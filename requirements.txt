@@ -1,0 +1,21 @@
+# Core geospatial stack
+geopandas>=0.14
+rasterio>=1.3
+xarray>=2024.1
+netcdf4>=1.6
+earthengine-api>=0.1.400
+
+# Deep learning
+torch>=2.1
+torchgeo>=0.5
+terratorch>=0.1
+
+# MLOps
+mlflow>=2.10
+dvc>=3.0
+
+# Modeling & API
+scikit-learn>=1.4
+pandas>=2.1
+fastapi>=0.110
+uvicorn[standard]>=0.27

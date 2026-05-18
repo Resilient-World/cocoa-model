@@ -1,0 +1,4 @@
+# DVC pipeline stages — extend as you add reproducible steps.
+# See: https://dvc.org/doc/user-guide/project-structure/pipelines
+
+stages: {}
