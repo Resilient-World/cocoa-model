@@ -36,17 +36,30 @@ This project lives at `~/resilient-cocoa-model` (separate from FamilyOS).
 
 ## Quick start
 
+**One-command setup** (Python 3.10+ required; on macOS use Homebrew `python@3.12`):
+
 ```bash
 cd ~/resilient-cocoa-model
-chmod +x scripts/init_project.sh
-./scripts/init_project.sh   # safe to re-run; skips existing git/DVC
-
-# Requires Python 3.10+ (macOS: python3.12 -m venv .venv if default python is older)
-python3.12 -m venv .venv
+./scripts/setup_venv.sh
 source .venv/bin/activate
+```
+
+This script recreates `.venv` with Python 3.12, upgrades pip, installs the full geospatial/ML stack (`geopandas`, `torch`, `torchgeo`, `terratorch`, `mlflow`, `dvc`, etc.), verifies imports, and runs tests.
+
+**Project layout only** (git + directories, no pip install):
+
+```bash
+chmod +x scripts/init_project.sh
+./scripts/init_project.sh
+```
+
+**Manual setup** (equivalent to `setup_venv.sh`):
+
+```bash
+python3.12 -m venv .venv && source .venv/bin/activate
 python -m pip install --upgrade pip setuptools wheel
 pip install -e ".[dev]"
-dvc init                      # after pip install, if not already done
+dvc version   # DVC is installed via pip; repo already has .dvc/ from scaffold
 ```
 
 ## Data versioning
