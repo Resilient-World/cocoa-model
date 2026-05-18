@@ -28,6 +28,7 @@ MANIFEST
 .env.*
 !.env.example
 .venv/
+.venv-*/
 venv/
 ENV/
 env/
@@ -79,13 +80,16 @@ checkpoints/
 .dvc/tmp
 # Keep .dvc/config and .dvcignore tracked; ignore local cache only
 
-# Data directories (never commit raw or processed datasets)
-data/
-!data/**/.gitkeep
-!data/raw/.gitkeep
-!data/processed/.gitkeep
-!data/interim/.gitkeep
-!data/external/.gitkeep
+# Dataset directories at repo root only (do not match src/data/)
+/data/*
+!/data/raw/
+!/data/raw/.gitkeep
+!/data/interim/
+!/data/interim/.gitkeep
+!/data/processed/
+!/data/processed/.gitkeep
+!/data/external/
+!/data/external/.gitkeep
 
 # Large geospatial artifacts
 *.tif
