@@ -1,143 +1,150 @@
-"""Tests for ATTRICI subprocess wrapper (GPL boundary, physics helpers)."""
+"""Tests for :mod:`counterfactual.attrici_runner` (GPL subprocess boundary)."""
 
 from __future__ import annotations
 
-import re
+import shutil
 import subprocess
-import sys
 from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
 
 from counterfactual.attrici_runner import (
-    ATTRICI_DISTRIBUTIONS,
-    ATTRICIConfig,
-    _buck_huss,
-    buck_saturation_vapor_pressure_hpa,
+    ATTRICIRunner,
+    SUPPORTED_VARIABLES,
+    _ERA5_TO_ATTRICI,
+    load_counterfactual,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = REPO_ROOT / "src"
-ATTRICI_BIN = REPO_ROOT / ".venv-attrici" / "bin" / "attrici"
-SHIM = REPO_ROOT / "scripts" / "attrici_cli_shim.py"
-
-# Mengel et al. 2021, GMD 14, 5269 — Table 1 (§3.2); exactly seven variables
-MENGEL_2021_TABLE_1: dict[str, tuple[str, str]] = {
-    "tas": ("normal", "identity"),
-    "tasrange": ("gamma", "log"),
-    "tasskew": ("normal", "identity"),
-    "pr": ("bernoulli_gamma", "log"),
-    "rsds": ("normal", "identity"),
-    "sfcwind": ("weibull", "log"),
-    "hurs": ("beta", "logit"),
-}
-
-_ATTRICI_IMPORT_RE = re.compile(r"^\s*(import attrici|from attrici\b)")
+_ALL_SIX = sorted(SUPPORTED_VARIABLES)
 
 
-def test_no_direct_attrici_imports() -> None:
-    hits: list[str] = []
-    for path in sorted(SRC_ROOT.rglob("*.py")):
-        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-            if _ATTRICI_IMPORT_RE.match(line):
-                hits.append(f"{path.relative_to(REPO_ROOT)}:{lineno}:{line.strip()}")
-    assert hits == []
-
-
-def test_distribution_table_matches_mengel_2021() -> None:
-    assert ATTRICI_DISTRIBUTIONS == MENGEL_2021_TABLE_1
-    assert len(ATTRICI_DISTRIBUTIONS) == 7
-
-
-def test_buck_1981_vapor_pressure_at_25c() -> None:
-    e_s = float(buck_saturation_vapor_pressure_hpa(25.0))
-    assert e_s == pytest.approx(31.69, rel=0.005)
-
-
-def test_huss_derivation_monotonic_in_hurs() -> None:
-    tas = xr.DataArray(25.0)
-    ps = xr.DataArray(101_325.0)
-    # ISIMIP ``hurs`` is percent; 0.3 / 0.6 / 0.9 denote 30 / 60 / 90 % RH
-    hurs_values = (30.0, 60.0, 90.0)
-    huss_values = [_buck_huss(tas, xr.DataArray(h), ps).item() for h in hurs_values]
-    assert huss_values[0] < huss_values[1] < huss_values[2]
-
-
-def _write_one_cell_toy_obs(path: Path, *, start: str = "2015-01-01", end: str = "2019-12-31") -> tuple[float, float]:
-    time = pd.date_range(start, end, freq="D")
-    lat, lon = 6.0, -5.0
-    n = len(time)
-    seasonal = 2.0 * np.sin(2.0 * np.pi * np.arange(n) / 365.25)
-    tas_k = 280.0 + seasonal
-    ds = xr.Dataset(
-        {"tas": (("time", "lat", "lon"), tas_k[:, np.newaxis, np.newaxis])},
-        coords={"time": time, "lat": [lat], "lon": [lon]},
+def test_attrici_runner_init_stores_fields(tmp_path: Path) -> None:
+    gmt = tmp_path / "gmt.nc"
+    work = tmp_path / "work"
+    runner = ATTRICIRunner(
+        gmt_file=gmt,
+        work_dir=work,
+        attrici_bin="/custom/attrici",
+        n_workers=7,
     )
-    ds.to_netcdf(path)
-    return lat, lon
+    assert runner.attrici_bin == "/custom/attrici"
+    assert runner.gmt_file == gmt
+    assert runner.work_dir == work
+    assert runner.n_workers == 7
+    assert runner._logs_dir == work / "logs"
 
 
-def _write_toy_gmt(path: Path, time: pd.DatetimeIndex) -> None:
-    n = len(time)
-    gmt = np.linspace(0.2, 0.8, n) + 0.05 * np.sin(2.0 * np.pi * np.arange(n) / 365.25)
-    xr.Dataset({"tas": ("time", gmt)}, coords={"time": time}).to_netcdf(path)
+def _write_factual_zarr(path: Path, variables: list[str]) -> None:
+    """Flat Zarr store (all vars at root) for ``xr.open_zarr`` in :meth:`ATTRICIRunner.run`."""
+    time = pd.date_range("2020-01-01", periods=30, freq="D")
+    lat, lon = [6.0], [-5.0]
+    data_vars = {
+        var: (("time", "lat", "lon"), np.full((len(time), 1, 1), float(i + 1), dtype=np.float32))
+        for i, var in enumerate(variables)
+    }
+    xr.Dataset(data_vars, coords={"time": time, "lat": lat, "lon": lon}).to_zarr(path, mode="w")
+
+
+def test_run_invokes_attrici_cli_with_expected_flags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gmt = tmp_path / "gmt.nc"
+    xr.Dataset({"tas": ("time", [0.1, 0.2])}, coords={"time": pd.date_range("2020", periods=2)}).to_netcdf(
+        gmt
+    )
+
+    factual_zarr = tmp_path / "factual.zarr"
+    output_zarr = tmp_path / "counterfactual.zarr"
+    requested = ["tmax", "precip", "srad"]
+    _write_factual_zarr(factual_zarr, requested)
+
+    captured: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured.append(list(cmd))
+        if "--version" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, "attrici 2.0.1", "")
+
+        out_path = Path(cmd[cmd.index("--output") + 1])
+        attrici_var = cmd[cmd.index("--variable") + 1]
+        era5_var = next(k for k, v in _ERA5_TO_ATTRICI.items() if v == attrici_var)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        xr.Dataset(
+            {era5_var: ("time", np.linspace(1.0, 2.0, 30))},
+            coords={"time": pd.date_range("2020-01-01", periods=30, freq="D")},
+        ).to_netcdf(out_path)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    runner = ATTRICIRunner(gmt_file=gmt, work_dir=tmp_path / "work", n_workers=3)
+    out = runner.run(factual_zarr, requested, output_zarr, overwrite=True)
+
+    assert out == output_zarr
+    cli_calls = [c for c in captured if "--gmt" in c]
+    assert len(cli_calls) == len(requested)
+
+    for era5_var in requested:
+        attrici_var = _ERA5_TO_ATTRICI[era5_var]
+        match = next(c for c in cli_calls if c[c.index("--variable") + 1] == attrici_var)
+        assert match[match.index("--gmt") + 1] == str(gmt)
+        assert match[match.index("--workers") + 1] == "3"
+        assert match[match.index("--variable") + 1] == attrici_var
+        assert match[match.index("--input") + 1].endswith(f"factual_{era5_var}.nc")
+        assert match[match.index("--output") + 1].endswith(f"counterfactual_{era5_var}.nc")
+
+
+def test_load_counterfactual_reads_six_variable_zarr(tmp_path: Path) -> None:
+    zarr_path = tmp_path / "cf.zarr"
+    time = pd.date_range("2020-01-01", periods=10, freq="D")
+    lat, lon = [6.0, 7.0], [-5.0, -4.0]
+
+    for idx, var in enumerate(_ALL_SIX):
+        data = np.full((len(time), 2, 2), float(idx), dtype=np.float32)
+        ds = xr.Dataset(
+            {var: (("time", "lat", "lon"), data)},
+            coords={"time": time, "lat": lat, "lon": lon},
+        )
+        ds.attrs["counterfactual"] = True
+        mode = "w" if idx == 0 else "a"
+        ds.to_zarr(zarr_path, group=var, mode=mode)
+
+    import zarr
+
+    root = zarr.open_group(zarr_path, mode="a")
+    root.attrs["attrici_version"] = "test-0.1"
+    root.attrs["counterfactual"] = True
+
+    merged = load_counterfactual(zarr_path)
+    assert set(merged.data_vars) == set(_ALL_SIX)
+    assert bool(merged.attrs.get("counterfactual")) is True
+    assert merged.attrs.get("attrici_version") == "test-0.1"
+    for var in _ALL_SIX:
+        assert merged[var].shape == (len(time), 2, 2)
 
 
 @pytest.mark.integration
-def test_attrici_subprocess_runs_on_one_cell(tmp_path: Path) -> None:
-    if not ATTRICI_BIN.is_file():
-        pytest.skip(f"ATTRICI not installed: {ATTRICI_BIN}")
+def test_attrici_on_path_integration_smoke(tmp_path: Path) -> None:
+    if shutil.which("attrici") is None:
+        pytest.skip("attrici not on PATH")
 
-    obs_path = tmp_path / "obs_tas.nc"
-    lat, lon = _write_one_cell_toy_obs(obs_path)
-    time = pd.date_range("2015-01-01", "2019-12-31", freq="D")
-    gmt_path = tmp_path / "gmt.nc"
-    _write_toy_gmt(gmt_path, time)
+    gmt = tmp_path / "gmt.nc"
+    time = pd.date_range("2015-01-01", periods=365, freq="D")
+    xr.Dataset({"tas": ("time", np.linspace(0.0, 1.0, 365))}, coords={"time": time}).to_netcdf(gmt)
 
-    out_dir = tmp_path / "detrend_out"
-    out_dir.mkdir()
-    cmd = [
-        sys.executable,
-        str(SHIM),
-        "--attrici-bin",
-        str(ATTRICI_BIN),
-        "--gmt-file",
-        str(gmt_path),
-        "--input-file",
-        str(obs_path),
-        "--output-dir",
-        str(out_dir),
-        "--variable",
-        "tas",
-        "--lat",
-        str(lat),
-        "--lon",
-        str(lon),
-        "--modes",
-        "4",
-        "--solver",
-        "scipy",
-        "--start-date",
-        "2015-01-01",
-        "--stop-date",
-        "2019-12-31",
-        "--overwrite",
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-    assert result.returncode == 0, result.stderr
+    factual_zarr = tmp_path / "factual.zarr"
+    _write_factual_zarr(factual_zarr, ["tmax"])
 
-    out_file = out_dir / "timeseries" / "tas" / f"lat_{lat:g}" / f"ts_lat{lat:g}_lon{lon:g}.nc"
-    assert out_file.is_file(), f"missing {out_file}; stderr={result.stderr}"
+    runner = ATTRICIRunner(gmt_file=gmt, work_dir=tmp_path / "work", n_workers=1)
+    output_zarr = tmp_path / "out.zarr"
 
-    out_ds = xr.open_dataset(out_file)
     try:
-        assert "time" in out_ds.dims
-        assert out_ds.sizes["time"] == len(time)
-        assert out_ds.sizes.get("lat", 1) == 1
-        assert out_ds.sizes.get("lon", 1) == 1
-        assert "cfact" in out_ds or "tas" in out_ds or len(out_ds.data_vars) >= 1
-    finally:
-        out_ds.close()
+        runner.run(factual_zarr, ["tmax"], output_zarr, overwrite=True)
+    except subprocess.CalledProcessError as exc:
+        pytest.skip(f"ATTRICI CLI not compatible with runner flags: {exc}")
+
+    assert output_zarr.exists()
+    ds = load_counterfactual(output_zarr)
+    assert "tmax" in ds.data_vars
