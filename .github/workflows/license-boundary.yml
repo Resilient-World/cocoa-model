@@ -1,0 +1,19 @@
+name: License boundary
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  attrici-gpl-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Block direct ATTRICI imports in src/ and tests/
+        run: |
+          if grep -rE "^(import attrici|from attrici)" src/ tests/; then
+            echo "❌ Direct ATTRICI import detected — violates GPL boundary"
+            exit 1
+          fi
