@@ -2,8 +2,20 @@
 Propensity Score Matching with logit-scale calipers, k:1 matching, balance diagnostics,
 and a cross-fit doubly-robust AIPW estimator (Chernozhukov et al. 2018 DML).
 
+Features
+--------
+- StandardScaler before LogisticRegression (covariate scale sensitivity)
+- Logit-scale caliper helper (Rosenbaum–Rubin: 0.2 * SD(logit PS))
+- k:1 NN matching with optional replacement; defaults preserve 1:1 contract
+- trim_common_support() for overlap-region restriction
+- standardized_mean_differences() + BalanceReport with |SMD| < 0.1 gate
+- love_plot_data() for MLflow artifact export
+- aipw_estimator(): K-fold cross-fit DML with HistGradientBoosting nuisances and
+  AIPW influence-function SEs for ATE and ATT (Sant'Anna & Zhao 2020 ATT IF)
+
 Backward-compatible: compute_propensity_scores, match_nearest_neighbor,
 propensity_score_match retain their original signatures and defaults.
+Pairs with did_impact for a doubly-robust causal layer.
 """
 
 from __future__ import annotations

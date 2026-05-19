@@ -297,35 +297,56 @@ Expects paired imagery/mask GeoTIFF directories compatible with `CocoaDataModule
 
 Observational impact evaluation on **farm-level panels** (pandas). Used for rigorous cohort analysis, distinct from the prospective API simulator.
 
-#### Propensity score matching — [`psm_matching.py`](src/analysis/psm_matching.py)
+#### Propensity score matching & DML — [`psm_matching.py`](src/analysis/psm_matching.py)
 
 | Function | Description |
 |----------|-------------|
-| `compute_propensity_scores()` | Logistic regression → P(treatment \| covariates) |
-| `match_nearest_neighbor()` | 1:1 nearest-neighbor on propensity scale, without replacement |
-| `propensity_score_match()` | End-to-end PSM |
+| `compute_propensity_scores()` | `StandardScaler` + logistic regression → P(treatment \| covariates) |
+| `default_logit_caliper()` | Rosenbaum–Rubin caliper: `0.2 × SD(logit PS)` |
+| `match_nearest_neighbor()` | k:1 NN on raw or logit propensity; optional replacement |
+| `trim_common_support()` | Restrict to overlap region |
+| `standardized_mean_differences()` | SMD before/after matching → `BalanceReport` (\|SMD\| &lt; 0.1 gate) |
+| `love_plot_data()` | Long-format SMD table for Love plots / MLflow artifacts |
+| `aipw_estimator()` | K-fold cross-fit DML/AIPW (HistGradientBoosting nuisances); ATE + ATT with IF SEs |
+| `propensity_score_match()` | End-to-end PSM (default logit caliper when `caliper=None`) |
 
 **Default covariates:** `farm_size_ha`, `baseline_yield`, `soil_quality_index`, `historical_rainfall`.
 
-**Output columns:** `propensity_score`, `match_pair_id`, `match_role` (`treated` / `control`).
+**Matching output columns:** `propensity_score`, `match_pair_id`, `match_role` (`treated` / `control`).
+
+**AIPW** follows Chernozhukov et al. (2018) cross-fitting and Sant'Anna & Zhao (2020) ATT influence functions; doubly robust to misspecification of either nuisance model.
+
+```python
+from analysis import aipw_estimator, propensity_score_match, standardized_mean_differences
+
+matched = propensity_score_match(farms_df, k=1)  # 1:1 default; k>1 for k:1 designs
+report = standardized_mean_differences(farms_df, matched, covariate_cols=[...])
+aipw = aipw_estimator(farms_df, outcome_col="yield_post_intervention", n_folds=5)
+```
 
 #### Difference-in-differences — [`did_impact.py`](src/analysis/did_impact.py)
 
 | Function | Description |
 |----------|-------------|
-| `calculate_did_att()` | Pair-level DiD → **ATT** (tonnes/ha) |
-| `calculate_avoided_revenue_loss()` | ATT × farm area × cocoa price for treated cohort (USD) |
+| `calculate_did_att()` | Pair-level DiD ATT with paired-bootstrap SE/CI |
+| `calculate_avoided_revenue_loss()` | ATT × farm area × cocoa price (optional ATT CI → USD CI) |
+| `event_study()` | Leads/lags with unit/time FE; parallel-trends F-test |
 
 **Required panel columns:** `yield_pre_intervention`, `yield_post_intervention`, plus PSM match columns.
 
-**Typical pipeline:**
+**Typical pipeline (PSM + DiD + revenue):**
 
 ```python
 from analysis import propensity_score_match, calculate_did_att, calculate_avoided_revenue_loss
 
 matched = propensity_score_match(farms_df)
 did = calculate_did_att(matched)
-revenue = calculate_avoided_revenue_loss(did.att, matched, cocoa_price_usd=3200.0)
+revenue = calculate_avoided_revenue_loss(
+    did.att,
+    matched,
+    cocoa_price_usd=3200.0,
+    att_ci=(did.ci_low, did.ci_high),
+)
 ```
 
 ---
