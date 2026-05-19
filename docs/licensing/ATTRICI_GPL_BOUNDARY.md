@@ -10,7 +10,8 @@ Implementation rules (enforced by CI grep):
 - NO `from attrici` anywhere in src/
 - ATTRICI is installed in a separate venv (`.venv-attrici/`)
 - All interaction goes through subprocess.run() with NetCDF I/O
-- The subprocess wrapper lives in src/counterfactual/attrici_runner.py
+- Grid-cell detrend orchestration: `src/counterfactual/attrici_runner.py`
+- Full-grid factual NetCDF runs: `scripts/run_attrici_subprocess.py` (isolated `.venv-attrici`)
 
 Reference: Mengel et al. 2021, Geosci. Model Dev., 14, 5269–5284,
 https://doi.org/10.5194/gmd-14-5269-2021
