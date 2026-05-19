@@ -11,6 +11,7 @@ earthengine-api>=0.1.390
 
 # Deep learning
 torch>=2.1
+pytorch-lightning>=2.1
 torchgeo>=0.5
 terratorch>=0.1
 
