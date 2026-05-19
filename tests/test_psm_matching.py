@@ -193,3 +193,62 @@ def test_trim_overlap_reduces_or_preserves_sample() -> None:
     trimmed = trim_common_support(df)
     assert len(trimmed) <= len(df)
     assert len(trimmed) > 0
+
+
+from analysis.psm_matching import (
+    DEFAULT_COVARIATES,
+    aipw_estimator,
+    default_logit_caliper,
+    love_plot_data,
+    standardized_mean_differences,
+    trim_common_support,
+)
+
+
+def test_smd_improves_after_matching() -> None:
+    df = _synthetic_farms(n=400)
+    matched = propensity_score_match(df)
+    rep = standardized_mean_differences(df, matched, covariate_cols=list(DEFAULT_COVARIATES))
+    assert rep.max_smd_matched <= rep.max_smd_unmatched + 1e-9
+    assert rep.smd.shape == (4, 3)
+
+
+def test_logit_caliper_default_is_positive() -> None:
+    df = _synthetic_farms(n=300)
+    df["propensity_score"] = compute_propensity_scores(df)
+    c = default_logit_caliper(df["propensity_score"].to_numpy())
+    assert c > 0
+    matched = match_nearest_neighbor(df, caliper=c, caliper_scale="logit")
+    assert "match_pair_id" in matched.columns
+
+
+def test_k_to_one_matching_structure() -> None:
+    df = _synthetic_farms(n=300)
+    df["propensity_score"] = compute_propensity_scores(df)
+    matched = match_nearest_neighbor(df, k=2, with_replacement=True)
+    counts = matched.groupby("match_pair_id")["match_role"].value_counts().unstack()
+    assert (counts["treated"] == 1).all()
+    assert (counts["control"] == 2).all()
+
+
+def test_trim_common_support_keeps_both_groups() -> None:
+    df = _synthetic_farms(n=300).copy()
+    df["propensity_score"] = compute_propensity_scores(df)
+    out = trim_common_support(df)
+    assert (out["received_intervention"] == 1).any()
+    assert (out["received_intervention"] == 0).any()
+
+
+def test_dml_aipw_recovers_known_att() -> None:
+    rng = np.random.default_rng(11)
+    n = 1500
+    x1, x2 = rng.normal(size=n), rng.normal(size=n)
+    p = 1 / (1 + np.exp(-(0.4 * x1 - 0.3 * x2)))
+    a = (rng.random(n) < p).astype(int)
+    true_att = 0.8
+    y = 1.0 + 0.5 * x1 + 0.7 * x2 + true_att * a + rng.normal(0, 0.3, n)
+    df = pd.DataFrame({"farm_id": range(n), "received_intervention": a, "x1": x1, "x2": x2, "y": y})
+    r = aipw_estimator(df, outcome_col="y", covariate_cols=["x1", "x2"], n_folds=5)
+    assert r.att_se > 0
+    assert abs(r.att - true_att) < 3 * r.att_se
+    assert r.att_ci_low < true_att < r.att_ci_high
