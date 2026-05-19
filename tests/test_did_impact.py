@@ -4,7 +4,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from analysis.did_impact import calculate_avoided_revenue_loss, calculate_did_att
+from analysis.did_impact import (
+    calculate_avoided_revenue_loss,
+    calculate_did_att,
+    event_study,
+)
 from analysis.psm_matching import propensity_score_match
 
 
@@ -52,6 +56,11 @@ def test_calculate_did_att_known_effect() -> None:
     assert result.treated_change_mean == 1.0
     assert result.control_change_mean == pytest.approx(0.15, abs=1e-9)
     assert result.att == pytest.approx(0.85, abs=1e-9)
+    assert result.se is not None
+    assert result.ci_low is not None
+    assert result.ci_high is not None
+    assert result.ci_low <= result.att <= result.ci_high
+    assert result.method == "paired_did_bootstrap"
 
 
 def test_calculate_did_att_on_psm_output() -> None:
@@ -92,3 +101,44 @@ def test_avoided_revenue_sums_treated_cohort() -> None:
     result = calculate_avoided_revenue_loss(att, matched, cocoa_price_usd=price)
     assert result.n_treated_farms == 2
     assert result.total_avoided_revenue_usd == pytest.approx((2.0 + 4.0) * 100.0)
+
+
+def test_avoided_revenue_propagates_att_ci() -> None:
+    matched = pd.DataFrame(
+        {
+            "match_pair_id": [0, 0, 1, 1],
+            "match_role": ["treated", "control", "treated", "control"],
+            "farm_size_ha": [2.0, 2.0, 4.0, 4.0],
+            "received_intervention": [1, 0, 1, 0],
+        }
+    )
+    result = calculate_avoided_revenue_loss(
+        1.0,
+        matched,
+        cocoa_price_usd=100.0,
+        att_ci=(0.5, 1.5),
+    )
+    assert result.total_avoided_revenue_ci_low_usd == pytest.approx((2.0 + 4.0) * 0.5 * 100.0)
+    assert result.total_avoided_revenue_ci_high_usd == pytest.approx((2.0 + 4.0) * 1.5 * 100.0)
+
+
+def test_event_study_runs() -> None:
+    rng = np.random.default_rng(0)
+    rows: list[dict[str, object]] = []
+    for farm in ("t1", "t2", "c1", "c2", "c3"):
+        treatment_period = 3.0 if farm.startswith("t") else np.nan
+        for period in range(8):
+            bump = 0.15 * max(0, period - 3) if farm.startswith("t") else 0.0
+            rows.append(
+                {
+                    "farm_id": farm,
+                    "period": period,
+                    "treatment_period": treatment_period,
+                    "yield": 2.0 + bump + rng.normal(0, 0.05),
+                }
+            )
+    panel = pd.DataFrame(rows)
+    result = event_study(panel, lead_window=2, lag_window=2)
+    assert not result.leads_lags.empty
+    assert "period" in result.leads_lags.columns
+    assert isinstance(result.parallel_trends_ok, bool)
