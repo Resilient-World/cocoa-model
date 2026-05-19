@@ -1,4 +1,18 @@
-# DVC pipeline stages — extend as you add reproducible steps.
-# See: https://dvc.org/doc/user-guide/project-structure/pipelines
+# DVC pipeline stages — see https://dvc.org/doc/user-guide/project-structure/pipelines
 
-stages: {}
+stages:
+  train_yield_surrogate:
+    cmd: python scripts/train_yield_surrogate.py
+    deps:
+      - scripts/train_yield_surrogate.py
+      - src/models/case2_runner.py
+      - src/models/almanac_runner.py
+      - src/models/ensemble_surrogate.py
+      - data/era5
+      - data/simulations/case2_lhs.parquet
+      - data/simulations/almanac_lhs.parquet
+    outs:
+      - models/pinn_v1.ckpt
+      - models/ensemble_weights.json
+    metrics:
+      - reports/pinn_metrics.json
