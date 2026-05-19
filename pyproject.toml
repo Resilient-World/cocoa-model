@@ -20,7 +20,8 @@ dependencies = [
     "numpy>=1.26",
     "netcdf4>=1.6",
     "earthengine-api>=0.1.390",
-    "torch>=2.2",
+    "torch>=2.1",
+    "pytorch-lightning>=2.1",
     "huggingface_hub>=0.24",
     "einops>=0.7",
     "torchgeo>=0.5",
@@ -36,11 +37,16 @@ dependencies = [
     "statsmodels>=0.14",  # event-study OLS with cluster-robust SEs
     "pooch>=1.8",
     "requests>=2.31",
+    "rpy2>=3.5; platform_system != 'Windows'",
 ]
 
 [project.optional-dependencies]
 gee = [
     "geemap>=0.30",
+]
+# Process-based crop models: CASE2 (rpy2) + ALMANAC (subprocess; stdlib only)
+process = [
+    "rpy2>=3.5",
 ]
 dev = [
     "pytest>=8.0",
