@@ -142,3 +142,72 @@ def test_event_study_runs() -> None:
     assert not result.leads_lags.empty
     assert "period" in result.leads_lags.columns
     assert isinstance(result.parallel_trends_ok, bool)
+
+
+# ---------------------------------------------------------------------------
+# Synthetic-truth tests: estimator must recover known τ within 2 SEs.
+# ---------------------------------------------------------------------------
+
+import numpy as np  # noqa: E402  (already imported above; safe to keep)
+
+
+def _simulate_matched_panel(
+    n_pairs: int = 500,
+    true_att: float = 0.4,
+    sigma: float = 0.3,
+    seed: int = 7,
+) -> pd.DataFrame:
+    rng = np.random.default_rng(seed)
+    rows = []
+    for pid in range(n_pairs):
+        pre_t = rng.normal(2.0, 0.3)
+        pre_c = pre_t + rng.normal(0.0, 0.05)  # well-matched on baseline
+        common_shock = rng.normal(0.1, sigma)
+        post_t = pre_t + common_shock + true_att + rng.normal(0, sigma)
+        post_c = pre_c + common_shock + rng.normal(0, sigma)
+        rows.append((pid, "treated", 5.0, pre_t, post_t, 1))
+        rows.append((pid, "control", 5.0, pre_c, post_c, 0))
+    return pd.DataFrame(
+        rows,
+        columns=[
+            "match_pair_id",
+            "match_role",
+            "farm_size_ha",
+            "yield_pre_intervention",
+            "yield_post_intervention",
+            "received_intervention",
+        ],
+    )
+
+
+def test_did_recovers_known_att_within_2_se() -> None:
+    panel = _simulate_matched_panel(n_pairs=500, true_att=0.4, seed=11)
+    result = calculate_did_att(panel, n_boot=500, random_state=11)
+    assert result.se is not None and result.se > 0
+    assert abs(result.att - 0.4) < 2 * result.se
+    assert result.ci_low < 0.4 < result.ci_high
+    assert result.p_value is not None and result.p_value < 0.05
+
+
+def test_did_null_effect_ci_covers_zero() -> None:
+    panel = _simulate_matched_panel(n_pairs=500, true_att=0.0, seed=23)
+    result = calculate_did_att(panel, n_boot=500, random_state=23)
+    assert result.ci_low < 0.0 < result.ci_high
+
+
+def test_avoided_revenue_ci_propagation() -> None:
+    panel = _simulate_matched_panel(n_pairs=200, true_att=0.5, seed=5)
+    did = calculate_did_att(panel, n_boot=300, random_state=5)
+    rev = calculate_avoided_revenue_loss(
+        did.att,
+        panel,
+        cocoa_price_usd=3000.0,
+        att_ci=(did.ci_low, did.ci_high),
+    )
+    assert rev.total_avoided_revenue_ci_low_usd is not None
+    assert rev.total_avoided_revenue_ci_high_usd is not None
+    assert (
+        rev.total_avoided_revenue_ci_low_usd
+        < rev.total_avoided_revenue_usd
+        < rev.total_avoided_revenue_ci_high_usd
+    )
