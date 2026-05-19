@@ -1,497 +1,313 @@
 """
-Counterfactual climate via ATTRICI (subprocess only — no ``import attrici``).
+ATTRICI counterfactual climate runner (subprocess boundary).
 
-Distributions per Mengel et al. 2021 (GMD 14, 5269) Table 1 are encoded in ATTRICI
-by variable name; :data:`ATTRICI_DISTRIBUTIONS` documents that mapping for review.
+ATTRICI is licensed under GPLv3. This module **never** imports ``attrici`` or any
+``attrici.*`` submodule so the Resilient Cocoa codebase can remain MIT-licensed.
+All ATTRICI work is delegated to the ``attrici`` CLI via :class:`subprocess.run`.
+
+Install ATTRICI only in an isolated environment (e.g. ``pip install -e '.[attrici]'``)
+for integration tests; it is not a required runtime dependency of this package.
 """
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 import subprocess
-import sys
-from dataclasses import dataclass
-from multiprocessing import Pool
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Protocol, Sequence
 
-import numpy as np
-import xarray as xr
+if TYPE_CHECKING:
+    import xarray as xr
 
 logger = logging.getLogger(__name__)
 
-# Mengel et al. 2021, GMD 14, 5269 — Table 1 (§3.2)
-ATTRICI_DISTRIBUTIONS: dict[str, tuple[str, str]] = {
-    "tas": ("normal", "identity"),
-    "tasrange": ("gamma", "log"),
-    "tasskew": ("normal", "identity"),
-    "pr": ("bernoulli_gamma", "log"),
-    "rsds": ("normal", "identity"),
-    "sfcwind": ("weibull", "log"),
-    "hurs": ("beta", "logit"),
-}
-
-# ATTRICI v2.0.1 internal names (see attrici.variables.create_variable)
-_ATTRICI_VAR_ALIASES: dict[str, str] = {
-    "sfcwind": "sfcWind",
-}
-
-# Detrended in ISIMIP3a / ATTRICI workflow (huss derived post-hoc; ps kept factual)
-_DETREND_TARGETS: tuple[str, ...] = (
-    "tas",
-    "tasrange",
-    "tasskew",
-    "pr",
-    "hurs",
-    "rsds",
-    "sfcWind",
+# ERA5 / ingest names requested for counterfactual detrending
+SUPPORTED_VARIABLES: frozenset[str] = frozenset(
+    {"tmax", "tmin", "precip", "rh_mean", "srad", "wind10m"}
 )
 
-_KELVIN_THRESHOLD = 150.0
+# ATTRICI v2 ISIMIP short names (subprocess ``--variable`` argument)
+_ERA5_TO_ATTRICI: dict[str, str] = {
+    "tmax": "tasmax",
+    "tmin": "tasmin",
+    "precip": "pr",
+    "rh_mean": "hurs",
+    "srad": "rsds",
+    "wind10m": "sfcwind",
+}
 
 
-@dataclass
-class ATTRICIConfig:
-    variables: tuple[str, ...] = (
-        "tas",
-        "tasmin",
-        "tasmax",
-        "pr",
-        "hurs",
-        "rsds",
-        "sfcwind",
-    )
-    aoi_bbox: tuple[float, float, float, float] = (-10.0, 4.0, 14.0, 11.0)  # W, S, E, N
-    start_year: int = 1979
-    end_year: int = 2019
-    backend: str = "scipy"  # "scipy" | "pymc5"
-    ssa_window_years: int = 10
-    n_fourier_modes: int = 4
-    attrici_venv: Path = Path(".venv-attrici")
-    work_dir: Path = Path("data/attrici_work")
-    gmt_file: Path = Path("data/raw/gmt/ssa_gmt.nc")
-    counterfactual_dir: Path = Path("data/counterfactual")
-    factual_ps_var: str = "ps"
+def _open_xarray():
+    import xarray as xr
+
+    return xr
 
 
-@dataclass
-class CellJob:
-    variable: str
-    lat: float
-    lon: float
+class CounterfactualClimateProvider(Protocol):
+    """Interface for point-wise counterfactual climate access."""
+
+    def get(self, lat: float, lon: float, year: int) -> xr.Dataset:
+        """Return counterfactual daily (or annual) climate for one site and year."""
+        ...
 
 
-@dataclass
-class CellJobResult:
-    variable: str
-    lat: float
-    lon: float
-    returncode: int
-    stderr: str = ""
-
-
-def _attrici_bin(config: ATTRICIConfig) -> Path:
-    return config.attrici_venv / "bin" / "attrici"
-
-
-def _shim_script() -> Path:
-    return Path(__file__).resolve().parents[2] / "scripts" / "attrici_cli_shim.py"
-
-
-def _to_attrici_var(name: str) -> str:
-    return _ATTRICI_VAR_ALIASES.get(name, name)
-
-
-def _normalize_lon(ds: xr.Dataset) -> xr.Dataset:
-    if "lon" in ds.coords and float(ds.lon.max()) > 180.0:
-        ds = ds.assign_coords(lon=(((ds.lon + 180) % 360) - 180))
-        ds = ds.sortby("lon")
-    return ds
-
-
-def _subset_bbox(ds: xr.Dataset, bbox: tuple[float, float, float, float]) -> xr.Dataset:
-    west, south, east, north = bbox
-    lat_name = "lat" if "lat" in ds.dims else "latitude"
-    lon_name = "lon" if "lon" in ds.dims else "longitude"
-    ds = _normalize_lon(ds)
-    return ds.sel(
-        **{
-            lat_name: slice(south, north),
-            lon_name: slice(west, east),
-        }
-    )
-
-
-def _subset_years(ds: xr.Dataset, start_year: int, end_year: int) -> xr.Dataset:
-    return ds.sel(time=slice(f"{start_year}-01-01", f"{end_year}-12-31"))
-
-
-def _tas_celsius(da: xr.DataArray) -> xr.DataArray:
-    """Return temperature in °C (W5E5/ISIMIP often store tas in K)."""
-    if float(da.mean(skipna=True)) > _KELVIN_THRESHOLD:
-        return da - 273.15
-    return da
-
-
-def _derive_tasrange_tasskew(
-    tas: xr.DataArray,
-    tasmin: xr.DataArray,
-    tasmax: xr.DataArray,
-) -> tuple[xr.DataArray, xr.DataArray]:
-    tas_c = _tas_celsius(tas)
-    tmin_c = _tas_celsius(tasmin)
-    tmax_c = _tas_celsius(tasmax)
-    tasrange = (tmax_c - tmin_c).rename("tasrange")
-    with np.errstate(divide="ignore", invalid="ignore"):
-        tasskew = ((tas_c - tmin_c) / tasrange).rename("tasskew")
-    tasskew = tasskew.where(tasrange > 0)
-    return tasrange, tasskew
-
-
-def _postprocess_tasmin_tasmax(
-    tas: xr.DataArray,
-    tasrange: xr.DataArray,
-    tasskew: xr.DataArray,
-) -> tuple[xr.DataArray, xr.DataArray]:
-    """Inverse of ATTRICI preprocess-tas (CDO formulas)."""
-    tas_c = _tas_celsius(tas)
-    tasmin = (tas_c - tasskew * tasrange).rename("tasmin")
-    tasmax = (tasmin + tasrange).rename("tasmax")
-    return tasmin, tasmax
-
-
-def buck_saturation_vapor_pressure_hpa(temperature_c: float | xr.DataArray) -> float | xr.DataArray:
-    """Saturation vapor pressure (hPa) from Buck (1981); ``temperature_c`` in °C."""
-    t = temperature_c
-    return 6.1121 * np.exp((18.678 - t / 234.5) * t / (257.14 + t))
-
-
-def _buck_huss(
-    tas_c: xr.DataArray,
-    hurs_pct: xr.DataArray,
-    ps_pa: xr.DataArray,
-) -> xr.DataArray:
+class ATTRICIRunner:
     """
-    Specific humidity from Buck (1981) via Mengel §3.2.7 / Weedon (2010).
+    Run ATTRICI detrend on factual Zarr slices and persist counterfactuals to Zarr.
 
-    ``e_s`` in hPa; ``ps`` in Pa; ``hurs`` in percent.
+    Parameters
+    ----------
+    attrici_bin:
+        ATTRICI CLI executable (default ``"attrici"`` on ``PATH``).
+    gmt_file:
+        SSA-smoothed global-mean temperature NetCDF for ATTRICI.
+    work_dir:
+        Temporary NetCDF, logs, and intermediate outputs.
+    n_workers:
+        Passed to ATTRICI ``--workers``.
     """
-    e_s = buck_saturation_vapor_pressure_hpa(tas_c)
-    e_hpa = e_s * (hurs_pct / 100.0)
-    ps_hpa = ps_pa / 100.0
-    return (0.622 * e_hpa / (ps_hpa - 0.378 * e_hpa)).rename("huss")
 
+    def __init__(
+        self,
+        gmt_file: Path,
+        work_dir: Path,
+        attrici_bin: str = "attrici",
+        n_workers: int = 4,
+    ) -> None:
+        self.attrici_bin = attrici_bin
+        self.gmt_file = Path(gmt_file)
+        self.work_dir = Path(work_dir)
+        self.n_workers = n_workers
+        self._logs_dir = self.work_dir / "logs"
 
-def _write_isimip_variable(ds: xr.Dataset, var: str, path: Path) -> None:
-    if var not in ds:
-        raise KeyError(f"Variable {var!r} not in dataset; have {list(ds.data_vars)}")
-    out = ds[[var]].copy()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    out.to_netcdf(path)
-
-
-def _config_from_dict(data: dict[str, Any]) -> ATTRICIConfig:
-    path_fields = ("attrici_venv", "work_dir", "gmt_file", "counterfactual_dir")
-    kwargs = dict(data)
-    for key in path_fields:
-        if key in kwargs:
-            kwargs[key] = Path(kwargs[key])
-    return ATTRICIConfig(**kwargs)
-
-
-def _run_cell_subprocess(
-    job: CellJob, runner_paths: dict[str, str], config_dict: dict[str, Any]
-) -> CellJobResult:
-    config = _config_from_dict(config_dict)
-    attrici_var = job.variable
-    input_file = Path(runner_paths["input_dir"]) / f"{attrici_var}.nc"
-
-    cmd = [
-        sys.executable,
-        str(_shim_script()),
-        "--attrici-bin",
-        str(_attrici_bin(config)),
-        "--gmt-file",
-        str(config.gmt_file),
-        "--input-file",
-        str(input_file),
-        "--output-dir",
-        str(Path(runner_paths["detrend_dir"])),
-        "--variable",
-        attrici_var,
-        "--lat",
-        str(job.lat),
-        "--lon",
-        str(job.lon),
-        "--modes",
-        str(config.n_fourier_modes),
-        "--solver",
-        config.backend,
-        "--start-date",
-        f"{config.start_year}-01-01",
-        "--stop-date",
-        f"{config.end_year}-12-31",
-        "--overwrite",
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    return CellJobResult(
-        variable=job.variable,
-        lat=job.lat,
-        lon=job.lon,
-        returncode=result.returncode,
-        stderr=result.stderr[-2000:] if result.stderr else "",
-    )
-
-
-class CounterfactualClimateRunner:
-    """Run ATTRICI detrending in an isolated venv via subprocess per grid cell."""
-
-    def __init__(self, config: ATTRICIConfig) -> None:
-        self.config = config
-        self._factual_ds: xr.Dataset | None = None
-        self._input_dir: Path = config.work_dir / "input"
-        self._detrend_dir: Path = config.work_dir / "detrend"
-        self._merged_dir: Path = config.work_dir / "merged"
-        self._failed_cells: list[CellJobResult] = []
-
-    @property
-    def failed_cells(self) -> list[CellJobResult]:
-        return list(self._failed_cells)
-
-    def prepare_inputs(self, factual_ds: xr.Dataset) -> Path:
-        """Write factual NetCDF in ISIMIP3a layout (one file per variable)."""
-        cfg = self.config
-        ds = _subset_years(_subset_bbox(factual_ds, cfg.aoi_bbox), cfg.start_year, cfg.end_year)
-        self._factual_ds = ds
-        self._input_dir.mkdir(parents=True, exist_ok=True)
-
-        written: set[str] = set()
-        for var in cfg.variables:
-            attrici_name = _to_attrici_var(var)
-            _write_isimip_variable(ds, var, self._input_dir / f"{attrici_name}.nc")
-            written.add(attrici_name)
-
-        if all(v in ds for v in ("tas", "tasmin", "tasmax")):
-            tasrange, tasskew = _derive_tasrange_tasskew(ds["tas"], ds["tasmin"], ds["tasmax"])
-            xr.Dataset({"tasrange": tasrange, "tasskew": tasskew}).to_netcdf(
-                self._input_dir / "_tas_derived.nc"
+    def _attrici_version(self) -> str:
+        result = subprocess.run(
+            [self.attrici_bin, "--version"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                "attrici --version failed (code %s): %s",
+                result.returncode,
+                result.stderr.strip(),
             )
-            tasrange.to_netcdf(self._input_dir / "tasrange.nc")
-            tasskew.to_netcdf(self._input_dir / "tasskew.nc")
-            written.update({"tasrange", "tasskew"})
+            return "unknown"
+        return (result.stdout or result.stderr).strip()
 
-        if cfg.factual_ps_var in ds and cfg.factual_ps_var not in written:
-            _write_isimip_variable(ds, cfg.factual_ps_var, self._input_dir / f"{cfg.factual_ps_var}.nc")
-
-        logger.info("Prepared ATTRICI inputs in %s (%d variables)", self._input_dir, len(written))
-        return self._input_dir
-
-    def _detrend_variables(self) -> list[str]:
-        """ATTRICI variable names present in the input directory."""
-        found: list[str] = []
-        for v in _DETREND_TARGETS:
-            if (self._input_dir / f"{v}.nc").is_file():
-                found.append(v)
-        return found
-
-    def _grid_jobs(self) -> list[CellJob]:
-        if self._factual_ds is None:
-            raise RuntimeError("Call prepare_inputs() before run()")
-        lat_name = "lat" if "lat" in self._factual_ds.dims else "latitude"
-        lon_name = "lon" if "lon" in self._factual_ds.dims else "longitude"
-        lats = [float(v) for v in self._factual_ds[lat_name].values]
-        lons = [float(v) for v in self._factual_ds[lon_name].values]
-
-        jobs: list[CellJob] = []
-        for var in self._detrend_variables():
-            for lat in lats:
-                for lon in lons:
-                    jobs.append(CellJob(variable=var, lat=lat, lon=lon))
-        return jobs
-
-    def run(self) -> Path:
-        """Invoke ATTRICI via subprocess per (variable, gridcell). Returns counterfactual NetCDF dir."""
-        cfg = self.config
-        if not _attrici_bin(cfg).exists():
-            raise FileNotFoundError(
-                f"ATTRICI venv not found at {cfg.attrici_venv}. Run: make attrici-env"
-            )
-        if not cfg.gmt_file.is_file():
-            raise FileNotFoundError(
-                f"SSA-smoothed GMT file required at {cfg.gmt_file}. "
-                "See docs/data/gswp3_w5e5.md"
-            )
-
-        self._detrend_dir.mkdir(parents=True, exist_ok=True)
-        jobs = self._grid_jobs()
-        if not jobs:
-            raise RuntimeError("No detrend jobs; check prepare_inputs() and variable files")
-
-        runner_paths = {
-            "input_dir": str(self._input_dir),
-            "detrend_dir": str(self._detrend_dir),
-        }
-        config_dict: dict[str, Any] = {
-            "variables": cfg.variables,
-            "aoi_bbox": cfg.aoi_bbox,
-            "start_year": cfg.start_year,
-            "end_year": cfg.end_year,
-            "backend": cfg.backend,
-            "ssa_window_years": cfg.ssa_window_years,
-            "n_fourier_modes": cfg.n_fourier_modes,
-            "attrici_venv": str(cfg.attrici_venv),
-            "work_dir": str(cfg.work_dir),
-            "gmt_file": str(cfg.gmt_file),
-            "counterfactual_dir": str(cfg.counterfactual_dir),
-            "factual_ps_var": cfg.factual_ps_var,
-        }
-
-        n_proc = os.cpu_count() or 1
-        logger.info("Running %d ATTRICI cell jobs with %d workers", len(jobs), n_proc)
-        with Pool(processes=n_proc) as pool:
-            results = pool.starmap(
-                _run_cell_subprocess,
-                [(job, runner_paths, config_dict) for job in jobs],
-            )
-
-        self._failed_cells = [r for r in results if r.returncode != 0]
-        if self._failed_cells:
-            fail_log = cfg.work_dir / "failed_cells.jsonl"
-            with fail_log.open("w", encoding="utf-8") as fh:
-                for r in self._failed_cells:
-                    fh.write(
-                        json.dumps(
-                            {
-                                "variable": r.variable,
-                                "lat": r.lat,
-                                "lon": r.lon,
-                                "returncode": r.returncode,
-                                "stderr": r.stderr,
-                            }
-                        )
-                        + "\n"
-                    )
-            logger.warning("%d cells failed; see %s", len(self._failed_cells), fail_log)
-
-        self._merge_detrend_outputs()
-        self._postprocess_and_publish()
-        return cfg.counterfactual_dir
-
-    def _merge_variable(self, attrici_var: str, out_name: str) -> Path | None:
-        ts_dir = self._detrend_dir / "timeseries" / attrici_var
-        if not ts_dir.is_dir():
-            logger.warning("No detrend output for %s at %s", attrici_var, ts_dir)
-            return None
-        merged_path = self._merged_dir / f"{out_name}_cfact.nc"
-        merged_path.parent.mkdir(parents=True, exist_ok=True)
+    def _run_attrici_cli(
+        self,
+        *,
+        era5_var: str,
+        tmp_nc: Path,
+        tmp_out_nc: Path,
+    ) -> None:
+        attrici_var = _ERA5_TO_ATTRICI[era5_var]
+        log_path = self._logs_dir / f"{era5_var}.log"
         cmd = [
-            str(_attrici_bin(self.config)),
-            "merge-output",
-            str(ts_dir),
-            str(merged_path),
+            self.attrici_bin,
+            "--gmt",
+            str(self.gmt_file),
+            "--input",
+            str(tmp_nc),
+            "--variable",
+            attrici_var,
+            "--output",
+            str(tmp_out_nc),
+            "--workers",
+            str(self.n_workers),
         ]
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
-        return merged_path
-
-    def _read_merged_cfact(self, path: Path, var_name: str) -> xr.DataArray:
-        ds = xr.open_dataset(path)
-        if "cfact" in ds:
-            da = ds["cfact"].rename(var_name)
-        elif var_name in ds:
-            da = ds[var_name]
-        else:
-            da = ds[list(ds.data_vars)[0]].rename(var_name)
-        ds.close()
-        return da
-
-    def _merge_detrend_outputs(self) -> None:
-        self._merged_dir.mkdir(parents=True, exist_ok=True)
-        for var in self._detrend_variables():
-            store = "sfcwind" if var == "sfcWind" else var
-            self._merge_variable(var, store)
-
-    def _postprocess_and_publish(self) -> None:
-        cfg = self.config
-        out_dir = cfg.counterfactual_dir
-        out_dir.mkdir(parents=True, exist_ok=True)
-
-        merged: dict[str, xr.DataArray] = {}
-        for var in _DETREND_TARGETS:
-            store = "sfcwind" if var == "sfcWind" else var
-            path = self._merged_dir / f"{store}_cfact.nc"
-            if path.is_file():
-                merged[store] = self._read_merged_cfact(path, store)
-
-        if all(k in merged for k in ("tas", "tasrange", "tasskew")):
-            tasmin, tasmax = _postprocess_tasmin_tasmax(
-                merged["tas"], merged["tasrange"], merged["tasskew"]
+        self._logs_dir.mkdir(parents=True, exist_ok=True)
+        with log_path.open("w", encoding="utf-8") as log_file:
+            log_file.write(f"# command: {' '.join(cmd)}\n\n")
+            result = subprocess.run(
+                cmd,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                text=True,
+                check=False,
             )
-            merged["tasmin"] = tasmin
-            merged["tasmax"] = tasmax
+        if result.returncode != 0:
+            raise subprocess.CalledProcessError(
+                result.returncode,
+                cmd,
+                None,
+                f"ATTRICI failed for {era5_var}; see {log_path}",
+            )
 
-        if "rsds" in merged:
-            merged["rsds"] = merged["rsds"].clip(min=0.0)
+    def _materialize_variable_nc(
+        self,
+        factual: xr.Dataset,
+        era5_var: str,
+        tmp_nc: Path,
+    ) -> None:
+        if era5_var not in factual.data_vars:
+            raise KeyError(
+                f"Variable {era5_var!r} not in factual Zarr "
+                f"(available: {list(factual.data_vars)})"
+            )
+        slice_ds = factual[[era5_var]]
+        slice_ds.to_netcdf(tmp_nc)
 
-        if self._factual_ds is not None and cfg.factual_ps_var in self._factual_ds:
-            ps = self._factual_ds[cfg.factual_ps_var]
-            if "tas" in merged and "hurs" in merged:
-                merged["huss"] = _buck_huss(
-                    _tas_celsius(merged["tas"]),
-                    merged["hurs"],
-                    ps,
+    def _read_counterfactual_nc(self, tmp_out_nc: Path, era5_var: str) -> xr.Dataset:
+        xr = _open_xarray()
+        out = xr.open_dataset(tmp_out_nc)
+        if era5_var in out.data_vars:
+            return out[[era5_var]]
+        # ATTRICI may emit ISIMIP / internal names (e.g. cfact, tasmax)
+        attrici_var = _ERA5_TO_ATTRICI[era5_var]
+        for candidate in (era5_var, attrici_var, "cfact"):
+            if candidate in out.data_vars:
+                renamed = out[[candidate]].rename({candidate: era5_var})
+                return renamed
+        raise KeyError(
+            f"No counterfactual variable found in {tmp_out_nc} "
+            f"(tried {era5_var}, {attrici_var}, cfact); got {list(out.data_vars)}"
+        )
+
+    def run(
+        self,
+        factual_zarr: Path,
+        variables: Sequence[str],
+        output_zarr: Path,
+        overwrite: bool = False,
+    ) -> Path:
+        """
+        Detrend each requested variable and write groups into ``output_zarr``.
+
+        Parameters
+        ----------
+        factual_zarr:
+            Path to factual daily climate Zarr (ERA5-Land style variable names).
+        variables:
+            Subset of :data:`SUPPORTED_VARIABLES`.
+        output_zarr:
+            Consolidated Zarr store (one group per variable).
+        overwrite:
+            Replace an existing ``output_zarr`` when True.
+
+        Returns
+        -------
+        pathlib.Path
+            ``output_zarr`` after all variables are written.
+        """
+        xr = _open_xarray()
+        factual_zarr = Path(factual_zarr)
+        output_zarr = Path(output_zarr)
+        self.work_dir.mkdir(parents=True, exist_ok=True)
+
+        requested = [v for v in variables if v in SUPPORTED_VARIABLES]
+        skipped = set(variables) - set(requested)
+        if skipped:
+            logger.warning("Ignoring unsupported counterfactual variables: %s", sorted(skipped))
+        if not requested:
+            raise ValueError(
+                f"No supported variables in {list(variables)}; "
+                f"expected subset of {sorted(SUPPORTED_VARIABLES)}"
+            )
+
+        if output_zarr.exists():
+            if not overwrite:
+                raise FileExistsError(
+                    f"Output Zarr already exists: {output_zarr} (pass overwrite=True)"
                 )
+            import shutil
 
-        if merged:
-            xr.Dataset(merged).to_netcdf(out_dir / "counterfactual_merged.nc")
-            for name, da in merged.items():
-                da.to_dataset(name=name).to_netcdf(out_dir / f"{name}.nc")
+            if output_zarr.is_dir():
+                shutil.rmtree(output_zarr)
+            else:
+                output_zarr.unlink()
 
-    def load_counterfactual(self) -> xr.Dataset:
-        """Read counterfactual NetCDFs back into a single xarray.Dataset."""
-        cfg = self.config
-        merged = cfg.counterfactual_dir / "counterfactual_merged.nc"
-        if merged.is_file():
-            return xr.open_dataset(merged)
+        attrici_version = self._attrici_version()
+        factual = xr.open_zarr(factual_zarr)
 
-        parts: dict[str, xr.DataArray] = {}
-        for path in sorted(cfg.counterfactual_dir.glob("*.nc")):
-            if path.name == "counterfactual_merged.nc":
-                continue
-            ds = xr.open_dataset(path)
-            var = path.stem
-            parts[var] = ds[var] if var in ds else ds[list(ds.data_vars)[0]]
-            ds.close()
-        if not parts:
-            raise FileNotFoundError(f"No counterfactual NetCDFs in {cfg.counterfactual_dir}")
-        return xr.Dataset(parts)
+        tmp_dir = self.work_dir / "nc_tmp"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+
+        for idx, era5_var in enumerate(requested):
+            tmp_nc = tmp_dir / f"factual_{era5_var}.nc"
+            tmp_out_nc = tmp_dir / f"counterfactual_{era5_var}.nc"
+
+            logger.info("ATTRICI detrend %s (%s)", era5_var, _ERA5_TO_ATTRICI[era5_var])
+            self._materialize_variable_nc(factual, era5_var, tmp_nc)
+            self._run_attrici_cli(era5_var=era5_var, tmp_nc=tmp_nc, tmp_out_nc=tmp_out_nc)
+
+            cf_ds = self._read_counterfactual_nc(tmp_out_nc, era5_var)
+            cf_ds.attrs["counterfactual"] = True
+            cf_ds.attrs["attrici_version"] = attrici_version
+            cf_ds.attrs["source_variable"] = era5_var
+
+            mode = "w" if idx == 0 else "a"
+            cf_ds.to_zarr(output_zarr, group=era5_var, mode=mode)
+
+        # Root-level metadata for :func:`load_counterfactual`
+        root_attrs = {
+            "counterfactual": True,
+            "attrici_version": attrici_version,
+            "variables": requested,
+        }
+        try:
+            import zarr
+
+            root = zarr.open_group(output_zarr, mode="a")
+            root.attrs.update(root_attrs)
+        except Exception as exc:
+            logger.warning("Could not write root Zarr attrs: %s", exc)
+
+        return output_zarr
 
 
-def ensure_gmt_ssa(
-    raw_gmt: Path,
-    output: Path,
-    *,
-    attrici_venv: Path,
-    variable: str = "tas",
-    window_days: int | None = None,
-    subset: int | None = None,
-) -> Path:
-    """SSA-smooth a GMT series NetCDF (ATTRICI ``ssa`` subcommand)."""
-    window_days = window_days or 365
-    subset = subset or 10
-    output.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        str(attrici_venv / "bin" / "attrici"),
-        "ssa",
-        str(raw_gmt),
-        str(output),
-        "--variable",
-        variable,
-        "--window-size",
-        str(window_days),
-        "--subset",
-        str(subset),
-    ]
-    subprocess.run(cmd, check=True)
-    return output
+def load_counterfactual(zarr_path: Path | str) -> xr.Dataset:
+    """
+    Open a consolidated counterfactual Zarr produced by :class:`ATTRICIRunner`.
+
+    Merges all variable groups into a single :class:`xarray.Dataset`.
+    """
+    xr = _open_xarray()
+    zarr_path = Path(zarr_path)
+    if not zarr_path.exists():
+        raise FileNotFoundError(f"Counterfactual Zarr not found: {zarr_path}")
+
+    root_attrs: dict[str, object] = {}
+    group_names: list[str] = []
+    try:
+        import zarr
+
+        root = zarr.open_group(zarr_path, mode="r")
+        group_names = sorted(root.group_keys())
+        root_attrs = dict(root.attrs)
+    except Exception:
+        pass
+
+    if group_names:
+        pieces = [xr.open_zarr(zarr_path, group=name) for name in group_names]
+        merged = xr.merge(pieces, compat="override")
+    else:
+        merged = xr.open_zarr(zarr_path)
+
+    merged.attrs.setdefault("counterfactual", True)
+    if "attrici_version" in root_attrs:
+        merged.attrs.setdefault("attrici_version", root_attrs["attrici_version"])
+    return merged
+
+
+class ZarrCounterfactualProvider:
+    """:class:`CounterfactualClimateProvider` backed by a consolidated Zarr store."""
+
+    def __init__(self, zarr_path: Path | str) -> None:
+        self.zarr_path = Path(zarr_path)
+
+    def get(self, lat: float, lon: float, year: int) -> xr.Dataset:
+        ds = load_counterfactual(self.zarr_path)
+        lat_name = "latitude" if "latitude" in ds.dims or "latitude" in ds.coords else "lat"
+        lon_name = "longitude" if "longitude" in ds.dims or "longitude" in ds.coords else "lon"
+        if lat_name not in ds.dims and lat_name not in ds.coords:
+            raise ValueError(f"No latitude coordinate in counterfactual store: {self.zarr_path}")
+        if lon_name not in ds.dims and lon_name not in ds.coords:
+            raise ValueError(f"No longitude coordinate in counterfactual store: {self.zarr_path}")
+
+        point = ds.sel({lat_name: lat, lon_name: lon}, method="nearest")
+        if "time" in point.dims or "time" in point.coords:
+            point = point.sel(time=point["time"].dt.year == year)
+        return point
