@@ -1,81 +1,74 @@
-"""Tests for ISIMIP3a counterclim ingest and attribution deltas."""
+"""Tests for ISIMIP3a delta counterfactual adjustment."""
 
 from __future__ import annotations
 
-import importlib
 import os
-import sys
 
 import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
 
-from data.attrici_counterfactual import CounterfactualClimate, compute_attribution_deltas
+from data.attrici_counterfactual import compute_counterfactual_delta
 
 
-def _toy(n: int = 120) -> tuple[xr.Dataset, xr.Dataset]:
-    t = pd.date_range("2010-01-01", periods=n, freq="D")
-    lat, lon = np.array([6.0, 7.0]), np.array([-5.0, -4.0])
-    rng = np.random.default_rng(0)
-    f = xr.Dataset(
-        {
-            "tas": (("time", "lat", "lon"), 27 + rng.normal(0, 1, (n, 2, 2))),
-            "pr": (("time", "lat", "lon"), np.maximum(0, rng.gamma(0.5, 4, (n, 2, 2)))),
-            "hurs": (("time", "lat", "lon"), 80 + rng.normal(0, 3, (n, 2, 2)).clip(-10, 10)),
-            "rsds": (("time", "lat", "lon"), 18 + rng.normal(0, 1, (n, 2, 2))),
-        },
-        coords={"time": t, "lat": lat, "lon": lon},
+def _toy_grid(name: str, value: float, n_days: int = 30) -> xr.Dataset:
+    time = pd.date_range("2010-01-01", periods=n_days, freq="D")
+    lat = np.array([6.0, 6.5, 7.0])
+    lon = np.array([-5.0, -4.5, -4.0])
+    shape = (n_days, len(lat), len(lon))
+    return xr.Dataset(
+        {name: (("time", "lat", "lon"), np.full(shape, value))},
+        coords={"time": time, "lat": lat, "lon": lon},
     )
-    cf = f.copy(deep=True)
-    cf["tas"] = cf["tas"] - 1.2
-    cf["pr"] = cf["pr"] * 0.95
-    cf["hurs"] = cf["hurs"] + 0.5
-    cf["rsds"] = cf["rsds"] - 0.3
-    return f, cf
 
 
-def test_tas_delta_is_additive_and_positive_under_warming() -> None:
-    f, cf = _toy()
-    d = compute_attribution_deltas(f, cf, ["tas"])
-    assert float(d["tas_delta"].mean()) == pytest.approx(1.2, abs=0.05)
+def test_delta_zero_when_obsclim_equals_counterclim() -> None:
+    factual = _toy_grid("tas", 27.0)
+    obsclim = _toy_grid("tas", 27.0)
+    counterclim = _toy_grid("tas", 27.0)
+    cf = compute_counterfactual_delta(factual, obsclim, counterclim, skip_regrid=True)
+    np.testing.assert_allclose(cf["tas"].values, factual["tas"].values)
 
 
-def test_pr_delta_uses_wet_day_mask_and_logratio() -> None:
-    """Per Mengel et al. 2021 sec 3.2.3, wet-day threshold is 0.1 mm/d."""
-    f, cf = _toy()
-    d = compute_attribution_deltas(f, cf, ["pr"])
-    assert "pr_delta" in d
-    finite = d["pr_delta"].where(np.isfinite(d["pr_delta"]))
-    assert float(finite.mean()) > 0
+def test_delta_subtracts_warming_signal() -> None:
+    # Factual ERA5 is 28C; ISIMIP obsclim 27C, counterclim 26C.
+    # Warming signal = 1C -> counterfactual should be 27C.
+    factual = _toy_grid("tas", 28.0)
+    obsclim = _toy_grid("tas", 27.0)
+    counterclim = _toy_grid("tas", 26.0)
+    cf = compute_counterfactual_delta(factual, obsclim, counterclim, skip_regrid=True)
+    np.testing.assert_allclose(cf["tas"].values, 27.0)
 
 
-def test_hurs_and_rsds_delta_additive() -> None:
-    f, cf = _toy()
-    d = compute_attribution_deltas(f, cf, ["hurs", "rsds"])
-    assert float(d["hurs_delta"].mean()) == pytest.approx(-0.5, abs=0.05)
-    assert float(d["rsds_delta"].mean()) == pytest.approx(0.3, abs=0.05)
-
-
-def test_subprocess_script_imports_without_attrici_in_main_env() -> None:
-    """Main repo env must NOT have attrici; subprocess script must still import."""
-    assert "attrici" not in sys.modules
-    importlib.import_module("scripts.run_attrici_subprocess")
+def test_precip_delta_preserves_nonnegative() -> None:
+    factual = _toy_grid("pr", 5.0)
+    obsclim = _toy_grid("pr", 3.0)
+    counterclim = _toy_grid("pr", 4.0)
+    cf = compute_counterfactual_delta(
+        factual,
+        obsclim,
+        counterclim,
+        skip_regrid=True,
+        clip_precip=True,
+    )
+    assert (cf["pr"].values >= 0).all()
 
 
 @pytest.mark.integration
-def test_isimip_download_smoke(tmp_path) -> None:
-    """Downloads one small counterclim file and confirms structure."""
-    if not os.getenv("RUN_NETWORK_TESTS"):
-        pytest.skip("Network tests disabled")
+def test_isimip_download_small_region() -> None:
+    if not os.getenv("ISIMIP_INTEGRATION"):
+        pytest.skip("set ISIMIP_INTEGRATION=1 to run network test")
 
-    cc = CounterfactualClimate(
-        aoi=None,
+    from data.attrici_counterfactual import ISIMIPCounterfactualLoader
+
+    loader = ISIMIPCounterfactualLoader(
+        bbox=(-5.6, 6.7, -5.4, 6.9),
         start="2015-01-01",
         end="2015-01-31",
-        variables=("tas",),
-        cache_dir=tmp_path,
+        variables=["tas"],
     )
-    ds = cc.fetch()
-    assert "tas" in ds.data_vars
-    assert ds.sizes["time"] >= 28
+    obs = loader.load("obsclim")
+    cf = loader.load("counterclim")
+    assert "tas" in obs.data_vars and "tas" in cf.data_vars
+    assert obs.sizes["time"] >= 28

@@ -1,88 +1,228 @@
 """
-ISIMIP3a counterclim ingest (GSWP3-W5E5, 0.5°) aligned to ERA5-Land grids.
+Counterfactual ERA5-Land climate via ISIMIP3a GSWP3-W5E5 obsclim / counterclim deltas.
 
-Downloads Mengel et al. (2021) counterfactual climate (``climate_scenario=counterclim``)
-via the ISIMIP file-list API and regrids onto grids from :mod:`data.era5_ingest`.
+Uses the ISIMIP3a counterfactual methodology (Mengel et al. 2021, Geosci. Model Dev.,
+14, 5269–5289; https://doi.org/10.5194/gmd-14-5269-2021) and GSWP3-W5E5 daily fields
+(DOI 10.48364/ISIMIP.982724.3; CC0). ATTRICI v1.1 produced the counterclim experiment;
+this module applies pre-computed ISIMIP deltas to an ERA5-Land factual stack — it does
+**not** import the ATTRICI Python package (GPL boundary).
 
-This module never imports the ``attrici`` package (GPL boundary). Running ATTRICI from
-source is delegated to ``scripts/run_attrici_subprocess.py`` (Prompt 3).
+Delta adjustment (per variable, after regridding ISIMIP 0.5° → ERA5 grid)::
+
+    cf = factual - (obsclim - counterclim)
 """
 
 from __future__ import annotations
 
-import hashlib
+import argparse
 import json
 import logging
-from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 import ee
 import numpy as np
 import pandas as pd
-import pooch
 import requests
 import xarray as xr
 
+from data.era5_ingest import (
+    FAO_ALBEDO,
+    FAO_GAMMA,
+    KELVIN_OFFSET,
+    MAGNUS_A,
+    MAGNUS_B,
+    MAGNUS_C,
+    WIND10_TO_WIND2_FACTOR,
+    compute_derived_features,
+)
+
 logger = logging.getLogger(__name__)
 
-# Map ERA5-Land names (``era5_ingest``) → ISIMIP short names for delta attribution
-_ERA5_TO_ISIMIP: dict[str, str] = {
-    "tmean": "tas",
-    "tmin": "tasmin",
-    "tmax": "tasmax",
-    "precip": "pr",
-    "rh_mean": "hurs",
-    "srad": "rsds",
+MENGEL_2021_DOI = "10.5194/gmd-14-5269-2021"
+ISIMIP_DATASET_DOI = "10.48364/ISIMIP.982724.3"
+
+ISIMIP_FILES_BASE = (
+    "https://files.isimip.org/ISIMIP3a/InputData/climate/atmosphere"
+)
+DEFAULT_CACHE_DIR = Path("data/external/isimip3a")
+DEFAULT_ISIMIP_VARIABLES: tuple[str, ...] = (
+    "tasmax",
+    "tasmin",
+    "tas",
+    "pr",
+    "hurs",
+    "rsds",
+    "sfcwind",
+)
+EXPERIMENTS: tuple[str, ...] = ("obsclim", "counterclim")
+
+ISIMIP_TO_ERA5: dict[str, str] = {
+    "tasmax": "tmax",
+    "tasmin": "tmin",
+    "tas": "tmean",
+    "pr": "precip",
+    "hurs": "rh_mean",
+    "rsds": "srad",
+    "sfcwind": "wind10m",
 }
 
-ISIMIP_API_V1 = "https://data.isimip.org/api/v1"
-ISIMIP_FILES_BASE = "https://files.isimip.org"
-ZENODO_RECORD_ID = "5036364"
-PR_WET_DAY_MM = 0.1  # Mengel et al. 2021 §3.2.3 (Bernoulli–gamma threshold)
-
-DEFAULT_VARIABLES: tuple[str, ...] = ("tas", "tasmin", "tasmax", "pr", "hurs", "rsds")
-_TAS_DERIVED: tuple[str, ...] = ("tasrange", "tasskew")
-_ADDITIVE_DELTA_VARS: frozenset[str] = frozenset({"tas", "tasmin", "tasmax", "rsds", "hurs"})
+_TEMPERATURE_ISIMIP = frozenset({"tas", "tasmin", "tasmax"})
 _KELVIN_THRESHOLD = 150.0
-
-_REGISTRY: pooch.Pooch | None = None
-
-
-def _get_registry(cache_dir: Path) -> pooch.Pooch:
-    global _REGISTRY
-    cache_dir = Path(cache_dir)
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    if _REGISTRY is None or Path(_REGISTRY.path) != cache_dir.resolve():
-        _REGISTRY = pooch.create(
-            path=str(cache_dir),
-            base_url=ISIMIP_FILES_BASE + "/",
-            registry={},
-            urls={},
-        )
-    return _REGISTRY
+_OPEN_CHUNKS: dict[str, int] = {"time": 365}
 
 
-def _expanded_variables(variables: Sequence[str]) -> list[str]:
-    """Include tasrange/tasskew when tasmin/tasmax requested (ATTRICI §3.2.2)."""
-    out: list[str] = []
-    need_tas_derived = "tasmin" in variables or "tasmax" in variables
-    for v in variables:
-        if v not in out:
-            out.append(v)
-    if need_tas_derived:
-        for v in _TAS_DERIVED:
-            if v not in out:
-                out.append(v)
-        if "tas" not in out:
-            out.insert(0, "tas")
+def _isimip_file_url(experiment: str, variable: str, year: int) -> str:
+    return (
+        f"{ISIMIP_FILES_BASE}/{experiment}/global/daily/historical/GSWP3-W5E5/"
+        f"gswp3-w5e5_{experiment}_{variable}_global_daily_{year}_{year}.nc"
+    )
+
+
+def _cache_file_path(cache_dir: Path, experiment: str, variable: str, year: int) -> Path:
+    name = f"gswp3-w5e5_{experiment}_{variable}_global_daily_{year}_{year}.nc"
+    return cache_dir / experiment / variable / name
+
+
+def _meta_path(dest: Path) -> Path:
+    return dest.with_suffix(dest.suffix + ".meta.json")
+
+
+def _download_cached(url: str, dest: Path, *, timeout: float = 120.0) -> Path:
+    """Download ``url`` to ``dest`` if missing or remote ETag/size changed."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    meta_file = _meta_path(dest)
+    prior: dict[str, Any] = {}
+    if meta_file.is_file():
+        prior = json.loads(meta_file.read_text(encoding="utf-8"))
+
+    headers: dict[str, str] = {}
+    if dest.is_file() and prior.get("etag"):
+        headers["If-None-Match"] = str(prior["etag"])
+
+    head = requests.head(url, timeout=timeout, allow_redirects=True)
+    head.raise_for_status()
+    remote_etag = head.headers.get("ETag")
+    remote_size = head.headers.get("Content-Length")
+
+    if dest.is_file():
+        if remote_etag and prior.get("etag") == remote_etag:
+            return dest
+        if remote_size and dest.stat().st_size == int(remote_size):
+            return dest
+
+    logger.info("Downloading %s -> %s", url, dest)
+    etag_out = remote_etag
+    with requests.get(url, stream=True, timeout=timeout, headers=headers) as resp:
+        resp.raise_for_status()
+        if resp.status_code == 304 and dest.is_file():
+            return dest
+        etag_out = resp.headers.get("ETag", remote_etag)
+        with dest.open("wb") as handle:
+            for chunk in resp.iter_content(chunk_size=1 << 20):
+                if chunk:
+                    handle.write(chunk)
+
+    meta = {
+        "url": url,
+        "etag": etag_out,
+        "size": dest.stat().st_size,
+    }
+    meta_file.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    return dest
+
+
+def _parse_year(date_str: str) -> int:
+    return int(pd.Timestamp(date_str).year)
+
+
+def _coord_names(ds: xr.Dataset | xr.DataArray) -> tuple[str, str]:
+    if "latitude" in ds.coords or "latitude" in getattr(ds, "dims", {}):
+        return "latitude", "longitude"
+    return "lat", "lon"
+
+
+def _subset_bbox(ds: xr.Dataset, bbox: tuple[float, float, float, float]) -> xr.Dataset:
+    west, south, east, north = bbox
+    lat_name, lon_name = _coord_names(ds)
+    out = ds.sel({lat_name: slice(south, north)})
+
+    lon = out[lon_name]
+    if float(lon.max()) > 180.0 and west < 0:
+        west_360 = west % 360.0
+        east_360 = east % 360.0
+        if west_360 <= east_360:
+            out = out.sel({lon_name: slice(west_360, east_360)})
+        else:
+            part_a = out.sel({lon_name: slice(west_360, 360.0)})
+            part_b = out.sel({lon_name: slice(0.0, east_360)})
+            out = xr.concat([part_a, part_b], dim=lon_name)
+    else:
+        out = out.sel({lon_name: slice(west, east)})
     return out
 
 
-def _aoi_bounds(
-    aoi: ee.Geometry | Any | None,
-) -> tuple[float, float, float, float]:
-    """Return ``(west, south, east, north)`` in EPSG:4326."""
+def _normalize_isimip_units(da: xr.DataArray, isimip_var: str) -> xr.DataArray:
+    """Kelvin → °C for temperature; kg m⁻² s⁻¹ → mm d⁻¹ for precipitation."""
+    out = da
+    if isimip_var in _TEMPERATURE_ISIMIP:
+        sample = float(out.isel({d: 0 for d in out.dims if d != "time"}, drop=True).mean().values)
+        if sample > _KELVIN_THRESHOLD:
+            out = out - KELVIN_OFFSET
+    if isimip_var == "pr":
+        out = out * 86400.0
+    return out
+
+
+def _resolve_isimip_var(ds: xr.Dataset, isimip_var: str) -> xr.DataArray:
+    if isimip_var in ds.data_vars:
+        return ds[isimip_var]
+    for name in ds.data_vars:
+        if isimip_var in name.lower():
+            return ds[name]
+    raise KeyError(f"Variable {isimip_var!r} not in {list(ds.data_vars)}")
+
+
+def _regrid_to_factual(
+    source: xr.DataArray,
+    factual: xr.Dataset,
+    *,
+    method: str = "bilinear",
+) -> xr.DataArray:
+    import xesmf as xe
+
+    src_lat, src_lon = _coord_names(source)
+    tgt_lat, tgt_lon = _coord_names(factual)
+    src_grid = xr.Dataset({"lat": source[src_lat], "lon": source[src_lon]})
+    dst_grid = xr.Dataset({"lat": factual[tgt_lat], "lon": factual[tgt_lon]})
+    regridder = xe.Regridder(src_grid, dst_grid, method, reuse_weights=False)
+    out = regridder(source.transpose(src_lat, src_lon, ...), keep_attrs=True)
+    regridder.clean_weight_file()
+    return out
+
+
+def _recompute_vpd_et0_cwd(ds: xr.Dataset) -> xr.Dataset:
+    """Recompute ``vpd_mean``, ``et0``, and ``cwd`` from adjusted daily drivers."""
+    out = ds.copy()
+    tmean = out["tmean"]
+    rh = out["rh_mean"].clip(0, 100)
+    es = MAGNUS_A * np.exp(MAGNUS_B * tmean / (MAGNUS_C + tmean))
+    out["vpd_mean"] = (es * (1.0 - rh / 100.0)).clip(min=0)
+
+    u2 = out["wind10m"] * WIND10_TO_WIND2_FACTOR
+    rn = out["srad"] * (1.0 - FAO_ALBEDO)
+    t_k = tmean + KELVIN_OFFSET
+    delta_slope = es * MAGNUS_B * MAGNUS_C / (tmean + MAGNUS_C) ** 2
+    vpd = out["vpd_mean"]
+    num_rad = delta_slope * rn * 0.408
+    num_aero = FAO_GAMMA * (900.0 / t_k) * u2 * vpd
+    den = delta_slope + FAO_GAMMA * (1.0 + 0.34 * u2)
+    out["et0"] = ((num_rad + num_aero) / den).clip(min=0)
+    out["cwd"] = out["et0"] - out["precip"]
+    return out
+
+
+def _aoi_bounds(aoi: ee.Geometry | Any | None) -> tuple[float, float, float, float]:
     if aoi is None:
         return -180.0, -90.0, 180.0, 90.0
 
@@ -96,406 +236,265 @@ def _aoi_bounds(
         pass
 
     if isinstance(aoi, ee.Geometry):
+        from data.gee_auth import initialize_earth_engine
+
+        initialize_earth_engine()
         coords = aoi.bounds().getInfo()["coordinates"][0]
         lons = [c[0] for c in coords]
         lats = [c[1] for c in coords]
         return float(min(lons)), float(min(lats)), float(max(lons)), float(max(lats))
 
+    if isinstance(aoi, (tuple, list)) and len(aoi) == 4:
+        west, south, east, north = aoi
+        return float(west), float(south), float(east), float(north)
+
     raise TypeError(f"Unsupported AOI type: {type(aoi)!r}")
 
 
-def _parse_year(date_str: str) -> int:
-    return int(pd.Timestamp(date_str).year)
-
-
-def _isimip_list_files(
-    *,
-    variables: Sequence[str],
-    start_year: int,
-    end_year: int,
-) -> list[dict[str, Any]]:
-    """Query ISIMIP v1 ``/files/`` endpoint (paginated)."""
-    params: dict[str, Any] = {
-        "simulation_round": "ISIMIP3a",
-        "climate_scenario": "counterclim",
-        "climate_forcing": "gswp3-w5e5",
-        "time_step": "daily",
-        "limit": 100,
-    }
-    files: list[dict[str, Any]] = []
-    url = f"{ISIMIP_API_V1}/files/"
-    while url:
-        response = requests.get(url, params=params if url.endswith("/files/") else None, timeout=120)
-        response.raise_for_status()
-        payload = response.json()
-        for item in payload.get("results", []):
-            spec = item.get("specifiers") or {}
-            var = spec.get("climate_variable")
-            sy = int(spec.get("start_year", 0))
-            ey = int(spec.get("end_year", 0))
-            if var not in variables:
-                continue
-            if ey < start_year or sy > end_year:
-                continue
-            files.append(item)
-        url = payload.get("next")
-        params = None
-    return files
-
-
-def _zenodo_fallback_files(
-    variables: Sequence[str],
-    start_year: int,
-    end_year: int,
-) -> list[dict[str, Any]]:
-    """Best-effort Zenodo 5036364 file list when the ISIMIP API is unavailable."""
-    api = f"https://zenodo.org/api/records/{ZENODO_RECORD_ID}"
-    response = requests.get(api, timeout=60)
-    response.raise_for_status()
-    files: list[dict[str, Any]] = []
-    for entry in response.json().get("files", []):
-        key = entry.get("key", "")
-        if not key.endswith(".nc"):
-            continue
-        var = next((v for v in variables if f"_{v}_" in key or f"_{v}." in key), None)
-        if var is None:
-            continue
-        years = [int(y) for y in key.replace(".nc", "").split("_") if y.isdigit() and len(y) == 4]
-        if years and (max(years) < start_year or min(years) > end_year):
-            continue
-        files.append(
-            {
-                "name": key,
-                "path": key,
-                "checksum": entry.get("checksum"),
-                "checksum_type": entry.get("checksum_type", "md5"),
-                "download_url": entry["links"]["self"],
-            }
-        )
-    if not files:
-        raise FileNotFoundError(
-            f"No Zenodo {ZENODO_RECORD_ID} files matched variables={variables!r} "
-            f"years={start_year}-{end_year}"
-        )
-    return files
-
-
-def _verify_sha512(path: Path, expected: str) -> None:
-    digest = hashlib.sha512()
-    with path.open("rb") as fh:
-        for block in iter(lambda: fh.read(65536), b""):
-            digest.update(block)
-    if digest.hexdigest() != expected:
-        raise ValueError(f"SHA-512 mismatch for {path.name}")
-
-
-def _download_isimip_file(meta: dict[str, Any], registry: pooch.Pooch) -> Path:
-    path_key = meta["path"]
-    fname = meta["name"]
-    cache_name = f"{hashlib.sha256(path_key.encode()).hexdigest()[:16]}_{fname}"
-    if cache_name in registry.registry:
-        return Path(registry.fetch(cache_name))
-
-    url = meta.get("download_url") or f"{ISIMIP_FILES_BASE}/{path_key}"
-    dest = Path(registry.abspath) / cache_name
-    dest.parent.mkdir(parents=True, exist_ok=True)
-
-    logger.info("Downloading %s", fname)
-    with requests.get(url, stream=True, timeout=600) as resp:
-        resp.raise_for_status()
-        with dest.open("wb") as fh:
-            for chunk in resp.iter_content(chunk_size=1024 * 1024):
-                if chunk:
-                    fh.write(chunk)
-
-    checksum = meta.get("checksum")
-    if meta.get("checksum_type") == "sha512" and checksum:
-        _verify_sha512(dest, checksum)
-
-    registry.registry[cache_name] = fname
-    registry.urls[cache_name] = url
-    registry.dump(registry.abspath / "registry.txt")
-    return dest
-
-
-def _open_variable_timeseries(paths: list[Path], var: str) -> xr.DataArray:
-    sorted_paths = sorted(paths)
-    ds = xr.open_mfdataset(sorted_paths, combine="by_coords", parallel=False)
-    try:
-        da = ds[var] if var in ds else ds[list(ds.data_vars)[0]]
-        return da.load()
-    finally:
-        ds.close()
-
-
-def _harmonize_coords(ds: xr.Dataset) -> xr.Dataset:
-    rename: dict[str, str] = {}
-    if "latitude" in ds.dims:
-        rename["latitude"] = "lat"
-    if "longitude" in ds.dims:
-        rename["longitude"] = "lon"
-    if rename:
-        ds = ds.rename(rename)
-    if "lon" in ds.coords and float(ds.lon.max()) > 180.0:
-        ds = ds.assign_coords(lon=(((ds.lon + 180) % 360) - 180)).sortby("lon")
-    return ds
-
-
-def _subset_bbox(ds: xr.Dataset, bbox: tuple[float, float, float, float]) -> xr.Dataset:
-    west, south, east, north = bbox
-    return ds.sel(lat=slice(south, north), lon=slice(west, east))
-
-
-def _to_celsius(da: xr.DataArray) -> xr.DataArray:
-    if float(da.mean(skipna=True)) > _KELVIN_THRESHOLD:
-        return da - 273.15
-    return da
-
-
-def reconstruct_tasmin_tasmax(ds: xr.Dataset) -> xr.Dataset:
-    """Piani et al. 2010 / ATTRICI §3.2.2 from tas, tasrange, tasskew."""
-    if not all(v in ds for v in ("tas", "tasrange", "tasskew")):
-        return ds
-    out = ds.copy()
-    tas = _to_celsius(ds["tas"])
-    tasrange = ds["tasrange"]
-    tasskew = ds["tasskew"]
-    out["tasmin"] = (tas - tasrange * tasskew).rename("tasmin")
-    out["tasmax"] = (out["tasmin"] + tasrange).rename("tasmax")
-    return out
-
-
-def compute_attribution_deltas(
-    factual: xr.Dataset,
-    counterfactual: xr.Dataset,
-    variables: Sequence[str],
-) -> xr.Dataset:
+class ISIMIPCounterfactualLoader:
     """
-    Attribution deltas between factual and counterfactual fields.
+    Download (cached) and open ISIMIP3a GSWP3-W5E5 obsclim / counterclim for an AOI.
 
-    Additive for ``tas``, ``tasmin``, ``tasmax``, ``rsds``, ``hurs``. For ``pr``,
-    returns ``log(factual / counterfactual)`` on wet days (≥ 0.1 mm/d) only
-    (Mengel et al. 2021 §3.2.3).
-    """
-    deltas: dict[str, xr.DataArray] = {}
-    for var in variables:
-        if var not in factual or var not in counterfactual:
-            logger.warning("Skipping delta for %s (missing in factual or counterfactual)", var)
-            continue
-        f = factual[var]
-        c = counterfactual[var]
-        if var == "pr":
-            wet = (f >= PR_WET_DAY_MM) & (c >= PR_WET_DAY_MM)
-            ratio = xr.where(wet, f / c.where(c > 0, np.nan), np.nan)
-            deltas[f"{var}_delta"] = xr.where(wet, np.log(ratio), np.nan).rename(f"{var}_delta")
-        elif var in _ADDITIVE_DELTA_VARS:
-            deltas[f"{var}_delta"] = (f - c).rename(f"{var}_delta")
-        else:
-            deltas[f"{var}_delta"] = (f - c).rename(f"{var}_delta")
-    return xr.Dataset(deltas)
-
-
-def _lat_lon_names(ds: xr.Dataset) -> tuple[str, str]:
-    if "latitude" in ds.dims or "latitude" in ds.coords:
-        return "latitude", "longitude"
-    return "lat", "lon"
-
-
-def _regrid_xesmf(
-    source: xr.DataArray,
-    target: xr.Dataset,
-    method: str,
-) -> xr.DataArray:
-    import xesmf as xe
-
-    lat_name, lon_name = _lat_lon_names(source.to_dataset(name=source.name))
-    tgt_lat, tgt_lon = _lat_lon_names(target)
-
-    src_grid = xr.Dataset(
-        {
-            "lat": source[lat_name],
-            "lon": source[lon_name],
-        }
-    )
-    dst_grid = xr.Dataset(
-        {
-            "lat": target[tgt_lat],
-            "lon": target[tgt_lon],
-        }
-    )
-    regridder = xe.Regridder(src_grid, dst_grid, method=method, reuse_weights=False)
-    out = regridder(source.transpose(lat_name, lon_name, ...), keep_attrs=True)
-    regridder.clean_weight_file()
-    return out
-
-
-def _regrid_interp(source: xr.DataArray, target: xr.Dataset) -> xr.DataArray:
-    lat_name, lon_name = _lat_lon_names(source.to_dataset(name=source.name))
-    tgt_lat, tgt_lon = _lat_lon_names(target)
-    interp_method = "nearest" if source.name == "pr" else "linear"
-    return source.interp(
-        {lat_name: target[tgt_lat], lon_name: target[tgt_lon]},
-        method=interp_method,
-    )
-
-
-class CounterfactualClimate:
-    """
-    Fetch ISIMIP3a counterclim (GSWP3-W5E5) and align to an ERA5-Land target grid.
-
-    Parameters
-    ----------
-    aoi:
-        Earth Engine or Shapely geometry defining the spatial subset.
-    start, end:
-        Date bounds (inclusive start, inclusive end) for the time dimension.
-    variables:
-        ISIMIP variable short names to load.
-    cache_dir:
-        Local cache for downloaded NetCDF files (SHA-512 verified when provided).
-    target_grid:
-        Factual ERA5-Land (or compatible) dataset used as the regrid target in :meth:`build`.
+    Opens files lazily with ``chunks={"time": 365}`` and subsets lat/lon before
+    concatenating years — never loads a full global field into RAM.
     """
 
     def __init__(
         self,
-        aoi: ee.Geometry | Any | None,
-        start: str,
-        end: str,
-        variables: Sequence[str] = DEFAULT_VARIABLES,
-        cache_dir: str | Path = "data/counterclim",
-        target_grid: xr.Dataset | None = None,
+        aoi_bbox: tuple[float, float, float, float] | None = None,
+        start: str = "",
+        end: str = "",
+        *,
+        bbox: tuple[float, float, float, float] | None = None,
+        variables: tuple[str, ...] = DEFAULT_ISIMIP_VARIABLES,
+        cache_dir: Path | str = DEFAULT_CACHE_DIR,
     ) -> None:
-        self.aoi = aoi
+        resolved = aoi_bbox if aoi_bbox is not None else bbox
+        if resolved is None:
+            raise TypeError("ISIMIPCounterfactualLoader requires aoi_bbox or bbox")
+        self.aoi_bbox = resolved
         self.start = start
         self.end = end
-        self.variables = tuple(variables)
+        self.variables = variables
         self.cache_dir = Path(cache_dir)
-        self.target_grid = target_grid
-        self._bbox = _aoi_bounds(aoi)
         self._start_year = _parse_year(start)
         self._end_year = _parse_year(end)
-        self._dataset: xr.Dataset | None = None
 
-    def fetch(self) -> xr.Dataset:
-        """Download (or load cached) ISIMIP3a counterclim NetCDFs for the requested variables and time slice."""
-        registry = _get_registry(self.cache_dir)
-        query_vars = _expanded_variables(self.variables)
+    def _ensure_year_files(self, experiment: str, variable: str) -> list[Path]:
+        paths: list[Path] = []
+        for year in range(self._start_year, self._end_year + 1):
+            dest = _cache_file_path(self.cache_dir, experiment, variable, year)
+            url = _isimip_file_url(experiment, variable, year)
+            paths.append(_download_cached(url, dest))
+        return paths
 
-        try:
-            file_metas = _isimip_list_files(
-                variables=query_vars,
-                start_year=self._start_year,
-                end_year=self._end_year,
-            )
-        except requests.RequestException as exc:
-            logger.warning("ISIMIP API failed (%s); trying Zenodo %s", exc, ZENODO_RECORD_ID)
-            file_metas = _zenodo_fallback_files(query_vars, self._start_year, self._end_year)
+    def _open_variable(self, experiment: str, variable: str) -> xr.DataArray:
+        paths = self._ensure_year_files(experiment, variable)
+        pieces: list[xr.DataArray] = []
+        for path in paths:
+            ds = xr.open_dataset(path, chunks=_OPEN_CHUNKS)
+            ds = _subset_bbox(ds, self.aoi_bbox)
+            da = _normalize_isimip_units(_resolve_isimip_var(ds, variable), variable)
+            pieces.append(da.load())
+            ds.close()
+        combined = xr.concat(pieces, dim="time")
+        combined.name = variable
+        start_ts = pd.Timestamp(self.start)
+        end_ts = pd.Timestamp(self.end)
+        return combined.sel(time=slice(start_ts, end_ts))
 
-        if not file_metas:
-            raise FileNotFoundError(
-                "No ISIMIP3a counterclim files matched the query. "
-                "Check variables, dates, and network access."
-            )
+    def load_experiment(self, experiment: str) -> xr.Dataset:
+        """Load all configured variables for ``obsclim`` or ``counterclim``."""
+        if experiment not in EXPERIMENTS:
+            raise ValueError(f"experiment must be one of {EXPERIMENTS}, got {experiment!r}")
 
-        by_var: dict[str, list[Path]] = {v: [] for v in query_vars}
-        for meta in file_metas:
-            var = (meta.get("specifiers") or {}).get("climate_variable")
-            if var is None and "name" in meta:
-                var = next((v for v in query_vars if v in meta["name"]), None)
-            if var is None:
-                continue
-            by_var[var].append(_download_isimip_file(meta, registry))
+        data_vars: dict[str, xr.DataArray] = {}
+        for var in self.variables:
+            logger.info("Loading ISIMIP %s %s (%d–%d)", experiment, var, self._start_year, self._end_year)
+            data_vars[var] = self._open_variable(experiment, var)
 
-        pieces: dict[str, xr.DataArray] = {}
-        for var, paths in by_var.items():
-            if not paths:
-                logger.warning("No files downloaded for variable %s", var)
-                continue
-            pieces[var] = _open_variable_timeseries(paths, var)
-
-        if not pieces:
-            raise FileNotFoundError("No counterclim variables could be loaded")
-
-        ds = _harmonize_coords(xr.Dataset(pieces))
-        ds = _subset_bbox(ds, self._bbox)
-        ds = ds.sel(time=slice(self.start, self.end))
-        ds = reconstruct_tasmin_tasmax(ds)
-        self._dataset = ds
+        ds = xr.Dataset(data_vars)
+        ds.attrs.update(
+            {
+                "experiment": experiment,
+                "source": "ISIMIP3a GSWP3-W5E5",
+                "mengel_2021_doi": MENGEL_2021_DOI,
+                "isimip_doi": ISIMIP_DATASET_DOI,
+            }
+        )
         return ds
 
-    def regrid_to(self, target: xr.Dataset, method: str = "bilinear") -> xr.Dataset:
-        """
-        Regrid counterfactual fields onto ``target``'s horizontal grid.
+    def load_obsclim(self) -> xr.Dataset:
+        return self.load_experiment("obsclim")
 
-        Uses xESMF (conservative for ``pr``, bilinear otherwise) when available;
-        falls back to :py:meth:`xarray.DataArray.interp`.
-        """
-        if self._dataset is None:
-            raise RuntimeError("Call fetch() before regrid_to()")
+    def load_counterclim(self) -> xr.Dataset:
+        return self.load_experiment("counterclim")
 
-        regridded: dict[str, xr.DataArray] = {}
-        use_xesmf = True
-        try:
-            import xesmf  # noqa: F401
-        except ImportError:
-            use_xesmf = False
-            logger.warning("xesmf not installed; falling back to xarray.interp for regridding")
+    def load(self, experiment: str) -> xr.Dataset:
+        """Alias for :meth:`load_experiment`."""
+        return self.load_experiment(experiment)
 
-        for var in self._dataset.data_vars:
-            da = self._dataset[var]
-            regrid_method = "conservative" if var == "pr" else method
-            if use_xesmf:
-                try:
-                    regridded[var] = _regrid_xesmf(da, target, regrid_method)
-                    continue
-                except Exception as exc:
-                    logger.warning("xesmf failed for %s (%s); using interp", var, exc)
-            regridded[var] = _regrid_interp(da, target)
 
-        out = xr.Dataset(regridded)
-        if "time" in self._dataset.coords:
-            out = out.assign_coords(time=self._dataset.time)
-            out = out.sel(time=slice(self.start, self.end), method="nearest")
-        return out
+def _factual_variable_key(factual: xr.Dataset, isimip_var: str, era5_var: str) -> str | None:
+    if era5_var in factual.data_vars:
+        return era5_var
+    if isimip_var in factual.data_vars:
+        return isimip_var
+    return None
 
-    def build(self) -> xr.Dataset:
-        """
-        ``fetch`` → AOI subset → regrid to ``target_grid`` → factual–counterfactual deltas.
 
-        Deltas use ERA5 variable names from ``target_grid`` mapped through
-        :data:`counterfactual.delta_downscaler.ISIMIP_TO_ERA5`.
-        """
-        if self.target_grid is None:
-            raise ValueError("target_grid is required for build()")
+def compute_counterfactual_delta(
+    factual_era5: xr.Dataset,
+    obsclim_isimip: xr.Dataset,
+    counterclim_isimip: xr.Dataset,
+    *,
+    regrid_method: str = "bilinear",
+    skip_regrid: bool = False,
+    clip_precip: bool = False,
+) -> xr.Dataset:
+    """
+    Apply ISIMIP obsclim–counterclim deltas on the ERA5-Land grid.
 
-        counter = self.fetch()
-        counter_on_target = self.regrid_to(self.target_grid)
+    For each mapped variable::
 
-        factual_parts: dict[str, xr.DataArray] = {}
-        for era5_var, isimip_var in _ERA5_TO_ISIMIP.items():
-            if isimip_var not in self.variables:
-                continue
-            if era5_var in self.target_grid:
-                factual_parts[isimip_var] = self.target_grid[era5_var]
-        if not factual_parts:
-            self._dataset = counter_on_target
-            return counter_on_target
+        cf = factual - (obsclim_regridded - counterclim_regridded)
 
-        factual_isimip = xr.Dataset(factual_parts)
-        deltas = compute_attribution_deltas(
-            factual_isimip,
-            counter_on_target,
-            [v for v in self.variables if v in factual_parts],
-        )
-        merged = xr.merge([counter_on_target, deltas], compat="override")
-        self._dataset = merged
-        return merged
+    Then recomputes ``vpd_mean``, ``et0``, ``cwd``, ``cwd_cum``, copies ``sm_root``
+    from factual where unchanged, and runs :func:`data.era5_ingest.compute_derived_features`.
+    """
+    adjusted: dict[str, xr.DataArray] = {}
 
-    def to_zarr(self, path: str, mode: str = "w") -> None:
-        """Persist :meth:`build` / :meth:`fetch` output to Zarr."""
-        if self._dataset is None:
-            self.build() if self.target_grid is not None else self.fetch()
-        out = Path(path)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        self._dataset.to_zarr(str(out), mode=mode)
+    for isimip_var, era5_var in ISIMIP_TO_ERA5.items():
+        factual_key = _factual_variable_key(factual_era5, isimip_var, era5_var)
+        if factual_key is None:
+            continue
+        obs = _resolve_isimip_var(obsclim_isimip, isimip_var)
+        counter = _resolve_isimip_var(counterclim_isimip, isimip_var)
+        if skip_regrid:
+            obs_r = obs
+            counter_r = counter
+        else:
+            obs_r = _regrid_to_factual(obs, factual_era5, method=regrid_method)
+            counter_r = _regrid_to_factual(counter, factual_era5, method=regrid_method)
+        delta = obs_r - counter_r
+        out_key = factual_key if skip_regrid else era5_var
+        adjusted[out_key] = (factual_era5[factual_key] - delta).astype(np.float32)
+
+    if not adjusted:
+        raise ValueError("No ERA5 variables could be adjusted; check factual and ISIMIP inputs")
+
+    cf = xr.Dataset(adjusted)
+    for coord in factual_era5.coords:
+        if coord not in cf.coords and coord in factual_era5.dims:
+            cf = cf.assign_coords({coord: factual_era5[coord]})
+
+    if clip_precip:
+        for precip_name in ("precip", "pr"):
+            if precip_name in cf:
+                cf[precip_name] = cf[precip_name].clip(min=0)
+
+    if skip_regrid:
+        cf.attrs.update({"counterfactual": True, "method": "isimip_delta"})
+        return cf
+
+    required_for_derived = {"tmean", "rh_mean", "wind10m", "srad", "precip"}
+    if required_for_derived.issubset(cf.data_vars):
+        cf = _recompute_vpd_et0_cwd(cf)
+        cf["cwd_cum"] = cf["cwd"].cumsum(dim="time")
+        if "sm_root" in factual_era5.data_vars:
+            cf["sm_root"] = factual_era5["sm_root"]
+        cf = compute_derived_features(cf)
+
+    cf.attrs.update(
+        {
+            "counterfactual": True,
+            "method": "isimip_delta",
+            "mengel_2021_doi": MENGEL_2021_DOI,
+            "isimip_doi": ISIMIP_DATASET_DOI,
+        }
+    )
+    return cf
+
+
+def attrici_counterfactual_stack(
+    aoi: ee.Geometry | Any,
+    start: str,
+    end: str,
+    factual_ds: xr.Dataset,
+    *,
+    cache_dir: Path | str = DEFAULT_CACHE_DIR,
+    variables: tuple[str, ...] = DEFAULT_ISIMIP_VARIABLES,
+) -> xr.Dataset:
+    """
+    End-to-end counterfactual ERA5-Land stack for an AOI and date range.
+
+    Loads ISIMIP obsclim + counterclim, regrids, applies deltas, and returns a
+    dataset with the same schema as :mod:`data.era5_ingest` factual output.
+    """
+    bbox = _aoi_bounds(aoi)
+    loader = ISIMIPCounterfactualLoader(
+        bbox,
+        start,
+        end,
+        variables=variables,
+        cache_dir=cache_dir,
+    )
+    obsclim = loader.load_obsclim()
+    counterclim = loader.load_counterclim()
+    return compute_counterfactual_delta(factual_ds, obsclim, counterclim)
+
+
+def _parse_bbox(value: str) -> tuple[float, float, float, float]:
+    parts = [float(x.strip()) for x in value.split(",")]
+    if len(parts) != 4:
+        raise argparse.ArgumentTypeError("bbox must be west,south,east,north")
+    return parts[0], parts[1], parts[2], parts[3]
+
+
+def _build_cli() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Build counterfactual ERA5-Land Zarr from ISIMIP3a GSWP3-W5E5 deltas.",
+    )
+    parser.add_argument(
+        "--aoi-bbox",
+        type=_parse_bbox,
+        required=True,
+        help="AOI bounds as west,south,east,north (EPSG:4326)",
+    )
+    parser.add_argument("--start", required=True, help="Start date YYYY-MM-DD")
+    parser.add_argument("--end", required=True, help="End date YYYY-MM-DD")
+    parser.add_argument("--factual-zarr", type=Path, required=True, help="Factual ERA5 Zarr path")
+    parser.add_argument(
+        "--output-zarr",
+        type=Path,
+        required=True,
+        help="Output counterfactual Zarr path",
+    )
+    parser.add_argument(
+        "--cache-dir",
+        type=Path,
+        default=DEFAULT_CACHE_DIR,
+        help=f"ISIMIP download cache (default: {DEFAULT_CACHE_DIR})",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _build_cli().parse_args(argv)
+    factual = xr.open_zarr(args.factual_zarr, chunks=_OPEN_CHUNKS)
+    cf = attrici_counterfactual_stack(
+        args.aoi_bbox,
+        args.start,
+        args.end,
+        factual,
+        cache_dir=args.cache_dir,
+    )
+    args.output_zarr.parent.mkdir(parents=True, exist_ok=True)
+    cf.to_zarr(args.output_zarr, mode="w")
+    logger.info("Wrote counterfactual stack to %s", args.output_zarr)
+    return 0
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    raise SystemExit(main())
