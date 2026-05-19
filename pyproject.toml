@@ -37,6 +37,7 @@ dependencies = [
     "statsmodels>=0.14",  # event-study OLS with cluster-robust SEs
     "pooch>=1.8",
     "requests>=2.31",
+    "xesmf>=0.8",
     "rpy2>=3.5; platform_system != 'Windows'",
 ]
 
