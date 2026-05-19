@@ -409,12 +409,17 @@ def propensity_score_match(
     )
     if trim_overlap:
         work = trim_common_support(work, treatment_col=treatment_col, ps_col=ps_col)
+    match_caliper = caliper
+    match_scale = caliper_scale
+    if match_caliper is None:
+        match_caliper = default_logit_caliper(work[ps_col].to_numpy())
+        match_scale = "logit"
     return match_nearest_neighbor(
         work,
         treatment_col=treatment_col,
         ps_col=ps_col,
-        caliper=caliper,
-        caliper_scale=caliper_scale,
+        caliper=match_caliper,
+        caliper_scale=match_scale,
         k=k,
         with_replacement=with_replacement,
     )
