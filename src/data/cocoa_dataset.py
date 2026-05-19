@@ -245,7 +245,7 @@ class CocoaDataModule(GeoDataModule):
                 DataKey.IMAGE: {"resample": Resample.BILINEAR, "align_corners": None},
             },
         )
-        self.aug = K.Identity()
+        self.aug = K.AugmentationSequential(data_keys=None, keepdim=True)
 
     def setup(self, stage: str) -> None:
         """Create datasets and samplers for the requested stage."""
