@@ -4,7 +4,12 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from models.yield_surrogate import PhysicsInformedYieldLoss, YieldSurrogateModel
+from models.yield_surrogate import (
+    MCDropout,
+    PhysicsInformedYieldLoss,
+    YieldSurrogateModel,
+    predict_with_uncertainty,
+)
 
 
 def test_forward_output_shape() -> None:
@@ -50,3 +55,41 @@ def test_invalid_static_features_raises() -> None:
     static = torch.randn(4, 5)
     with pytest.raises(ValueError, match="static_features"):
         model(climate, static)
+
+
+def test_mc_dropout_active_when_model_eval() -> None:
+    layer = MCDropout(p=0.5)
+    layer.eval()
+    x = torch.ones(100, 32)
+    torch.manual_seed(0)
+    out1 = layer(x)
+    torch.manual_seed(0)
+    out2 = layer(x)
+    assert not torch.allclose(out1, x)
+    assert torch.allclose(out1, out2)
+
+
+def test_predict_with_uncertainty_shapes() -> None:
+    model = YieldSurrogateModel(dropout=0.2)
+    climate = torch.randn(4, 365, 4)
+    static = torch.randn(4, 10)
+    result = predict_with_uncertainty(model, climate, static, num_samples=50)
+    assert result.mean.shape == (4,)
+    assert result.std.shape == (4,)
+
+
+def test_predict_with_uncertainty_nonzero_std() -> None:
+    model = YieldSurrogateModel(dropout=0.3)
+    climate = torch.randn(8, 365, 4)
+    static = torch.randn(8, 10)
+    result = predict_with_uncertainty(model, climate, static, num_samples=50)
+    assert (result.std > 0).all()
+
+
+def test_predict_with_uncertainty_single_sample() -> None:
+    model = YieldSurrogateModel()
+    climate = torch.randn(2, 365, 4)
+    static = torch.randn(2, 10)
+    result = predict_with_uncertainty(model, climate, static, num_samples=1)
+    assert result.std.shape == (2,)
+    assert torch.all(result.std == 0)
