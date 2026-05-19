@@ -8,11 +8,36 @@ tensor width (``climate_features``) must match your input variables.
 
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import NamedTuple, TypedDict
 
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
+
+
+class YieldPrediction(NamedTuple):
+    """Monte Carlo yield estimate with epistemic uncertainty (std over forward passes)."""
+
+    mean: Tensor
+    std: Tensor
+
+
+class MCDropout(nn.Module):
+    """
+    Dropout that stays active during inference for Monte Carlo uncertainty estimation.
+
+    Unlike ``nn.Dropout``, forward always applies dropout (``training=True``),
+    so repeated forward passes at inference time produce a predictive distribution.
+    """
+
+    def __init__(self, p: float = 0.1) -> None:
+        super().__init__()
+        if not 0.0 <= p < 1.0:
+            raise ValueError(f"dropout probability must be in [0, 1), got {p}")
+        self.p = p
+
+    def forward(self, x: Tensor) -> Tensor:
+        return F.dropout(x, p=self.p, training=True)
 
 
 class LossComponents(TypedDict):
@@ -44,7 +69,8 @@ class YieldSurrogateModel(nn.Module):
     lstm_layers:
         Stacked LSTM depth.
     dropout:
-        Dropout on static branch and fusion head.
+        Dropout probability on static branch, post-LSTM embedding, and fusion head.
+        Uses :class:`MCDropout` so noise remains active at inference for MC sampling.
     """
 
     def __init__(
@@ -71,20 +97,21 @@ class YieldSurrogateModel(nn.Module):
             dropout=dropout if lstm_layers > 1 else 0.0,
         )
 
+        self.climate_dropout = MCDropout(dropout)
         self.static_mlp = nn.Sequential(
             nn.Linear(static_features, static_hidden),
             nn.ReLU(),
-            nn.Dropout(dropout),
+            MCDropout(dropout),
             nn.Linear(static_hidden, static_hidden),
             nn.ReLU(),
-            nn.Dropout(dropout),
+            MCDropout(dropout),
         )
 
         fusion_in = temporal_hidden + static_hidden
         self.head = nn.Sequential(
             nn.Linear(fusion_in, head_hidden),
             nn.ReLU(),
-            nn.Dropout(dropout),
+            MCDropout(dropout),
             nn.Linear(head_hidden, 1),
         )
 
@@ -124,11 +151,61 @@ class YieldSurrogateModel(nn.Module):
         self._validate_inputs(climate, static)
 
         _, (h_n, _) = self.climate_lstm(climate)
-        climate_emb = h_n[-1]
+        climate_emb = self.climate_dropout(h_n[-1])
 
         static_emb = self.static_mlp(static)
         fused = torch.cat([climate_emb, static_emb], dim=1)
         return self.head(fused).squeeze(-1)
+
+
+@torch.no_grad()
+def predict_with_uncertainty(
+    model: YieldSurrogateModel,
+    x_climate: Tensor,
+    x_static: Tensor,
+    num_samples: int = 50,
+) -> YieldPrediction:
+    """
+    Estimate yield and uncertainty via Monte Carlo Dropout.
+
+    Runs ``num_samples`` stochastic forward passes (dropout active each time)
+    and returns the mean prediction and standard deviation across samples.
+
+    Parameters
+    ----------
+    model:
+        Trained :class:`YieldSurrogateModel` with :class:`MCDropout` layers.
+    x_climate:
+        Daily climate tensor ``[batch, sequence_length, climate_features]``.
+    x_static:
+        Static features ``[batch, static_features]``.
+    num_samples:
+        Number of MC forward passes (default 50).
+
+    Returns
+    -------
+    YieldPrediction
+        ``mean``: final yield estimate ``[batch]``.
+        ``std``: uncertainty (standard deviation across MC samples) ``[batch]``.
+    """
+    if num_samples < 1:
+        raise ValueError(f"num_samples must be >= 1, got {num_samples}")
+
+    was_training = model.training
+    model.eval()
+
+    samples = torch.stack(
+        [model(x_climate, x_static) for _ in range(num_samples)],
+        dim=0,
+    )
+
+    if was_training:
+        model.train()
+
+    # samples: [num_samples, batch]
+    mean = samples.mean(dim=0)
+    std = samples.std(dim=0) if num_samples > 1 else torch.zeros_like(mean)
+    return YieldPrediction(mean=mean, std=std)
 
 
 class PhysicsInformedYieldLoss(nn.Module):
