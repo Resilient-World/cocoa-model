@@ -1,10 +1,16 @@
-"""Unit tests for yield surrogate model and physics-informed loss."""
+"""Unit tests for PINN yield surrogate, mechanistic core, and uncertainty."""
+
+from __future__ import annotations
+
+import warnings
 
 import pytest
 import torch
 import torch.nn.functional as F
 
 from models.yield_surrogate import (
+    CocoaPINNLoss,
+    DeepEnsemble,
     MCDropout,
     PhysicsInformedYieldLoss,
     YieldSurrogateModel,
@@ -12,12 +18,185 @@ from models.yield_surrogate import (
 )
 
 
-def test_forward_output_shape() -> None:
+def _dummy_batch(B: int = 4, T: int = 365, C: int = 11, S: int = 10) -> tuple[torch.Tensor, torch.Tensor]:
+    climate = torch.randn(B, T, C) * 0.1
+    climate[..., 0] = 30 + torch.randn(B, T) * 2  # tmax
+    climate[..., 1] = 22 + torch.randn(B, T) * 1  # tmin
+    climate[..., 2] = 26 + torch.randn(B, T) * 1  # tmean
+    climate[..., 3] = torch.relu(torch.randn(B, T)) * 3  # precip
+    climate[..., 4] = 18 + torch.randn(B, T) * 1  # srad MJ/m2/d
+    climate[..., 5] = 0.8 + torch.relu(torch.randn(B, T)) * 0.3  # vpd
+    climate[..., 6] = 3.5 + torch.randn(B, T) * 0.3  # ET0
+    climate[..., 7] = 0.28 + torch.randn(B, T) * 0.02
+    climate[..., 8] = 2.0 + torch.randn(B, T) * 0.3
+    climate[..., 9] = 80 + torch.randn(B, T) * 3
+    climate[..., 10] = 415.0
+    static = torch.randn(B, S)
+    static[:, 0] = 150.0  # AWC
+    return climate, static
+
+
+# --- Forward / legacy / MC (original + new) ---
+
+
+def test_forward_shape() -> None:
+    m = YieldSurrogateModel()
+    c, s = _dummy_batch()
+    y = m(c, s)
+    assert y.shape == (4,)
+
+
+def test_forward_output_shape_legacy_batch() -> None:
+    """Original: batch 8 with legacy 4-channel climate."""
     model = YieldSurrogateModel()
     climate = torch.randn(8, 365, 4)
     static = torch.randn(8, 10)
+    static[:, 0] = 150.0
     pred = model(climate, static)
     assert pred.shape == (8,)
+
+
+def test_legacy_4channel_still_works_with_warning() -> None:
+    m = YieldSurrogateModel()
+    c = torch.randn(2, 365, 4)
+    s = torch.randn(2, 10)
+    s[:, 0] = 150.0
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        y = m(c, s)
+    assert any("deprecat" in str(x.message).lower() for x in w)
+    assert y.shape == (2,)
+
+
+def test_mc_dropout_uncertainty_nontrivial() -> None:
+    m = YieldSurrogateModel()
+    c, s = _dummy_batch(B=8)
+    pred = predict_with_uncertainty(m, c, s, num_samples=20)
+    assert pred.std.mean().item() > 0.0
+
+
+def test_predict_with_uncertainty_shapes() -> None:
+    model = YieldSurrogateModel(dropout=0.2)
+    climate = torch.randn(4, 365, 4)
+    static = torch.randn(4, 10)
+    static[:, 0] = 150.0
+    result = predict_with_uncertainty(model, climate, static, num_samples=50)
+    assert result.mean.shape == (4,)
+    assert result.std.shape == (4,)
+
+
+def test_predict_with_uncertainty_nonzero_std() -> None:
+    model = YieldSurrogateModel(dropout=0.3)
+    climate = torch.randn(8, 365, 4)
+    static = torch.randn(8, 10)
+    static[:, 0] = 150.0
+    result = predict_with_uncertainty(model, climate, static, num_samples=50)
+    assert (result.std > 0).all()
+
+
+def test_predict_with_uncertainty_single_sample() -> None:
+    model = YieldSurrogateModel()
+    climate = torch.randn(2, 365, 4)
+    static = torch.randn(2, 10)
+    static[:, 0] = 150.0
+    result = predict_with_uncertainty(model, climate, static, num_samples=1)
+    assert result.std.shape == (2,)
+    assert torch.all(result.std == 0)
+
+
+def test_mc_dropout_active_when_model_eval() -> None:
+    layer = MCDropout(p=0.5)
+    layer.eval()
+    x = torch.ones(100, 32)
+    torch.manual_seed(0)
+    out1 = layer(x)
+    torch.manual_seed(0)
+    out2 = layer(x)
+    assert not torch.allclose(out1, x)
+    assert torch.allclose(out1, out2)
+
+
+# --- Mechanistic physics (8 new) ---
+
+
+def test_mechanistic_core_water_balance_never_negative() -> None:
+    m = YieldSurrogateModel()
+    c, s = _dummy_batch()
+    c[..., 3] = 0.0  # no precip
+    c[..., 6] = 5.0  # high ET0
+    _, traces = m.forward_with_traces(c, s)
+    assert (traces["sw_trace"] >= -1e-5).all()
+
+
+def test_mechanistic_biomass_is_monotone_nondecreasing() -> None:
+    m = YieldSurrogateModel()
+    c, s = _dummy_batch()
+    _, traces = m.forward_with_traces(c, s)
+    diffs = traces["biomass_trace"].diff(dim=1)
+    assert (diffs >= -1e-5).all()
+
+
+def test_high_vpd_reduces_yield() -> None:
+    m = YieldSurrogateModel()
+    c1, s = _dummy_batch()
+    c2 = c1.clone()
+    c2[..., 5] = c1[..., 5] + 1.5  # push VPD past 1.8 kPa threshold
+    _, t1 = m.forward_with_traces(c1, s)
+    _, t2 = m.forward_with_traces(c2, s)
+    assert t2["y_mech"].mean() < t1["y_mech"].mean()
+
+
+def test_co2_enhancement_increases_yield() -> None:
+    m = YieldSurrogateModel()
+    c1, s = _dummy_batch()
+    c2 = c1.clone()
+    c2[..., 10] = 700.0
+    _, t1 = m.forward_with_traces(c1, s)
+    _, t2 = m.forward_with_traces(c2, s)
+    assert t2["y_mech"].mean() > t1["y_mech"].mean()
+
+
+def test_supraoptimal_temperature_reduces_yield() -> None:
+    m = YieldSurrogateModel()
+    c1, s = _dummy_batch()
+    c2 = c1.clone()
+    c2[..., 0] = c1[..., 0] + 16  # supraoptimal / near-lethal heat
+    c2[..., 2] = c1[..., 2] + 16
+    _, t1 = m.forward_with_traces(c1, s)
+    _, t2 = m.forward_with_traces(c2, s)
+    assert t2["y_mech"].mean() < t1["y_mech"].mean()
+
+
+def test_drought_reduces_yield() -> None:
+    m = YieldSurrogateModel()
+    c1, s = _dummy_batch()
+    c2 = c1.clone()
+    c2[..., 3] = 0.0
+    _, t1 = m.forward_with_traces(c1, s)
+    _, t2 = m.forward_with_traces(c2, s)
+    assert t2["y_mech"].mean() < t1["y_mech"].mean()
+
+
+def test_pinn_loss_components_sum_correctly() -> None:
+    m = YieldSurrogateModel()
+    c, s = _dummy_batch()
+    y_true = torch.full((4,), 1.5)
+    loss_fn = CocoaPINNLoss(y_max=4.0)
+    y_pred, traces = m.forward_with_traces(c, s)
+    out = loss_fn(y_pred, y_true, traces, return_components=True)
+    assert out["loss"].item() >= out["mse"].item() - 1e-6
+    assert out["penalty_water"].item() >= 0
+
+
+def test_deep_ensemble_predict_returns_mean_and_std() -> None:
+    ens = DeepEnsemble(n_members=3)
+    c, s = _dummy_batch()
+    pred = ens.predict(c, s, num_mc_samples=5)
+    assert pred.mean.shape == (4,)
+    assert (pred.std > 0).all()
+
+
+# --- Validation / legacy PhysicsInformedYieldLoss ---
 
 
 def test_loss_no_penalty_when_below_ymax() -> None:
@@ -55,41 +234,3 @@ def test_invalid_static_features_raises() -> None:
     static = torch.randn(4, 5)
     with pytest.raises(ValueError, match="static_features"):
         model(climate, static)
-
-
-def test_mc_dropout_active_when_model_eval() -> None:
-    layer = MCDropout(p=0.5)
-    layer.eval()
-    x = torch.ones(100, 32)
-    torch.manual_seed(0)
-    out1 = layer(x)
-    torch.manual_seed(0)
-    out2 = layer(x)
-    assert not torch.allclose(out1, x)
-    assert torch.allclose(out1, out2)
-
-
-def test_predict_with_uncertainty_shapes() -> None:
-    model = YieldSurrogateModel(dropout=0.2)
-    climate = torch.randn(4, 365, 4)
-    static = torch.randn(4, 10)
-    result = predict_with_uncertainty(model, climate, static, num_samples=50)
-    assert result.mean.shape == (4,)
-    assert result.std.shape == (4,)
-
-
-def test_predict_with_uncertainty_nonzero_std() -> None:
-    model = YieldSurrogateModel(dropout=0.3)
-    climate = torch.randn(8, 365, 4)
-    static = torch.randn(8, 10)
-    result = predict_with_uncertainty(model, climate, static, num_samples=50)
-    assert (result.std > 0).all()
-
-
-def test_predict_with_uncertainty_single_sample() -> None:
-    model = YieldSurrogateModel()
-    climate = torch.randn(2, 365, 4)
-    static = torch.randn(2, 10)
-    result = predict_with_uncertainty(model, climate, static, num_samples=1)
-    assert result.std.shape == (2,)
-    assert torch.all(result.std == 0)
