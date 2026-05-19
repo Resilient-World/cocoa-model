@@ -20,3 +20,6 @@ pandas>=2.1
 fastapi>=0.110
 uvicorn[standard]>=0.27
 httpx>=0.27
+
+# Optional: local ERA5 GeoTIFF export (pip install geemap or pip install -e ".[gee]")
+# geemap>=0.30
