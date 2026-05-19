@@ -46,7 +46,7 @@ package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["data*", "models*", "api*", "training*"]
+include = ["data*", "models*", "api*", "training*", "analysis*"]
 
 [tool.ruff]
 line-length = 100
