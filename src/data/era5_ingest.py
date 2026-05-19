@@ -1,376 +1,364 @@
 """
-Ingest ERA5 daily climate data for Ghana and Côte d'Ivoire via Google Earth Engine.
+ERA5 / CHIRPS daily climate ingest via Google Earth Engine → lazy xarray → Zarr.
 
-Computes per-pixel heat-stress day counts (daily max 2 m temperature > 32 °C) and
-annual total precipitation for a given year, then exports a multi-band GeoTIFF.
+Server-side band algebra in Earth Engine; materialization uses the Xarray ``ee``
+backend (Xee). No raw NetCDF downloads.
 """
 
 from __future__ import annotations
 
-import argparse
-import sys
-import time
+import math
 from pathlib import Path
-from typing import Literal
 
 import ee
+import numpy as np
+import pandas as pd
+import xarray as xr
 
-from data.gee_auth import (
-    EarthEngineAuthError,
-    EarthEngineNotAuthenticatedError,
-    initialize_earth_engine,
+# Registers the ``ee`` Xarray backend (Xee).
+import xee  # noqa: F401
+
+from data.gee_auth import initialize_earth_engine
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+ERA5_LAND_DAILY = "ECMWF/ERA5_LAND/DAILY_AGGR"
+ERA5_DAILY = "ECMWF/ERA5/DAILY"
+CHIRPS_DAILY = "UCSB-CHG/CHIRPS/DAILY"
+
+KELVIN_OFFSET = 273.15
+
+# Magnus (Alduchov & Eskridge 1996) — saturation vapor pressure [kPa]
+MAGNUS_A = 0.61094
+MAGNUS_B = 17.625
+MAGNUS_C = 243.04
+
+# FAO-56 reference grass
+FAO_ALBEDO = 0.23
+FAO_RS = 70.0  # s/m
+FAO_GAMMA = 0.067  # kPa/°C (psychrometric constant, sea-level approx.)
+WIND10_TO_WIND2_FACTOR = 4.87 / np.log(67.8 * 10.0 - 5.42)
+
+# Root-zone depth weights (m) for ERA5-Land layers 1–3 (0–7, 7–28, 28–100 cm)
+SM_LAYER_DEPTHS = (0.07, 0.21, 0.72)
+
+DEFAULT_SCALE_M = 11_000  # ~0.1° ERA5-Land
+
+OUTPUT_VARS = (
+    "tmax",
+    "tmin",
+    "tmean",
+    "rh_mean",
+    "vpd_mean",
+    "precip",
+    "et0",
+    "cwd",
+    "cwd_cum",
+    "sm_root",
+    "wind10m",
+    "srad",
 )
 
-ERA5_DAILY_COLLECTION = "ECMWF/ERA5/DAILY"
-BAND_MAX_TEMP = "maximum_2m_air_temperature"
-BAND_PRECIP = "total_precipitation"
 
-# Ghana & Côte d'Ivoire — [west, south, east, north] in degrees
-GHANA_CI_BOUNDS: dict[str, float] = {
-    "west": -8.6,
-    "south": 4.0,
-    "east": 1.3,
-    "north": 11.2,
-}
-
-# Native ERA5 resolution (~0.25°)
-ERA5_SCALE_METERS = 27_830
-KELVIN_OFFSET = 273.15
-HEAT_STRESS_THRESHOLD_C = 32.0
-
-ExportDestination = Literal["drive", "local"]
+def _saturation_vapor_pressure_kpa(tmean_c: float) -> float:
+    """Magnus saturation vapor pressure (kPa) at ``tmean_c`` (°C)."""
+    return MAGNUS_A * math.exp(MAGNUS_B * tmean_c / (MAGNUS_C + tmean_c))
 
 
-class Era5ExportError(RuntimeError):
-    """Raised when an ERA5 export fails or cannot be started."""
+def _vpd_kpa(tmean_c: float, rh_pct: float) -> float:
+    """Vapor pressure deficit (kPa) from mean temperature and RH (%)."""
+    rh = max(0.0, min(100.0, rh_pct))
+    es = _saturation_vapor_pressure_kpa(tmean_c)
+    return es * (1.0 - rh / 100.0)
 
 
-def ghana_ci_geometry(
-    bounds: dict[str, float] | None = None,
-) -> ee.Geometry:
-    """Return an Earth Engine rectangle covering Ghana and Côte d'Ivoire."""
-    b = bounds or GHANA_CI_BOUNDS
-    return ee.Geometry.Rectangle([b["west"], b["south"], b["east"], b["north"]])
-
-
-def daily_max_temp_celsius(image: ee.Image) -> ee.Image:
-    """Convert daily maximum 2 m temperature from Kelvin to Celsius."""
-    return image.select(BAND_MAX_TEMP).subtract(KELVIN_OFFSET).rename("max_temp_c")
-
-
-def build_era5_daily_collection(
-    year: int,
-    roi: ee.Geometry | None = None,
-) -> ee.ImageCollection:
-    """
-    Filter ECMWF/ERA5/DAILY to a calendar year over the region of interest.
-
-    Bands retained: maximum_2m_air_temperature (K), total_precipitation (m).
-    """
-    region = roi or ghana_ci_geometry()
-    start = f"{year}-01-01"
-    end = f"{year + 1}-01-01"
-
+def _magnus_es_kpa(temp_c: ee.Image) -> ee.Image:
+    """Saturation vapor pressure (kPa) from temperature (°C)."""
     return (
-        ee.ImageCollection(ERA5_DAILY_COLLECTION)
-        .filterDate(start, end)
-        .filterBounds(region)
-        .select([BAND_MAX_TEMP, BAND_PRECIP])
+        ee.Image(MAGNUS_A)
+        .multiply(temp_c.multiply(MAGNUS_B).divide(temp_c.add(MAGNUS_C)).exp())
     )
 
 
-def compute_heat_stress_days(
-    collection: ee.ImageCollection,
-    threshold_c: float = HEAT_STRESS_THRESHOLD_C,
+def _kelvin_to_celsius(img: ee.Image, band: str, new_name: str) -> ee.Image:
+    return img.select(band).subtract(KELVIN_OFFSET).rename(new_name)
+
+
+def _fao_et0_daily(
+    tmean_c: ee.Image,
+    rh_pct: ee.Image,
+    wind10m: ee.Image,
+    srad_mj: ee.Image,
 ) -> ee.Image:
     """
-    Count days per pixel where daily maximum 2 m temperature exceeds threshold_c.
+    FAO-56 Penman–Monteith reference ET0 (mm/day), grass reference.
 
-    Returns an Int16 image named ``heat_stress_days``.
+    Rn ≈ (1 - albedo) * Rs with Rnl omitted (Rs-only simplification when only
+    downward solar is available). G = 0.
     """
-    threshold_k = threshold_c + KELVIN_OFFSET
+    es = _magnus_es_kpa(tmean_c)
+    ea = es.multiply(rh_pct.divide(100.0))
+    vpd = es.subtract(ea).max(0)
 
-    def _daily_stress(image: ee.Image) -> ee.Image:
-        exceeds = image.select(BAND_MAX_TEMP).gt(threshold_k)
-        return exceeds.rename("heat_stress").toUint8()
+    delta = (
+        es.multiply(MAGNUS_B)
+        .multiply(MAGNUS_C)
+        .divide(tmean_c.add(MAGNUS_C).pow(2))
+    )
 
-    return (
-        collection.map(_daily_stress)
-        .sum()
-        .rename("heat_stress_days")
-        .toInt16()
-        .set(
+    u2 = wind10m.multiply(WIND10_TO_WIND2_FACTOR)
+    rn = srad_mj.multiply(1.0 - FAO_ALBEDO)
+
+    t_k = tmean_c.add(KELVIN_OFFSET)
+    num_rad = delta.multiply(rn).multiply(0.408)
+    num_aero = (
+        ee.Image(FAO_GAMMA)
+        .multiply(ee.Image(900).divide(t_k))
+        .multiply(u2)
+        .multiply(vpd)
+    )
+    den = delta.add(ee.Image(FAO_GAMMA).multiply(ee.Image(1).add(u2.multiply(0.34))))
+
+    et0 = num_rad.add(num_aero).divide(den).max(0).rename("et0")
+    return et0
+
+
+def _build_daily_collection(
+    aoi: ee.Geometry,
+    start: str,
+    end: str,
+    *,
+    chirps_for_precip: bool,
+) -> ee.ImageCollection:
+    """Assemble a daily ImageCollection with all target bands (server-side)."""
+    era5_land = (
+        ee.ImageCollection(ERA5_LAND_DAILY)
+        .filterDate(start, end)
+        .filterBounds(aoi)
+        .select(
+            [
+                "temperature_2m",
+                "dewpoint_temperature_2m",
+                "u_component_of_wind_10m",
+                "v_component_of_wind_10m",
+                "surface_solar_radiation_downwards_sum",
+                "volumetric_soil_water_layer_1",
+                "volumetric_soil_water_layer_2",
+                "volumetric_soil_water_layer_3",
+                "total_precipitation_sum",
+            ]
+        )
+    )
+    era5_daily = (
+        ee.ImageCollection(ERA5_DAILY)
+        .filterDate(start, end)
+        .filterBounds(aoi)
+        .select(["maximum_2m_air_temperature", "minimum_2m_air_temperature"])
+    )
+    chirps = None
+    if chirps_for_precip:
+        chirps = (
+            ee.ImageCollection(CHIRPS_DAILY)
+            .filterDate(start, end)
+            .filterBounds(aoi)
+            .select(["precipitation"])
+        )
+
+    def _enrich(land_img: ee.Image) -> ee.Image:
+        millis = land_img.date().millis()
+        era5_img = era5_daily.filter(ee.Filter.eq("system:time_start", millis)).first()
+        tmax = _kelvin_to_celsius(era5_img, "maximum_2m_air_temperature", "tmax")
+        tmin = _kelvin_to_celsius(era5_img, "minimum_2m_air_temperature", "tmin")
+        tmean = _kelvin_to_celsius(land_img, "temperature_2m", "tmean")
+
+        t_dew = _kelvin_to_celsius(land_img, "dewpoint_temperature_2m", "t_dew")
+        es_mean = _magnus_es_kpa(tmean)
+        es_dew = _magnus_es_kpa(t_dew)
+        rh = es_dew.divide(es_mean).multiply(100).clamp(0, 100).rename("rh_mean")
+        vpd = es_mean.multiply(ee.Image(1).subtract(rh.divide(100))).rename("vpd_mean")
+
+        u = land_img.select("u_component_of_wind_10m")
+        v = land_img.select("v_component_of_wind_10m")
+        wind10m = u.hypot(v).rename("wind10m")
+
+        srad = (
+            land_img.select("surface_solar_radiation_downwards_sum")
+            .divide(1e6)
+            .rename("srad")
+        )
+
+        sw1 = land_img.select("volumetric_soil_water_layer_1")
+        sw2 = land_img.select("volumetric_soil_water_layer_2")
+        sw3 = land_img.select("volumetric_soil_water_layer_3")
+        sm_root = (
+            sw1.multiply(SM_LAYER_DEPTHS[0])
+            .add(sw2.multiply(SM_LAYER_DEPTHS[1]))
+            .add(sw3.multiply(SM_LAYER_DEPTHS[2]))
+            .divide(sum(SM_LAYER_DEPTHS))
+            .rename("sm_root")
+        )
+
+        era5_precip_mm = land_img.select("total_precipitation_sum").multiply(1000)
+        if chirps is not None:
+            chirps_img = chirps.filter(ee.Filter.eq("system:time_start", millis)).first()
+            chirps_mm = chirps_img.select("precipitation")
+            precip = chirps_mm.unmask(era5_precip_mm).rename("precip")
+        else:
+            precip = era5_precip_mm.rename("precip")
+
+        et0 = _fao_et0_daily(tmean, rh, wind10m, srad)
+        cwd = et0.subtract(precip).rename("cwd")
+
+        daily = ee.Image.cat(
+            [tmax, tmin, tmean, rh, vpd, precip, et0, cwd, sm_root, wind10m, srad]
+        ).copyProperties(land_img, ["system:time_start"])
+
+        return daily.clip(aoi)
+
+    return era5_land.map(_enrich)
+
+
+class ERA5Ingest:
+    """
+    Ingest daily agrometeorology for an AOI and date range via Earth Engine + Xee.
+
+    Results are lazy until computed; use :meth:`to_zarr` for chunked persistence.
+    """
+
+    def __init__(
+        self,
+        aoi: ee.Geometry,
+        start: str,
+        end: str,
+        *,
+        chirps_for_precip: bool = True,
+        chunks: dict[str, int] | None = None,
+        scale: int = DEFAULT_SCALE_M,
+        project: str | None = None,
+    ) -> None:
+        self.aoi = aoi
+        self.start = start
+        self.end = end
+        self.chirps_for_precip = chirps_for_precip
+        self.chunks = chunks or {"time": 30, "latitude": 256, "longitude": 256}
+        self.scale = scale
+        self.project = project
+        self._dataset: xr.Dataset | None = None
+
+    def build(self) -> xr.Dataset:
+        """Open a lazy daily ``xarray.Dataset`` backed by Earth Engine."""
+        initialize_earth_engine(project=self.project)
+
+        ic = _build_daily_collection(
+            self.aoi,
+            self.start,
+            self.end,
+            chirps_for_precip=self.chirps_for_precip,
+        )
+
+        ds = xr.open_dataset(
+            ic,
+            engine="ee",
+            geometry=self.aoi,
+            scale=self.scale,
+            chunks=self.chunks,
+        )
+
+        # Standardize dimension names and variable set
+        rename_map: dict[str, str] = {}
+        if "lat" in ds.dims:
+            rename_map["lat"] = "latitude"
+        if "lon" in ds.dims:
+            rename_map["lon"] = "longitude"
+        if rename_map:
+            ds = ds.rename(rename_map)
+
+        keep = [v for v in OUTPUT_VARS if v != "cwd_cum" and v in ds.data_vars]
+        ds = ds[keep]
+
+        ds["cwd_cum"] = ds["cwd"].cumsum(dim="time")
+
+        ds.attrs.update(
             {
-                "heat_stress_threshold_c": threshold_c,
-                "description": f"Days with daily max 2m temperature > {threshold_c} °C",
+                "source": "Google Earth Engine",
+                "era5_land_collection": ERA5_LAND_DAILY,
+                "era5_collection": ERA5_DAILY,
+                "chirps_collection": CHIRPS_DAILY if self.chirps_for_precip else "disabled",
+                "start_date": self.start,
+                "end_date": self.end,
+                "magnus": "Alduchov & Eskridge 1996",
+                "et0_method": "FAO-56 Penman-Monteith (grass reference)",
             }
         )
-    )
+
+        self._dataset = ds
+        return ds
+
+    def to_zarr(self, path: str, mode: str = "w") -> None:
+        """Materialize :meth:`build` output to a chunked Zarr store."""
+        ds = self._dataset if self._dataset is not None else self.build()
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        ds.to_zarr(str(out), mode=mode)
 
 
-def compute_annual_precipitation(collection: ee.ImageCollection) -> ee.Image:
-    """Sum daily total precipitation (m) over the collection period."""
-    return (
-        collection.select(BAND_PRECIP)
-        .sum()
-        .rename("annual_precipitation_m")
-        .set(
-            {
-                "units": "m",
-                "description": "Annual sum of ERA5 daily total precipitation",
-            }
+def compute_derived_features(ds: xr.Dataset) -> xr.Dataset:
+    """
+    Add cocoa-oriented derived features on a daily climate dataset.
+
+    Features
+    --------
+    gdd_cocoa:
+        Growing degree-days (base 18 °C, cap 32 °C; Schwendenmann et al.).
+    heat_days_above_32c:
+        Binary indicator ``tmax > 32 °C``.
+    dry_spell_max:
+        Longest run of consecutive days with ``precip < 1`` mm.
+    rolling means:
+        30- and 90-day rolling means of ``vpd_mean``, ``cwd``, ``sm_root``.
+    """
+    out = ds.copy()
+
+    tmax = out["tmax"]
+    tmean = out["tmean"]
+    precip = out["precip"]
+
+    out["gdd_cocoa"] = (tmean.clip(min=18, max=32) - 18).clip(min=0)
+
+    out["heat_days_above_32c"] = (tmax > 32.0).astype(np.int8)
+
+    def _max_dry_spell(p: np.ndarray) -> float:
+        mask = p < 1.0
+        if not mask.any():
+            return 0.0
+        max_run = cur = 0
+        for val in mask:
+            if val:
+                cur += 1
+                max_run = max(max_run, cur)
+            else:
+                cur = 0
+        return float(max_run)
+
+    precip_np = precip.values
+    if precip_np.ndim == 3:
+        spell = xr.apply_ufunc(
+            _max_dry_spell,
+            precip,
+            input_core_dims=[["time"]],
+            vectorize=True,
+            dask="parallelized",
+            output_dtypes=[np.float64],
         )
-    )
+        out["dry_spell_max"] = spell
+    else:
+        out["dry_spell_max"] = xr.DataArray(_max_dry_spell(precip_np.ravel()))
 
+    for window in (30, 90):
+        out[f"vpd_mean_{window}d"] = out["vpd_mean"].rolling(time=window, min_periods=1).mean()
+        out[f"cwd_{window}d"] = out["cwd"].rolling(time=window, min_periods=1).mean()
+        out[f"sm_root_{window}d"] = out["sm_root"].rolling(time=window, min_periods=1).mean()
 
-def build_era5_summary_image(
-    year: int,
-    roi: ee.Geometry | None = None,
-    *,
-    heat_stress_threshold_c: float = HEAT_STRESS_THRESHOLD_C,
-) -> tuple[ee.Image, ee.ImageCollection]:
-    """
-    Build a multi-band summary image for the given year.
-
-    Bands
-    -----
-    heat_stress_days : int16
-        Count of days with daily max temperature above threshold.
-    annual_precipitation_m : float
-        Sum of daily precipitation (meters).
-    """
-    region = roi or ghana_ci_geometry()
-    collection = build_era5_daily_collection(year, region)
-    heat_stress = compute_heat_stress_days(collection, heat_stress_threshold_c)
-    annual_precip = compute_annual_precipitation(collection)
-
-    summary = heat_stress.addBands(annual_precip).clip(region)
-    summary = summary.set(
-        {
-            "year": year,
-            "region": "Ghana and Cote d'Ivoire",
-            "source": ERA5_DAILY_COLLECTION,
-        }
-    )
-    return summary, collection
-
-
-def export_to_google_drive(
-    image: ee.Image,
-    *,
-    description: str,
-    folder: str,
-    region: ee.Geometry,
-    scale: int = ERA5_SCALE_METERS,
-    max_pixels: int = 10**13,
-    wait: bool = True,
-    poll_interval_s: int = 30,
-) -> ee.batch.Task:
-    """
-    Start an Earth Engine export task to Google Drive as GeoTIFF.
-
-    Returns the Task object; optionally blocks until completion when wait=True.
-    """
-    task = ee.batch.Export.image.toDrive(
-        image=image,
-        description=description,
-        folder=folder,
-        region=region,
-        scale=scale,
-        maxPixels=max_pixels,
-        fileFormat="GeoTIFF",
-        formatOptions={"cloudOptimized": True},
-    )
-    task.start()
-
-    if wait:
-        _wait_for_task(task, poll_interval_s=poll_interval_s)
-
-    return task
-
-
-def export_local_geotiff(
-    image: ee.Image,
-    output_path: str | Path,
-    *,
-    region: ee.Geometry,
-    scale: int = ERA5_SCALE_METERS,
-    max_pixels: int = 10**13,
-) -> Path:
-    """
-    Download a GeoTIFF locally.
-
-    Uses geemap when installed; otherwise falls back to ``getDownloadURL``.
-    """
-    path = Path(output_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    try:
-        import geemap
-
-        geemap.ee_export_image(
-            image,
-            filename=str(path),
-            scale=scale,
-            region=region,
-            file_per_band=False,
-        )
-        return path
-    except ImportError:
-        pass
-
-    params = {
-        "image": image,
-        "region": region,
-        "scale": scale,
-        "maxPixels": max_pixels,
-        "format": "GEO_TIFF",
-        "filePerBand": False,
-    }
-    try:
-        url = image.getDownloadURL(params)
-    except ee.EEException as exc:
-        raise Era5ExportError(
-            "Local download failed. The region may exceed EE download limits. "
-            "Install geemap (`pip install geemap`) or use --export drive.\n"
-            f"Original error: {exc}"
-        ) from exc
-
-    import urllib.request
-
-    print(f"Downloading GeoTIFF to {path} ...")
-    urllib.request.urlretrieve(url, path)
-    return path
-
-
-def _wait_for_task(task: ee.batch.Task, poll_interval_s: int = 30) -> None:
-    """Poll an EE batch task until it completes or fails."""
-    print(f"Task {task.id} started — waiting for completion ...")
-    while True:
-        status = task.status()
-        state = status.get("state")
-        if state == "COMPLETED":
-            print(f"Task {task.id} completed.")
-            if "destination_uris" in status:
-                print(f"  Output: {status['destination_uris']}")
-            return
-        if state == "FAILED":
-            raise Era5ExportError(
-                f"Earth Engine export failed: {status.get('error_message', status)}"
-            )
-        if state == "CANCELLED":
-            raise Era5ExportError(f"Earth Engine export cancelled: {task.id}")
-        print(f"  Status: {state} — checking again in {poll_interval_s}s")
-        time.sleep(poll_interval_s)
-
-
-def run_era5_export(
-    year: int = 2024,
-    *,
-    export: ExportDestination = "drive",
-    output_path: str | Path | None = None,
-    drive_folder: str = "resilient_cocoa_model",
-    drive_description: str | None = None,
-    wait: bool = True,
-    project: str | None = None,
-) -> ee.batch.Task | Path:
-    """
-    End-to-end ERA5 ingest: initialize EE, compute summaries, export.
-
-    Parameters
-    ----------
-    export:
-        ``drive`` exports to Google Drive; ``local`` writes a GeoTIFF under output_path.
-    output_path:
-        Required for local export (default: data/processed/era5_ghana_ci_{year}.tif).
-    """
-    initialize_earth_engine(project=project)
-    roi = ghana_ci_geometry()
-    summary, _ = build_era5_summary_image(year, roi)
-
-    description = drive_description or f"era5_ghana_ci_{year}"
-
-    if export == "drive":
-        print(
-            f"Exporting ERA5 summary ({year}) to Google Drive folder '{drive_folder}' "
-            f"as '{description}' ..."
-        )
-        return export_to_google_drive(
-            summary,
-            description=description,
-            folder=drive_folder,
-            region=roi,
-            wait=wait,
-        )
-
-    dest = output_path or Path("data/processed") / f"era5_ghana_ci_{year}.tif"
-    print(f"Exporting ERA5 summary ({year}) locally to {dest} ...")
-    return export_local_geotiff(summary, dest, region=roi)
-
-
-def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Extract ERA5 daily climate data for Ghana & Côte d'Ivoire and compute "
-            "heat-stress days (max 2 m temperature > 32 °C) for a given year."
-        )
-    )
-    parser.add_argument("--year", type=int, default=2024, help="Calendar year (default: 2024)")
-    parser.add_argument(
-        "--export",
-        choices=("drive", "local"),
-        default="drive",
-        help="Export destination (default: drive)",
-    )
-    parser.add_argument(
-        "--output",
-        type=Path,
-        default=None,
-        help="Local GeoTIFF path when --export local",
-    )
-    parser.add_argument(
-        "--drive-folder",
-        default="resilient_cocoa_model",
-        help="Google Drive folder for Drive export",
-    )
-    parser.add_argument(
-        "--no-wait",
-        action="store_true",
-        help="Start Drive export and return without waiting for completion",
-    )
-    parser.add_argument(
-        "--project",
-        default=None,
-        help="GCP project ID (overrides EARTHENGINE_PROJECT)",
-    )
-    return parser.parse_args(argv)
-
-
-def main(argv: list[str] | None = None) -> int:
-    args = _parse_args(argv)
-    try:
-        result = run_era5_export(
-            year=args.year,
-            export=args.export,
-            output_path=args.output,
-            drive_folder=args.drive_folder,
-            wait=not args.no_wait,
-            project=args.project,
-        )
-    except EarthEngineNotAuthenticatedError as exc:
-        print(exc, file=sys.stderr)
-        return 1
-    except (EarthEngineAuthError, Era5ExportError) as exc:
-        print(exc, file=sys.stderr)
-        return 2
-
-    if args.export == "drive" and isinstance(result, ee.batch.Task):
-        print(f"Drive export task id: {result.id}")
-    elif args.export == "local":
-        print(f"Saved local GeoTIFF: {result}")
-
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    return out
