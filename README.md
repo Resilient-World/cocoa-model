@@ -72,6 +72,31 @@ git add data/raw/your_dataset.tif.dvc .gitignore
 git commit -m "Track dataset with DVC"
 ```
 
+## API (intervention simulation)
+
+After `pip install -e ".[dev]"`, run the Avoided Loss simulation service:
+
+```bash
+source .venv/bin/activate
+uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+`GET /health` — liveness check.
+
+`POST /simulate-intervention` — mock climate/soil for a lat/lon, run yield surrogate inference (counterfactual vs factual), return baseline/projected yield, avoided loss (tonnes), financial impact (USD), and a 90% confidence interval. Example body:
+
+```json
+{
+  "farm_location": { "lat": 6.5, "lon": -1.2 },
+  "farm_size_ha": 5.0,
+  "current_yield": 2.0,
+  "intervention_type": "shade_trees",
+  "cocoa_price_usd": 3200.0
+}
+```
+
+Optional env vars (see `.env.example`): `MODEL_CHECKPOINT_PATH`, `MC_NUM_SAMPLES`, `YIELD_BLEND_WEIGHT`.
+
 ## Environment
 
 Copy `.env.example` to `.env` and set credentials (Earth Engine, cloud storage, MLflow URI). Never commit `.env`.
