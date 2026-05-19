@@ -64,6 +64,12 @@ attrici = [
     "xarray>=2024.1",
     "zarr>=2.17",
 ]
+# Fields of The World parcel delineation (subprocess CLI boundary)
+ftw = [
+    "ftw-tools>=2.0.0b5",
+    "rasterstats>=0.20",
+    "geopandas>=0.14",
+]
 
 # Optional (Callaway-Sant'Anna upgrade — not pinned yet):
 # differences>=0.2.0
