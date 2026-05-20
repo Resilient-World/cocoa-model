@@ -37,10 +37,7 @@ CLIMATE_CHANNEL_NAMES: tuple[str, ...] = (
 N_CLIMATE_CHANNELS = len(CLIMATE_CHANNEL_NAMES)
 CLIMATE_IDX = {name: i for i, name in enumerate(CLIMATE_CHANNEL_NAMES)}
 
-# Static feature registry (legacy default 10, index 0 = AWC mm).
-#
-# This is a naming layer only: the model remains checkpoint-compatible because the
-# default layout and width stay the same unless `static_feature_names` is provided.
+# Static feature registry (default 13 site features; index 0 = AWC mm).
 STATIC_FEATURE_NAMES: tuple[str, ...] = (
     "awc_mm",
     "sand_frac",
@@ -52,7 +49,61 @@ STATIC_FEATURE_NAMES: tuple[str, ...] = (
     "ph_norm",
     "treecover_norm",
     "cocoa_prob",
+    "tree_age_years_norm",
+    "cohort_phase",
+    "planting_density_norm",
 )
+
+N_STATIC_SITE = len(STATIC_FEATURE_NAMES)
+STATIC_IDX = {name: i for i, name in enumerate(STATIC_FEATURE_NAMES)}
+
+# Phenology cohort multipliers (applied as mechanistic f_age).
+COHORT_JUVENILE = 0.0  # < 5 y
+COHORT_RAMP = 0.5  # 5–10 y
+COHORT_PEAK = 1.0  # 10–25 y
+COHORT_SENESCENT = 0.6  # > 25 y
+
+DEFAULT_TREE_AGE_YEARS = 12.0
+DEFAULT_PLANTING_DENSITY = 1100.0
+MAX_TREE_AGE_NORM_YEARS = 40.0
+MAX_PLANTING_DENSITY = 1500.0
+
+
+def cohort_phase_from_age(age_years: float) -> float:
+    """Map tree age (years) to cohort phase multiplier for mechanistic f_age."""
+    age = float(age_years)
+    if age < 5.0:
+        return COHORT_JUVENILE
+    if age < 10.0:
+        return COHORT_RAMP
+    if age <= 25.0:
+        return COHORT_PEAK
+    return COHORT_SENESCENT
+
+
+def tree_age_years_norm(age_years: float, *, max_age: float = MAX_TREE_AGE_NORM_YEARS) -> float:
+    return float(min(max(float(age_years) / max_age, 0.0), 1.0))
+
+
+def planting_density_norm(
+    density_trees_ha: float,
+    *,
+    max_density: float = MAX_PLANTING_DENSITY,
+) -> float:
+    return float(min(max(float(density_trees_ha) / max_density, 0.0), 1.0))
+
+
+def pack_tree_age_static(
+    age_years: float,
+    *,
+    planting_density_trees_ha: float = DEFAULT_PLANTING_DENSITY,
+) -> tuple[float, float, float]:
+    """Return ``(tree_age_years_norm, cohort_phase, planting_density_norm)``."""
+    return (
+        tree_age_years_norm(age_years),
+        cohort_phase_from_age(age_years),
+        planting_density_norm(planting_density_trees_ha),
+    )
 
 # Legacy 4-channel order (geo_mock / early API): tmax, tmin, precip, srad
 _LEGACY_4_NAMES: tuple[str, ...] = ("tmax", "tmin", "precip", "srad")
@@ -197,7 +248,18 @@ class MechanisticCore(nn.Module):
         sw = torch.zeros(batch, device=device, dtype=dtype)
         sw_trace = torch.zeros(batch, time_steps, device=device, dtype=dtype)
         biomass_trace = torch.zeros(batch, time_steps, device=device, dtype=dtype)
-        stress_trace = torch.zeros(batch, time_steps, 4, device=device, dtype=dtype)
+        stress_trace = torch.zeros(batch, time_steps, 5, device=device, dtype=dtype)
+
+        cohort_idx = STATIC_IDX["cohort_phase"]
+        if static.shape[1] > cohort_idx:
+            f_age = static[:, cohort_idx].clamp(0.0, 1.0)
+        else:
+            f_age = torch.full(
+                (batch,),
+                cohort_phase_from_age(DEFAULT_TREE_AGE_YEARS),
+                device=device,
+                dtype=dtype,
+            )
 
         rue = self.rue.clamp(min=0.1)
         hi = self.harvest_index.clamp(0.01, 0.5)
@@ -214,8 +276,9 @@ class MechanisticCore(nn.Module):
             stress_trace[:, t, 1] = f_vpd
             stress_trace[:, t, 2] = f_temp
             stress_trace[:, t, 3] = f_co2
+            stress_trace[:, t, 4] = f_age
 
-            d_b = rue * srad[:, t] * f_w * f_vpd * f_temp * f_co2
+            d_b = rue * srad[:, t] * f_w * f_vpd * f_temp * f_co2 * f_age
             biomass_cum = biomass_cum + d_b
             biomass_trace[:, t] = biomass_cum
 
@@ -244,11 +307,10 @@ class YieldSurrogateModel(nn.Module):
         Input channels per day. Default 11 (:data:`CLIMATE_CHANNEL_NAMES`). Legacy ``4``
         pads missing channels with zeros (deprecation warning).
     static_features:
-        Site covariates (default 10); index 0 = AWC (mm) for the mechanistic soil bucket.
+        Site covariates (default 13); index 0 = AWC (mm) for the mechanistic soil bucket.
     galileo_dim:
         Optional Galileo embedding width appended to site static features
-        (total input width = ``static_features + galileo_dim``). ``0`` preserves
-        the legacy 10-dimensional static vector.
+        (total input width = ``static_features + galileo_dim``).
     static_hidden, head_hidden, dropout:
         MLP / residual head hyperparameters.
     gru_hidden, gru_layers, attn_heads:
@@ -261,7 +323,7 @@ class YieldSurrogateModel(nn.Module):
         self,
         sequence_length: int = 365,
         climate_features: int = N_CLIMATE_CHANNELS,
-        static_features: int = 10,
+        static_features: int = N_STATIC_SITE,
         static_feature_names: tuple[str, ...] | None = None,
         galileo_dim: int = 0,
         static_hidden: int = 64,
@@ -317,7 +379,7 @@ class YieldSurrogateModel(nn.Module):
             MCDropout(dropout),
         )
 
-        stress_summary_dim = 4
+        stress_summary_dim = 5
         fusion_in = gru_out_dim + static_hidden + stress_summary_dim
         self.residual_head = nn.Sequential(
             nn.Linear(fusion_in, head_hidden),

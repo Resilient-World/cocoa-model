@@ -316,9 +316,9 @@ def climate_attributable_loss(
         raise ValueError(f"farm_coords missing columns: {sorted(missing)}")
 
     n_rows = len(farm_coords)
-    if static_features.shape != (n_rows, 10):
+    if static_features.shape != (n_rows, 13):
         raise ValueError(
-            f"static_features must be shape ({n_rows}, 10), got {static_features.shape}"
+            f"static_features must be shape ({n_rows}, 13), got {static_features.shape}"
         )
 
     records: list[dict[str, Any]] = []

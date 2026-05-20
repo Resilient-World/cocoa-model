@@ -152,7 +152,7 @@ def test_attribution_gap_zero_when_identical_climate() -> None:
             "year": [2020],
         }
     )
-    static_features = np.zeros((1, 10), dtype=np.float32)
+    static_features = np.zeros((1, 13), dtype=np.float32)
     model = StubYieldModel(a_tmax=0.2, b_precip=0.001)
 
     df = climate_attributable_loss(
@@ -179,7 +179,7 @@ def test_climate_attributable_loss_positive_when_factual_warmer() -> None:
             "year": [2020, 2020],
         }
     )
-    static_features = np.zeros((2, 10), dtype=np.float32)
+    static_features = np.zeros((2, 13), dtype=np.float32)
     static_features[:, 0] = 150.0
 
     model = StubYieldModel(a_tmax=0.2, b_precip=0.0)

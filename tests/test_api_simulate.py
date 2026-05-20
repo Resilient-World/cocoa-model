@@ -18,7 +18,7 @@ VALID_PAYLOAD = {
     "cocoa_price_usd": 3200.0,
 }
 
-SITE_STATIC_DIM = 10
+SITE_STATIC_DIM = 13
 SEQUENCE_LENGTH = 365
 
 
@@ -103,6 +103,7 @@ def test_shade_trees_intervention_response_schema(client: TestClient) -> None:
         "financial_impact_usd",
         "confidence_interval",
         "conformal_interval",
+        "biotic_loss_attribution",
     }
 
 
@@ -135,7 +136,7 @@ def test_simulate_with_overridden_model(client: TestClient) -> None:
     app.state.yield_model = YieldSurrogateModel(
         sequence_length=365,
         climate_features=11,
-        static_features=10,
+        static_features=13,
         galileo_dim=0,
     )
     response = client.post("/simulate-intervention", json=VALID_PAYLOAD)
@@ -144,11 +145,11 @@ def test_simulate_with_overridden_model(client: TestClient) -> None:
 
 
 def test_yield_surrogate_galileo_dim_backward_compat() -> None:
-    model = YieldSurrogateModel(static_features=10, galileo_dim=0)
-    assert model.static_features == 10
-    model_g = YieldSurrogateModel(static_features=10, galileo_dim=32)
-    assert model_g.static_features == 42
+    model = YieldSurrogateModel(static_features=13, galileo_dim=0)
+    assert model.static_features == 13
+    model_g = YieldSurrogateModel(static_features=13, galileo_dim=32)
+    assert model_g.static_features == 45
     climate = torch.randn(2, 365, 11)
-    static = torch.randn(2, 42)
+    static = torch.randn(2, 45)
     out = model_g(climate, static)
     assert out.shape == (2,)

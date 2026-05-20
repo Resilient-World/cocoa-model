@@ -8,17 +8,27 @@ import pytest
 import torch
 import torch.nn.functional as F
 
+from models.checkpoint_migration import is_v1_static_checkpoint, migrate_v1_static_to_v2
 from models.yield_surrogate import (
     CocoaPINNLoss,
     DeepEnsemble,
     MCDropout,
+    N_STATIC_SITE,
     PhysicsInformedYieldLoss,
+    STATIC_FEATURE_NAMES,
     YieldSurrogateModel,
+    cohort_phase_from_age,
+    pack_tree_age_static,
     predict_with_uncertainty,
 )
 
 
-def _dummy_batch(B: int = 4, T: int = 365, C: int = 11, S: int = 10) -> tuple[torch.Tensor, torch.Tensor]:
+def _dummy_batch(
+    B: int = 4,
+    T: int = 365,
+    C: int = 11,
+    S: int = N_STATIC_SITE,
+) -> tuple[torch.Tensor, torch.Tensor]:
     climate = torch.randn(B, T, C) * 0.1
     climate[..., 0] = 30 + torch.randn(B, T) * 2  # tmax
     climate[..., 1] = 22 + torch.randn(B, T) * 1  # tmin
@@ -50,7 +60,7 @@ def test_forward_output_shape_legacy_batch() -> None:
     """Original: batch 8 with legacy 4-channel climate."""
     model = YieldSurrogateModel()
     climate = torch.randn(8, 365, 4)
-    static = torch.randn(8, 10)
+    static = torch.randn(8, N_STATIC_SITE)
     static[:, 0] = 150.0
     pred = model(climate, static)
     assert pred.shape == (8,)
@@ -59,7 +69,7 @@ def test_forward_output_shape_legacy_batch() -> None:
 def test_legacy_4channel_still_works_with_warning() -> None:
     m = YieldSurrogateModel()
     c = torch.randn(2, 365, 4)
-    s = torch.randn(2, 10)
+    s = torch.randn(2, N_STATIC_SITE)
     s[:, 0] = 150.0
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
@@ -78,7 +88,7 @@ def test_mc_dropout_uncertainty_nontrivial() -> None:
 def test_predict_with_uncertainty_shapes() -> None:
     model = YieldSurrogateModel(dropout=0.2)
     climate = torch.randn(4, 365, 4)
-    static = torch.randn(4, 10)
+    static = torch.randn(4, N_STATIC_SITE)
     static[:, 0] = 150.0
     result = predict_with_uncertainty(model, climate, static, num_samples=50)
     assert result.mean.shape == (4,)
@@ -88,7 +98,7 @@ def test_predict_with_uncertainty_shapes() -> None:
 def test_predict_with_uncertainty_nonzero_std() -> None:
     model = YieldSurrogateModel(dropout=0.3)
     climate = torch.randn(8, 365, 4)
-    static = torch.randn(8, 10)
+    static = torch.randn(8, N_STATIC_SITE)
     static[:, 0] = 150.0
     result = predict_with_uncertainty(model, climate, static, num_samples=50)
     assert (result.std > 0).all()
@@ -97,7 +107,7 @@ def test_predict_with_uncertainty_nonzero_std() -> None:
 def test_predict_with_uncertainty_single_sample() -> None:
     model = YieldSurrogateModel()
     climate = torch.randn(2, 365, 4)
-    static = torch.randn(2, 10)
+    static = torch.randn(2, N_STATIC_SITE)
     static[:, 0] = 150.0
     result = predict_with_uncertainty(model, climate, static, num_samples=1)
     assert result.std.shape == (2,)
@@ -223,14 +233,62 @@ def test_loss_penalty_when_above_ymax() -> None:
 def test_invalid_climate_shape_raises() -> None:
     model = YieldSurrogateModel(sequence_length=365, climate_features=4)
     climate = torch.randn(4, 100, 4)
-    static = torch.randn(4, 10)
+    static = torch.randn(4, N_STATIC_SITE)
     with pytest.raises(ValueError, match="sequence_length"):
         model(climate, static)
 
 
 def test_invalid_static_features_raises() -> None:
-    model = YieldSurrogateModel(static_features=10)
+    model = YieldSurrogateModel(static_features=N_STATIC_SITE)
     climate = torch.randn(4, 365, 4)
     static = torch.randn(4, 5)
     with pytest.raises(ValueError, match="static_features"):
         model(climate, static)
+
+
+def test_static_feature_count_is_13() -> None:
+    assert len(STATIC_FEATURE_NAMES) == 13
+    assert YieldSurrogateModel().site_static_features == 13
+
+
+def test_age_curve_peaks_at_12y() -> None:
+    assert cohort_phase_from_age(12.0) == pytest.approx(1.0)
+    assert cohort_phase_from_age(3.0) == pytest.approx(0.0)
+    assert cohort_phase_from_age(7.0) == pytest.approx(0.5)
+    assert cohort_phase_from_age(30.0) == pytest.approx(0.6)
+
+
+def _static_with_tree_age(age_years: float) -> tuple[torch.Tensor, torch.Tensor]:
+    climate = torch.randn(1, 365, 11)
+    climate[..., 2] = 26.0
+    climate[..., 4] = 15.0
+    static = torch.zeros(1, N_STATIC_SITE)
+    static[:, 0] = 150.0
+    age_norm, cohort, dens = pack_tree_age_static(age_years)
+    static[:, 10] = age_norm
+    static[:, 11] = cohort
+    static[:, 12] = dens
+    return climate, static
+
+
+def test_senescent_farm_yields_60pct_of_peak() -> None:
+    model = YieldSurrogateModel()
+    climate, s_peak = _static_with_tree_age(12.0)
+    _, s_sen = _static_with_tree_age(30.0)
+    traces_peak = model.mechanistic(climate, s_peak)
+    traces_sen = model.mechanistic(climate, s_sen)
+    ratio = traces_sen["y_mech"] / traces_peak["y_mech"]
+    assert float(ratio.item()) == pytest.approx(0.6, rel=0.02)
+
+
+def test_legacy_10dim_checkpoint_loads_via_migration() -> None:
+    old_names = STATIC_FEATURE_NAMES[:10]
+    model_v1 = YieldSurrogateModel(static_features=10, static_feature_names=old_names)
+    state = model_v1.state_dict()
+    assert is_v1_static_checkpoint(state)
+    state_v2 = migrate_v1_static_to_v2(state)
+    model_v2 = YieldSurrogateModel()
+    model_v2.load_state_dict(state_v2, strict=False)
+    climate, static = _static_with_tree_age(12.0)
+    pred = model_v2(climate, static)
+    assert pred.shape == (1,)
