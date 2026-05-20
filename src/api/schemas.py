@@ -24,6 +24,35 @@ class FarmLocation(BaseModel):
     lon: float = Field(..., ge=-180.0, le=180.0, description="Longitude in decimal degrees")
 
 
+FinancialCurrency = Literal["USD", "GHS", "XOF", "EUR"]
+PricingBasis = Literal["spot", "12m_forward", "trailing_3y_avg"]
+
+
+class CurrencyFinancialBand(BaseModel):
+    """Avoided-loss value in one currency with interval bounds."""
+
+    point: float = Field(..., ge=0.0)
+    ci_low: float = Field(..., ge=0.0)
+    ci_high: float = Field(..., ge=0.0)
+    currency: FinancialCurrency
+    price_usd_per_tonne: float = Field(
+        ...,
+        ge=0.0,
+        description="Effective cocoa price (USD/tonne) used for conversion",
+    )
+    pricing_basis: PricingBasis = "spot"
+    farm_gate: bool = True
+
+
+class FinancialImpactResponse(BaseModel):
+    """Tri-currency financial impact (USD, GHS, XOF) plus primary reporting currency."""
+
+    primary: CurrencyFinancialBand
+    usd: CurrencyFinancialBand
+    ghs: CurrencyFinancialBand
+    xof: CurrencyFinancialBand
+
+
 class SimulateInterventionRequest(BaseModel):
     """Request body for POST /simulate-intervention."""
 
@@ -35,10 +64,26 @@ class SimulateInterventionRequest(BaseModel):
         description="Observed current yield in tonnes per hectare",
     )
     intervention_type: InterventionType
-    cocoa_price_usd: float = Field(
-        ...,
+    cocoa_price_usd: float | None = Field(
+        default=None,
         ge=0.0,
-        description="Market cocoa price in USD per tonne",
+        description="Optional flat USD/tonne override; omit to use ICCO + farm-gate model",
+    )
+    currency: FinancialCurrency = Field(
+        default="USD",
+        description="Primary reporting currency for financial_impact.primary",
+    )
+    pricing_basis: PricingBasis = Field(
+        default="spot",
+        description="spot | 12m_forward (ICE curve) | trailing_3y_avg",
+    )
+    farm_gate: bool = Field(
+        default=True,
+        description="Apply country farm-gate pass-through to ICCO NY",
+    )
+    country_code: Literal["GHA", "CIV", "CMR"] | None = Field(
+        default=None,
+        description="Producer country for pass-through; inferred from coordinates if omitted",
     )
 
     # Optional cooperative-level mode: request recommendations for many farms at once.
@@ -137,11 +182,15 @@ class SimulateScenarioRequest(BaseModel):
         description="Observed current yield in tonnes per hectare",
     )
     intervention_type: InterventionType
-    cocoa_price_usd: float = Field(
-        ...,
+    cocoa_price_usd: float | None = Field(
+        default=None,
         ge=0.0,
-        description="Market cocoa price in USD per tonne",
+        description="Optional flat USD/tonne override; omit to use ICCO + farm-gate model",
     )
+    currency: FinancialCurrency = Field(default="USD")
+    pricing_basis: PricingBasis = Field(default="spot")
+    farm_gate: bool = Field(default=True)
+    country_code: Literal["GHA", "CIV", "CMR"] | None = None
     scenario: ScenarioSSP = Field(
         ...,
         description="CMIP6 SSP label passed through ScenarioBuilder",
@@ -189,7 +238,11 @@ class SimulateScenarioResponse(BaseModel):
     financial_impact_usd_mean: float = Field(
         ...,
         ge=0.0,
-        description="USD value using mean avoided tonnes × cocoa_price_usd",
+        description="USD point estimate (equals financial_impact.usd.point)",
+    )
+    financial_impact: FinancialImpactResponse = Field(
+        ...,
+        description="Avoided-loss valuation in USD, GHS, and XOF",
     )
 
 
@@ -228,7 +281,11 @@ class SimulateInterventionResponse(BaseModel):
     financial_impact_usd: float = Field(
         ...,
         ge=0.0,
-        description="Monetary value of avoided loss (USD)",
+        description="USD point estimate (equals financial_impact.usd.point)",
+    )
+    financial_impact: FinancialImpactResponse = Field(
+        ...,
+        description="Avoided-loss valuation in USD, GHS, and XOF",
     )
     confidence_interval: ConfidenceInterval
     conformal_interval: ConformalConfidenceInterval | None = Field(

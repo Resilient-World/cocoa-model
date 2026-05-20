@@ -87,7 +87,13 @@ def test_simulate_intervention_happy_path(client: TestClient) -> None:
         max(0.0, projected - baseline) * VALID_PAYLOAD["farm_size_ha"],
         rel=1e-5,
     )
-    assert financial == pytest.approx(avoided * VALID_PAYLOAD["cocoa_price_usd"], rel=1e-5)
+    assert financial == pytest.approx(
+        avoided * VALID_PAYLOAD["cocoa_price_usd"] * 0.72, rel=1e-3
+    )
+    assert "financial_impact" in data
+    assert data["financial_impact"]["usd"]["currency"] == "USD"
+    assert data["financial_impact"]["ghs"]["currency"] == "GHS"
+    assert data["financial_impact"]["xof"]["currency"] == "XOF"
     assert ci["level"] == 0.9
     assert ci["lower"] <= avoided <= ci["upper"]
 
@@ -101,6 +107,7 @@ def test_shade_trees_intervention_response_schema(client: TestClient) -> None:
         "projected_yield_tonnes_per_ha",
         "avoided_loss_tonnes",
         "financial_impact_usd",
+        "financial_impact",
         "confidence_interval",
         "conformal_interval",
         "biotic_loss_attribution",
@@ -119,10 +126,11 @@ def test_validation_negative_farm_size(client: TestClient) -> None:
     assert response.status_code == 422
 
 
-def test_validation_missing_cocoa_price(client: TestClient) -> None:
+def test_validation_missing_cocoa_price_uses_icco(client: TestClient) -> None:
     payload = {k: v for k, v in VALID_PAYLOAD.items() if k != "cocoa_price_usd"}
     response = client.post("/simulate-intervention", json=payload)
-    assert response.status_code == 422
+    assert response.status_code == 200
+    assert response.json()["financial_impact"]["usd"]["price_usd_per_tonne"] > 0
 
 
 def test_validation_unknown_intervention(client: TestClient) -> None:

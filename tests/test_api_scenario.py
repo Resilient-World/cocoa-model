@@ -146,10 +146,11 @@ def test_simulate_scenario_happy_path(mock_sb_cls: MagicMock, scenario_client: T
 
     avoided = data["avoided_loss_tonnes"]
     assert avoided["p10"] <= avoided["mean"] <= avoided["p90"]
-    assert (
-        data["financial_impact_usd_mean"]
-        == pytest.approx(avoided["mean"] * SCENARIO_PAYLOAD["cocoa_price_usd"], rel=1e-5)
+    price = SCENARIO_PAYLOAD["cocoa_price_usd"] * 0.72  # GHA farm-gate pass-through
+    assert data["financial_impact_usd_mean"] == pytest.approx(
+        avoided["mean"] * price, rel=1e-3
     )
+    assert data["financial_impact"]["ghs"]["currency"] == "GHS"
 
 
 def test_simulate_scenario_missing_cmip6_zarr_returns_400(scenario_client: TestClient, tmp_path) -> None:
