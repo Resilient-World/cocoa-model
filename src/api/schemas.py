@@ -228,6 +228,53 @@ class AvoidedLossUncertaintyBand(BaseModel):
     p90: float = Field(..., ge=0.0)
 
 
+class SimulateClimateAttributionRequest(BaseModel):
+    """Request body for POST /simulate-climate-attribution (factual vs ATTRICI counterfactual)."""
+
+    farm_location: FarmLocation
+    farm_size_ha: float = Field(..., gt=0.0)
+    current_yield: float = Field(..., ge=0.0)
+    intervention_type: InterventionType
+    cocoa_price_usd: float | None = Field(default=None, ge=0.0)
+    currency: FinancialCurrency = Field(default="USD")
+    pricing_basis: PricingBasis = Field(default="spot")
+    farm_gate: bool = Field(default=True)
+    country_code: Literal["GHA", "CIV", "CMR"] | None = None
+    climate_year: int | None = Field(
+        default=None,
+        description="Calendar year for ERA5 / counterfactual slice (default: API CLIMATE_REFERENCE_YEAR)",
+    )
+
+
+class SimulateClimateAttributionResponse(BaseModel):
+    """
+    Decomposes avoided loss into climate-attributed vs intervention components.
+
+    ``attributed_loss_tonnes_per_ha = counterfactual_yield - factual_yield`` (climate-change
+    impact on yield). ``total_avoided_loss_tonnes`` combines climate buffer + intervention uplift.
+    """
+
+    factual_yield_tonnes_per_ha: float
+    counterfactual_yield_tonnes_per_ha: float
+    attributed_loss_tonnes_per_ha: float = Field(
+        ...,
+        description="Per-ha yield gap: no-climate-change world minus current (≥ 0 when warming hurt)",
+    )
+    intervention_avoided_loss_tonnes: float = Field(
+        ...,
+        ge=0.0,
+        description="Farm-level avoided loss from intervention (existing simulate-intervention logic)",
+    )
+    total_avoided_loss_tonnes: float = Field(
+        ...,
+        ge=0.0,
+        description="attributed_loss × area + intervention_avoided_loss",
+    )
+    climate_reference_year: int
+    financial_impact_usd: float = Field(..., ge=0.0)
+    financial_impact: FinancialImpactResponse
+
+
 class SimulateScenarioResponse(BaseModel):
     """Response from POST /simulate-scenario."""
 

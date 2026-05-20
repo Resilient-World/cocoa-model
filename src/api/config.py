@@ -34,6 +34,11 @@ class APISettings(BaseSettings):
 
     # Feature resolution (replaces geo_mock on the simulation hot path)
     era5_zarr_path: Path = _REPO_ROOT / "data" / "processed" / "era5_2020_2024.zarr"
+    era5_counterfactual_zarr_path: Path = (
+        _REPO_ROOT / "data" / "processed" / "era5_counterfactual" / "civ_ghana_1980_2024.zarr"
+    )
+    attrici_gmt_file: Path = _REPO_ROOT / "data" / "raw" / "gmt" / "ssa_gmt.nc"
+    attrici_cache_dir: Path = _REPO_ROOT / "data" / "cache" / "attrici_counterfactual"
     cmip6_zarr_path: Path = _REPO_ROOT / "data" / "processed" / "cmip6_ensemble.zarr"
     static_zarr_path: Path = _REPO_ROOT / "data" / "processed" / "site_static.zarr"
     feature_cache_dir: Path = _REPO_ROOT / "data" / "cache" / "api_features"

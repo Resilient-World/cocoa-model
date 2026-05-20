@@ -49,3 +49,19 @@ FDP cocoa model (CC-BY 4.0 **NC**). SaaS and insurance workflows using AEF embed
 should include the attribution above in product documentation and any public materials
 that surface model provenance. Confirm your Earth Engine / Google Cloud terms separately
 for API access and export quotas.
+
+## ATTRICI (ISI-MIP)
+
+Counterfactual climate attribution uses [ATTRICI](https://github.com/ISI-MIP/attrici) v2.0.1
+(Mengel et al., 2021, *Geosci. Model Dev.* 14, 5269–5284).
+
+**License:** GNU General Public License v3.0 (GPL-3.0).
+
+**Boundary:** This repository does **not** import or link ATTRICI into the FastAPI service or
+MIT-licensed application code. ATTRICI is invoked only as an **external CLI subprocess**
+(see `docs/licensing/ATTRICI_GPL_BOUNDARY.md`), consistent with treating it as a separate
+aggregation service (ASP-style separation). Install via optional extra
+`pip install -e '.[attrici]'` or isolated `.venv-attrici`.
+
+**Citation:** Mengel, M., Treu, S., Lange, S., Frieler, K. (2021). ATTRICI v1.1 – counterfactual
+climate for impact attribution. *Geosci. Model Dev.*, 14, 5269–5284.
