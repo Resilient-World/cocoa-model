@@ -22,7 +22,7 @@ VALID_PAYLOAD = {
     "cocoa_price_usd": 3200.0,
 }
 
-SITE_STATIC_DIM = 10
+SITE_STATIC_DIM = 13
 SEQUENCE_LENGTH = 365
 
 
@@ -128,7 +128,7 @@ def test_simulate_scenario_happy_path(mock_sb_cls: MagicMock, scenario_client: T
     app.state.yield_model = YieldSurrogateModel(
         sequence_length=365,
         climate_features=11,
-        static_features=10,
+        static_features=13,
         galileo_dim=0,
     )
 

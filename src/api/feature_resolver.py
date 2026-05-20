@@ -27,18 +27,26 @@ from data.cocoa_exposure import CocoaExposureIngest, FDP_COCOA_COLLECTION
 from data.era5_ingest import ERA5Ingest
 from data.feature_store import FeatureStore
 from data.gee_auth import initialize_earth_engine
-from models.yield_surrogate import CLIMATE_CHANNEL_NAMES
+from models.yield_surrogate import (
+    CLIMATE_CHANNEL_NAMES,
+    DEFAULT_PLANTING_DENSITY,
+    DEFAULT_TREE_AGE_YEARS,
+    N_STATIC_SITE,
+    pack_tree_age_static,
+)
 
 logger = logging.getLogger(__name__)
 
 SEQUENCE_LENGTH = 365
-SITE_STATIC_DIM = 10
+SITE_STATIC_DIM = N_STATIC_SITE
 DEFAULT_AWC_MM = 150.0
+FARM_REGISTRY_MAX_DIST_DEG2 = 4.0  # ~2° if no nearby farm row
 DEFAULT_CO2_PPM = 415.0
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ERA5_ZARR = _REPO_ROOT / "data" / "processed" / "era5_2020_2024.zarr"
 DEFAULT_STATIC_ZARR = _REPO_ROOT / "data" / "processed" / "site_static.zarr"
+DEFAULT_FARM_REGISTRY = _REPO_ROOT / "data" / "processed" / "farm_registry.parquet"
 DEFAULT_CACHE_DIR = _REPO_ROOT / "data" / "cache" / "api_features"
 
 # GEE asset IDs for static covariates
@@ -65,6 +73,7 @@ _ZARR_CLIMATE_ALIASES: dict[str, tuple[str, ...]] = {
 class FeatureResolverConfig:
     era5_zarr_path: Path = DEFAULT_ERA5_ZARR
     static_zarr_path: Path = DEFAULT_STATIC_ZARR
+    farm_registry_path: Path = DEFAULT_FARM_REGISTRY
     cache_dir: Path = DEFAULT_CACHE_DIR
     feature_store_root: Path | None = None
     use_galileo_embedding: bool = False
@@ -97,6 +106,36 @@ def _awc_mm_from_texture(sand_pct: float, clay_pct: float, depth_cm: float = 100
     theta_fc = 0.2576 - 0.002 * sand * 100 - 0.00136 * clay * 100 + 0.2322 * theta_s
     awc_frac = max(0.05, theta_fc - 0.12)
     return float(np.clip(awc_frac * depth_cm * 10.0, 40.0, 280.0))
+
+
+def _lookup_farm_registry(
+    lat: float,
+    lon: float,
+    registry_path: Path,
+) -> tuple[float, float]:
+    """
+    Nearest farm row for tree age and planting density.
+
+    Defaults to 12 y (peak cohort) when the registry file is missing or no row is nearby.
+    """
+    if not registry_path.is_file():
+        return DEFAULT_TREE_AGE_YEARS, DEFAULT_PLANTING_DENSITY
+
+    import pandas as pd
+
+    df = pd.read_parquet(registry_path)
+    if df.empty or "lat" not in df.columns or "lon" not in df.columns:
+        return DEFAULT_TREE_AGE_YEARS, DEFAULT_PLANTING_DENSITY
+
+    dist2 = (df["lat"].astype(float) - lat) ** 2 + (df["lon"].astype(float) - lon) ** 2
+    idx = int(dist2.idxmin())
+    if float(dist2.loc[idx]) > FARM_REGISTRY_MAX_DIST_DEG2:
+        return DEFAULT_TREE_AGE_YEARS, DEFAULT_PLANTING_DENSITY
+
+    row = df.loc[idx]
+    age = float(row.get("tree_age_years", DEFAULT_TREE_AGE_YEARS))
+    density = float(row.get("planting_density_trees_ha", DEFAULT_PLANTING_DENSITY))
+    return age, density
 
 
 def _cocoa_belt_probability(lat: float, lon: float) -> float:
@@ -207,7 +246,7 @@ class FarmFeatureResolver:
         return tensor
 
     def resolve_static(self, lat: float, lon: float, year: int | None = None) -> Tensor:
-        """Site static covariates ``[1, 10]`` (AWC + soil/terrain/cocoa; indices 2–4 for API encoding)."""
+        """Site static covariates ``[1, 13]`` (AWC + soil/terrain/cocoa + tree-age cohort)."""
         cache_key = f"static:{lat:.6f}:{lon:.6f}"
         cached = self._cache.get(cache_key)
         if cached is not None:
@@ -279,7 +318,7 @@ class FarmFeatureResolver:
         lon: float,
         year: int,
     ) -> Tensor:
-        """Concatenate site static ``[1,10]`` with Galileo ``[1,D]`` when enabled."""
+        """Concatenate site static ``[1,13]`` with Galileo ``[1,D]`` when enabled."""
         site = self.resolve_static(lat, lon, year=year)
         if not self.config.use_galileo_embedding:
             return site
@@ -325,6 +364,9 @@ class FarmFeatureResolver:
         ds = xr.open_zarr(path, consolidated=True)
         lat_name, lon_name = _lat_lon_coord_names(ds)
         point = ds.sel({lat_name: lat, lon_name: lon}, method="nearest")
+        tree_age, density = _lookup_farm_registry(
+            lat, lon, self.config.farm_registry_path
+        )
         return self._pack_static_vector(
             sand_pct=float(point.get("sand_pct", 40.0)),
             clay_pct=float(point.get("clay_pct", 25.0)),
@@ -334,6 +376,8 @@ class FarmFeatureResolver:
             slope_deg=float(point.get("slope_deg", 2.0)),
             treecover_pct=float(point.get("treecover_pct", 60.0)),
             cocoa_prob=float(point.get("cocoa_prob", 0.5)),
+            tree_age_years=tree_age,
+            planting_density_trees_ha=density,
         )
 
     def _static_from_gee(self, lat: float, lon: float, *, year: int | None = None) -> np.ndarray:
@@ -381,6 +425,9 @@ class FarmFeatureResolver:
         else:
             cocoa_prob = fdp_prob
 
+        tree_age, density = _lookup_farm_registry(
+            lat, lon, self.config.farm_registry_path
+        )
         return self._pack_static_vector(
             sand_pct=sand_pct,
             clay_pct=clay_pct,
@@ -390,6 +437,8 @@ class FarmFeatureResolver:
             slope_deg=slope_deg,
             treecover_pct=treecover,
             cocoa_prob=cocoa_prob,
+            tree_age_years=tree_age,
+            planting_density_trees_ha=density,
         )
 
     def _pack_static_vector(
@@ -403,11 +452,14 @@ class FarmFeatureResolver:
         slope_deg: float,
         treecover_pct: float,
         cocoa_prob: float,
+        tree_age_years: float = DEFAULT_TREE_AGE_YEARS,
+        planting_density_trees_ha: float = DEFAULT_PLANTING_DENSITY,
     ) -> np.ndarray:
         """
-        Pack site static features (10).
+        Pack site static features (13).
 
         Index 0: AWC (mm, from texture). Indices 2–4 reserved for simulation encodings.
+        Indices 10–12: tree age / cohort phase / planting density.
         """
         del elevation_m, slope_deg  # inform AWC / future extensions
         vec = np.zeros(SITE_STATIC_DIM, dtype=np.float32)
@@ -418,6 +470,13 @@ class FarmFeatureResolver:
         vec[7] = np.clip(ph / 14.0, 0.0, 1.0)
         vec[8] = np.clip(treecover_pct / 100.0, 0.0, 1.0)
         vec[9] = np.clip(cocoa_prob, 0.0, 1.0)
+        age_norm, cohort, dens_norm = pack_tree_age_static(
+            tree_age_years,
+            planting_density_trees_ha=planting_density_trees_ha,
+        )
+        vec[10] = age_norm
+        vec[11] = cohort
+        vec[12] = dens_norm
         return vec
 
     def _get_galileo_extractor(self) -> Any:
@@ -441,5 +500,8 @@ def build_resolver_from_settings(settings: Any) -> FarmFeatureResolver:
             use_galileo_embedding=bool(getattr(settings, "use_galileo_embedding", False)),
             galileo_embedding_dim=int(getattr(settings, "galileo_embedding_dim", 128)),
             gee_project=getattr(settings, "earthengine_project", None),
+            farm_registry_path=Path(
+                getattr(settings, "farm_registry_path", DEFAULT_FARM_REGISTRY)
+            ),
         )
     )

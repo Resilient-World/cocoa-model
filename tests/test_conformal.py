@@ -52,7 +52,7 @@ def _make_tensors(n: int, seed: int) -> tuple[torch.Tensor, torch.Tensor, torch.
     rng = torch.Generator().manual_seed(seed)
     climate = torch.randn(n, 365, 11, generator=rng) * 0.2
     climate[..., 0] = 28.0 + torch.randn(n, 365, generator=rng) * 2.0
-    static = torch.randn(n, 10, generator=rng)
+    static = torch.randn(n, 13, generator=rng)
     static[:, 0] = 150.0
     noise = torch.randn(n, generator=rng) * 0.18
     y = _true_yield(climate, static) + noise
@@ -208,7 +208,7 @@ def test_api_returns_conformal_when_json_present(tmp_path: Path) -> None:
 
         def resolve_static(self, lat: float, lon: float) -> torch.Tensor:
             del lat, lon
-            s = torch.zeros(1, 10)
+            s = torch.zeros(1, 13)
             s[0, 0] = 150.0
             return s
 

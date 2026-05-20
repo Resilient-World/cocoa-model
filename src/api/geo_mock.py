@@ -8,9 +8,11 @@ import numpy as np
 import torch
 from torch import Tensor
 
+from models.yield_surrogate import N_STATIC_SITE, pack_tree_age_static
+
 SEQUENCE_LENGTH = 365
 CLIMATE_FEATURES = 11
-STATIC_FEATURES = 10
+STATIC_FEATURES = N_STATIC_SITE
 
 # Aligns with models.yield_surrogate.CLIMATE_CHANNEL_NAMES
 _CLIMATE_TMAX = 0
@@ -52,7 +54,7 @@ def fetch_climate_and_soil(lat: float, lon: float) -> tuple[Tensor, Tensor]:
         tmax, tmin, tmean, precip (mm/d), srad (MJ/m²/d), vpd (kPa), et0 (mm/d),
         sm_root (m³/m³), wind10m (m/s), rh_mean (%), co2_ppm.
     static:
-        ``[1, 10]`` — index 0 = AWC (mm); remaining slots are normalized covariates.
+        ``[1, 13]`` — index 0 = AWC (mm); indices 10–12 = tree-age cohort features.
     """
     rng = np.random.default_rng(_location_seed(lat, lon))
 
@@ -94,6 +96,10 @@ def fetch_climate_and_soil(lat: float, lon: float) -> tuple[Tensor, Tensor]:
     static[0] = DEFAULT_AWC_MM
     static[1] = np.clip((lat + 10.0) / 50.0, 0.0, 1.0)
     static[2] = np.clip((lon + 20.0) / 60.0, 0.0, 1.0)
+    age_norm, cohort, dens_norm = pack_tree_age_static(12.0)
+    static[10] = age_norm
+    static[11] = cohort
+    static[12] = dens_norm
 
     return (
         torch.from_numpy(climate).unsqueeze(0),
