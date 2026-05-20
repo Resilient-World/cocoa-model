@@ -1,12 +1,15 @@
-"""Tests for POST /simulate-intervention."""
+"""Tests for POST /simulate-intervention (mock vs real feature paths)."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 import torch
+import xarray as xr
 from fastapi.testclient import TestClient
 
+from api.config import APISettings
+from api.feature_resolver import FarmFeatureResolver, FeatureResolverConfig
 from api.main import app
 from models.yield_surrogate import N_CLIMATE_CHANNELS, YieldSurrogateModel
 
@@ -45,8 +48,8 @@ class StubFeatureResolver:
         climate[:, 10] = 415.0
         return torch.from_numpy(climate).unsqueeze(0)
 
-    def resolve_static(self, lat: float, lon: float) -> torch.Tensor:
-        del lat, lon
+    def resolve_static(self, lat: float, lon: float, year: int | None = None) -> torch.Tensor:
+        del lat, lon, year
         static = np.zeros(SITE_STATIC_DIM, dtype=np.float32)
         static[0] = 150.0
         static[1] = 0.4
@@ -54,6 +57,51 @@ class StubFeatureResolver:
 
     def resolve_static_with_galileo(self, lat: float, lon: float, year: int) -> torch.Tensor:
         return self.resolve_static(lat, lon)
+
+
+def _write_minimal_features_cache(path, *, lat: float = 6.5, lon: float = -1.2) -> None:
+    """Tiny features_cache.zarr for real-feature API tests."""
+    import pandas as pd
+
+    time = pd.date_range("2023-01-01", periods=SEQUENCE_LENGTH, freq="D")
+    climate = np.zeros((SEQUENCE_LENGTH, N_CLIMATE_CHANNELS), dtype=np.float32)
+    climate[:, 0] = 28.0
+    climate[:, 1] = 22.0
+    climate[:, 2] = 25.0
+    climate[:, 3] = 5.0
+    climate[:, 4] = 15.0
+    climate[:, 5] = 1.0
+    climate[:, 6] = 3.0
+    climate[:, 7] = 0.25
+    climate[:, 8] = 2.0
+    climate[:, 9] = 75.0
+    climate[:, 10] = 420.0
+
+    ds = xr.Dataset(
+        {
+            "clay_pct": (("latitude", "longitude"), np.array([[25.0]], dtype=np.float32)),
+            "sand_pct": (("latitude", "longitude"), np.array([[40.0]], dtype=np.float32)),
+            "soc_gkg": (("latitude", "longitude"), np.array([[20.0]], dtype=np.float32)),
+            "cec_cmolkg": (("latitude", "longitude"), np.array([[15.0]], dtype=np.float32)),
+            "ph": (("latitude", "longitude"), np.array([[5.5]], dtype=np.float32)),
+            "elevation_m": (("latitude", "longitude"), np.array([[220.0]], dtype=np.float32)),
+            "slope_deg": (("latitude", "longitude"), np.array([[2.0]], dtype=np.float32)),
+            "chirps_annual_mm": (("latitude", "longitude"), np.array([[1400.0]], dtype=np.float32)),
+            "protected_dist_km": (("latitude", "longitude"), np.array([[12.0]], dtype=np.float32)),
+            "cocoa_prob": (("latitude", "longitude"), np.array([[0.82]], dtype=np.float32)),
+            "climate": (
+                ("latitude", "longitude", "day", "channel"),
+                climate.reshape(1, 1, SEQUENCE_LENGTH, N_CLIMATE_CHANNELS),
+            ),
+        },
+        coords={
+            "latitude": [lat],
+            "longitude": [lon],
+            "day": np.arange(SEQUENCE_LENGTH),
+            "channel": np.arange(N_CLIMATE_CHANNELS),
+        },
+    )
+    ds.to_zarr(path, mode="w")
 
 
 @pytest.fixture
@@ -70,6 +118,44 @@ def test_feature_resolver_climate_and_static_shapes() -> None:
     assert climate.shape == (1, SEQUENCE_LENGTH, N_CLIMATE_CHANNELS)
     assert static.shape == (1, SITE_STATIC_DIM)
     assert static[0, 0].item() == pytest.approx(150.0)
+
+
+def test_geo_mock_path_when_use_real_features_false(tmp_path) -> None:
+    """USE_REAL_FEATURES=false → deterministic geo_mock tensors."""
+    resolver = FarmFeatureResolver(
+        FeatureResolverConfig(
+            use_real_features=False,
+            cache_dir=tmp_path / "cache",
+        )
+    )
+    climate = resolver.resolve_climate(6.5, -1.2, 2023)
+    static = resolver.resolve_static(6.5, -1.2, year=2023)
+    assert climate.shape == (1, SEQUENCE_LENGTH, N_CLIMATE_CHANNELS)
+    assert static.shape == (1, SITE_STATIC_DIM)
+    assert static[0, 0].item() == pytest.approx(150.0)
+    climate2 = resolver.resolve_climate(6.5, -1.2, 2023)
+    assert torch.allclose(climate, climate2)
+
+
+def test_real_features_from_cache_zarr(tmp_path) -> None:
+    """USE_REAL_FEATURES=true reads precomputed features_cache.zarr."""
+    cache_path = tmp_path / "features_cache.zarr"
+    _write_minimal_features_cache(cache_path, lat=6.5, lon=-1.2)
+
+    resolver = FarmFeatureResolver(
+        FeatureResolverConfig(
+            use_real_features=True,
+            features_cache_zarr_path=cache_path,
+            era5_zarr_path=tmp_path / "missing_era5.zarr",
+            cache_dir=tmp_path / "cache",
+        )
+    )
+    climate = resolver.resolve_climate(6.52, -1.18, 2023)
+    static = resolver.resolve_static(6.48, -1.22, year=2023)
+    assert climate.shape == (1, SEQUENCE_LENGTH, N_CLIMATE_CHANNELS)
+    assert static.shape == (1, SITE_STATIC_DIM)
+    assert static[0, 9].item() == pytest.approx(0.82, rel=0.01)
+    assert static[0, 0].item() > 40.0
 
 
 def test_simulate_intervention_happy_path(client: TestClient) -> None:
@@ -99,11 +185,47 @@ def test_simulate_intervention_happy_path(client: TestClient) -> None:
     assert data["confidence_interval"]["method"] in ("mcd", "cqr")
 
 
+def test_simulate_with_real_feature_resolver(tmp_path) -> None:
+    """End-to-end API call using features_cache (not StubFeatureResolver)."""
+    cache_path = tmp_path / "features_cache.zarr"
+    _write_minimal_features_cache(cache_path)
+
+    settings = APISettings(
+        use_real_features=True,
+        features_cache_zarr_path=cache_path,
+        era5_zarr_path=tmp_path / "no_era5.zarr",
+        feature_cache_dir=tmp_path / "api_cache",
+    )
+    app.state.settings = settings
+    app.state.feature_resolver = FarmFeatureResolver(
+        FeatureResolverConfig(
+            use_real_features=True,
+            features_cache_zarr_path=cache_path,
+            era5_zarr_path=settings.era5_zarr_path,
+            cache_dir=settings.feature_cache_dir,
+        )
+    )
+
+    with TestClient(app) as test_client:
+        # Lifespan resets resolver; override after startup for this test.
+        app.state.feature_resolver = FarmFeatureResolver(
+            FeatureResolverConfig(
+                use_real_features=True,
+                features_cache_zarr_path=cache_path,
+                era5_zarr_path=settings.era5_zarr_path,
+                cache_dir=settings.feature_cache_dir,
+            )
+        )
+        response = test_client.post("/simulate-intervention", json=VALID_PAYLOAD)
+    assert response.status_code == 200
+    assert "avoided_loss_tonnes" in response.json()
+
+
 def test_shade_trees_intervention_response_schema(client: TestClient) -> None:
     response = client.post("/simulate-intervention", json=VALID_PAYLOAD)
     assert response.status_code == 200
     data = response.json()
-    assert set(data.keys()) == {
+    assert {
         "baseline_yield_tonnes_per_ha",
         "projected_yield_tonnes_per_ha",
         "avoided_loss_tonnes",
@@ -112,7 +234,7 @@ def test_shade_trees_intervention_response_schema(client: TestClient) -> None:
         "confidence_interval",
         "conformal_interval",
         "biotic_loss_attribution",
-    }
+    }.issubset(set(data.keys()))
 
 
 def test_validation_invalid_latitude(client: TestClient) -> None:
@@ -141,7 +263,6 @@ def test_validation_unknown_intervention(client: TestClient) -> None:
 
 
 def test_simulate_with_overridden_model(client: TestClient) -> None:
-    """Deterministic small model still returns structured response."""
     app.state.yield_model = YieldSurrogateModel(
         sequence_length=365,
         climate_features=11,

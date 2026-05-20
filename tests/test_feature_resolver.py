@@ -13,10 +13,12 @@ import xarray as xr
 from api.feature_resolver import (
     FarmFeatureResolver,
     FeatureResolverConfig,
+    ResolvedStaticFeatures,
     SITE_STATIC_DIM,
     _awc_mm_from_texture,
     _climate_tensor_from_dataset,
     _lookup_farm_registry,
+    round_to_grid,
 )
 from models.yield_surrogate import COHORT_PEAK, COHORT_SENESCENT, cohort_phase_from_age
 
@@ -85,21 +87,53 @@ def test_farm_registry_tree_age_and_cohort(tmp_path: Path) -> None:
             cache_dir=tmp_path / "cache",
         )
     )
-    vec = resolver._pack_static_vector(
-        sand_pct=40,
-        clay_pct=25,
-        soc_gkg=20,
-        ph=5.5,
-        elevation_m=200,
-        slope_deg=2,
-        treecover_pct=60,
-        cocoa_prob=0.8,
+    vec = resolver._pack_model_static_vector(
+        ResolvedStaticFeatures(
+            clay_pct=25,
+            sand_pct=40,
+            soc_gkg=20,
+            cec_cmolkg=15,
+            ph=5.5,
+            elevation_m=200,
+            slope_deg=2,
+            chirps_annual_mm=1200,
+            protected_dist_km=20,
+            cocoa_prob=0.8,
+        ),
+        6.0,
+        -4.0,
         tree_age_years=32,
         planting_density_trees_ha=900,
     )
     assert vec.shape == (SITE_STATIC_DIM,)
     assert vec[11] == pytest.approx(COHORT_SENESCENT)
     assert cohort_phase_from_age(12) == pytest.approx(COHORT_PEAK)
+
+
+def test_round_to_grid_step() -> None:
+    lat_r, lon_r = round_to_grid(6.52, -1.18, step=0.05)
+    assert lat_r == pytest.approx(6.5)
+    assert lon_r == pytest.approx(-1.2)
+
+
+def test_pack_model_static_from_resolved() -> None:
+    resolver = FarmFeatureResolver(FeatureResolverConfig(use_real_features=False))
+    resolved = ResolvedStaticFeatures(
+        clay_pct=25.0,
+        sand_pct=40.0,
+        soc_gkg=20.0,
+        cec_cmolkg=15.0,
+        ph=5.5,
+        elevation_m=200.0,
+        slope_deg=2.0,
+        chirps_annual_mm=1400.0,
+        protected_dist_km=10.0,
+        cocoa_prob=0.9,
+    )
+    vec = resolver._pack_model_static_vector(resolved, 6.5, -1.2)
+    assert vec.shape == (SITE_STATIC_DIM,)
+    assert vec[0] > 40.0
+    assert vec[9] == pytest.approx(0.9)
 
 
 def test_climate_tensor_channel_order() -> None:
