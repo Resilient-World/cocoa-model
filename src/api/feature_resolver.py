@@ -25,6 +25,7 @@ from torch import Tensor
 
 from data.era5_ingest import ERA5Ingest
 from data.gee_auth import initialize_earth_engine
+from data.feature_store import FeatureStore
 from models.yield_surrogate import CLIMATE_CHANNEL_NAMES
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,7 @@ class FeatureResolverConfig:
     era5_zarr_path: Path = DEFAULT_ERA5_ZARR
     static_zarr_path: Path = DEFAULT_STATIC_ZARR
     cache_dir: Path = DEFAULT_CACHE_DIR
+    feature_store_root: Path | None = None
     use_galileo_embedding: bool = False
     galileo_embedding_dim: int = 128
     galileo_h3_resolution: int = 7
@@ -162,6 +164,12 @@ class FarmFeatureResolver:
         self.config.cache_dir.mkdir(parents=True, exist_ok=True)
         self._cache = Cache(str(self.config.cache_dir))
         self._galileo_extractor: Any | None = None
+        self._feature_store: FeatureStore | None = None
+        if self.config.feature_store_root is not None:
+            try:
+                self._feature_store = FeatureStore(self.config.feature_store_root)
+            except Exception as exc:
+                logger.warning("Failed to init FeatureStore (%s); continuing without it", exc)
 
     def resolve_climate(self, lat: float, lon: float, year: int) -> Tensor:
         """
@@ -172,6 +180,15 @@ class FarmFeatureResolver:
         if cached is not None:
             return torch.from_numpy(np.asarray(cached, dtype=np.float32)).unsqueeze(0)
 
+        if self._feature_store is not None:
+            try:
+                tensor = self._feature_store.climate_tensor(lat=lat, lon=lon, year=year)
+                if torch.isfinite(tensor).all():
+                    self._cache.set(cache_key, tensor.numpy())
+                    return tensor
+            except Exception as exc:
+                logger.info("FeatureStore climate miss (%s); falling back", exc)
+
         zarr_path = self.config.era5_zarr_path
         if zarr_path.is_dir():
             try:
@@ -181,7 +198,13 @@ class FarmFeatureResolver:
             except Exception as exc:
                 logger.warning("ERA5 Zarr read failed (%s); falling back to live GEE", exc)
 
-        tensor = self._climate_from_gee(lat, lon, year)
+        # Final fallback: deterministic mock (no GEE requirements).
+        try:
+            from api.geo_mock import fetch_climate_and_soil
+
+            tensor, _ = fetch_climate_and_soil(lat, lon)
+        except Exception:
+            tensor = self._climate_from_gee(lat, lon, year)
         self._cache.set(cache_key, tensor.numpy())
         return tensor
 
@@ -192,6 +215,15 @@ class FarmFeatureResolver:
         if cached is not None:
             return torch.from_numpy(np.asarray(cached, dtype=np.float32)).unsqueeze(0)
 
+        if self._feature_store is not None:
+            try:
+                vec = self._feature_store.static_vector(lat=lat, lon=lon).numpy().reshape(-1)
+                if np.isfinite(vec).all():
+                    self._cache.set(cache_key, vec)
+                    return torch.from_numpy(vec).unsqueeze(0)
+            except Exception as exc:
+                logger.info("FeatureStore static miss (%s); falling back", exc)
+
         zarr_path = self.config.static_zarr_path
         if zarr_path.is_dir():
             try:
@@ -201,7 +233,13 @@ class FarmFeatureResolver:
             except Exception as exc:
                 logger.warning("Static Zarr read failed (%s); falling back to GEE", exc)
 
-        vec = self._static_from_gee(lat, lon)
+        try:
+            from api.geo_mock import fetch_climate_and_soil
+
+            _, static = fetch_climate_and_soil(lat, lon)
+            vec = np.asarray(static.squeeze(0).numpy(), dtype=np.float32)
+        except Exception:
+            vec = self._static_from_gee(lat, lon)
         self._cache.set(cache_key, vec)
         return torch.from_numpy(vec).unsqueeze(0)
 
@@ -389,6 +427,7 @@ def build_resolver_from_settings(settings: Any) -> FarmFeatureResolver:
             era5_zarr_path=Path(getattr(settings, "era5_zarr_path", DEFAULT_ERA5_ZARR)),
             static_zarr_path=Path(getattr(settings, "static_zarr_path", DEFAULT_STATIC_ZARR)),
             cache_dir=Path(getattr(settings, "feature_cache_dir", DEFAULT_CACHE_DIR)),
+            feature_store_root=getattr(settings, "feature_store_root", None),
             use_galileo_embedding=bool(getattr(settings, "use_galileo_embedding", False)),
             galileo_embedding_dim=int(getattr(settings, "galileo_embedding_dim", 128)),
             gee_project=getattr(settings, "earthengine_project", None),

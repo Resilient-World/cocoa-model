@@ -37,6 +37,23 @@ CLIMATE_CHANNEL_NAMES: tuple[str, ...] = (
 N_CLIMATE_CHANNELS = len(CLIMATE_CHANNEL_NAMES)
 CLIMATE_IDX = {name: i for i, name in enumerate(CLIMATE_CHANNEL_NAMES)}
 
+# Static feature registry (legacy default 10, index 0 = AWC mm).
+#
+# This is a naming layer only: the model remains checkpoint-compatible because the
+# default layout and width stay the same unless `static_feature_names` is provided.
+STATIC_FEATURE_NAMES: tuple[str, ...] = (
+    "awc_mm",
+    "sand_frac",
+    "baseline_yield_scaled",
+    "intervention_flag",
+    "stress_tolerance_flag",
+    "clay_frac",
+    "soc_norm",
+    "ph_norm",
+    "treecover_norm",
+    "cocoa_prob",
+)
+
 # Legacy 4-channel order (geo_mock / early API): tmax, tmin, precip, srad
 _LEGACY_4_NAMES: tuple[str, ...] = ("tmax", "tmin", "precip", "srad")
 
@@ -245,6 +262,7 @@ class YieldSurrogateModel(nn.Module):
         sequence_length: int = 365,
         climate_features: int = N_CLIMATE_CHANNELS,
         static_features: int = 10,
+        static_feature_names: tuple[str, ...] | None = None,
         galileo_dim: int = 0,
         static_hidden: int = 64,
         head_hidden: int = 64,
@@ -267,6 +285,10 @@ class YieldSurrogateModel(nn.Module):
         if galileo_dim < 0:
             raise ValueError(f"galileo_dim must be >= 0, got {galileo_dim}")
         self.galileo_dim = galileo_dim
+        if static_feature_names is not None:
+            static_feature_names = tuple(static_feature_names)
+            static_features = len(static_feature_names)
+        self.static_feature_names = static_feature_names or STATIC_FEATURE_NAMES
         self.site_static_features = static_features
         total_static = static_features + galileo_dim
         self.static_features = total_static
