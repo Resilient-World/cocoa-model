@@ -218,6 +218,7 @@ Copy `.env.example` to `.env` (never commit `.env`).
 | `MLFLOW_EXPERIMENT_NAME` | Prithvi training | Experiment name |
 | `API_HOST` / `API_PORT` | Deployment | Uvicorn bind (documentation; not auto-wired in code) |
 | `MODEL_CHECKPOINT_PATH` | API | Path to `YieldSurrogateModel` weights (`.pt`) |
+| `CASEJ_CHECKPOINT_PATH` | API | Path to `CASEJSurrogate` weights for `/simulate-scenario` |
 | `MC_NUM_SAMPLES` | API | Monte Carlo forward passes (default `50`) |
 | `YIELD_BLEND_WEIGHT` | API | Blend weight for observed `current_yield` (default `0.3`) |
 | `ERA5_ZARR_PATH` | API | Historical ERA5-Land stack (`ScenarioBuilder` + `/simulate-intervention` resolver) |
@@ -471,6 +472,10 @@ Interactive docs: `http://localhost:8000/docs`
 #### `POST /simulate-scenario`
 
 Runs the same intervention machinery as `/simulate-intervention`, but replaces resolved ERA5 with a **delta-change** daily stack built by [`ScenarioBuilder`](src/counterfactual/cmip6_scenarios.py): monthly CMIP6 anomalies vs historical ERA5 (temperature/humidity additive; precipitation/radiation/wind multiplicative), then recomputed VPD / ET0 / CWD / agronomic indices.
+
+Uses [`CASEJSurrogate`](src/models/casej_surrogate.py) (PINN emulating Asante et al. 2025 CASEJ CO₂ physiology) with explicit SSP CO₂ (ppm) — not the generic `YieldSurrogateModel`. `/simulate-intervention` continues to use `YieldSurrogateModel` until CASEJ passes intervention benchmarks.
+
+Train: `python scripts/generate_casej_training_set.py` → `python scripts/train_casej_surrogate.py` → `models/casej_surrogate.pt` (`CASEJ_CHECKPOINT_PATH`).
 
 **Extra request fields:** `scenario` (`ssp245` \| `ssp585`) and `horizon_year` (`2030` \| `2050` \| `2080`). The horizon selects the CMIP6 climatology window used for those monthly deltas; `CLIMATE_REFERENCE_YEAR` still picks which calendar year is sliced from the adjusted ERA5 timeline for the surrogate.
 

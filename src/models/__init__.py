@@ -8,6 +8,7 @@ from models.conformal import (
     load_conformal_if_exists,
     save_conformal,
 )
+from models.casej_surrogate import CASEJPhysicsLoss, CASEJSurrogate, load_casej_surrogate
 from models.yield_surrogate import (
     MCDropout,
     PhysicsInformedYieldLoss,
@@ -17,6 +18,9 @@ from models.yield_surrogate import (
 )
 
 __all__ = [
+    "CASEJPhysicsLoss",
+    "CASEJSurrogate",
+    "load_casej_surrogate",
     "ConformalInterval",
     "MondrianConformalYield",
     "SplitConformalYield",

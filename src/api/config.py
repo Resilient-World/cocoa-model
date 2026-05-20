@@ -28,6 +28,7 @@ class APISettings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     model_checkpoint_path: str = "models/yield_surrogate_v1.pt"
+    casej_checkpoint_path: str = "models/casej_surrogate.pt"
     mc_num_samples: int = 50
     yield_blend_weight: float = 0.0
 

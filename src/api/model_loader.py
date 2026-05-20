@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from models.checkpoint_migration import is_v1_static_checkpoint, migrate_v1_static_to_v2
+from models.casej_surrogate import CASEJSurrogate, load_casej_surrogate
 from models.yield_surrogate import YieldSurrogateModel
 
 if TYPE_CHECKING:
@@ -54,3 +55,15 @@ def load_yield_model(
 
     model.eval()
     return model
+
+
+def load_casej_model(
+    checkpoint_path: str | None = None,
+    *,
+    settings: APISettings | None = None,
+) -> CASEJSurrogate:
+    """Load :class:`~models.casej_surrogate.CASEJSurrogate` for ``/simulate-scenario``."""
+    galileo_dim = 0
+    if settings is not None and settings.use_galileo_embedding:
+        galileo_dim = settings.galileo_embedding_dim
+    return load_casej_surrogate(checkpoint_path, galileo_dim=galileo_dim)

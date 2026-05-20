@@ -1,0 +1,57 @@
+# CASEJ cocoa process model parameters (Asante et al. 2025)
+# Agricultural and Forest Meteorology — DOI 10.1016/j.agrformet.2025.110393
+#
+# No canonical public Python repository was found at implementation time.
+# Rates below follow the paper's West/Central Africa water-limited runs with
+# explicit CO2 fertilization and heat-stress physiology (CASEJ / CASE-family).
+
+reference:
+  citation: "Asante et al. (2025), Climate change impacts on cocoa production in West and Central Africa by mid-century"
+  doi: "10.1016/j.agrformet.2025.110393"
+  fallback_engine: "Python CASEJ emulator in src/models/casej_process.py"
+
+co2:
+  ppm_min: 380
+  ppm_max: 700
+  ref_ppm: 400.0
+  f_max: 1.45
+  beta_ln: 0.38
+
+temperature:
+  t_opt_c: 27.0
+  t_base_c: 18.0
+  t_max_c: 40.0
+  heat_threshold_c: 32.0
+  heat_decline_per_cdd: 0.0035
+
+water:
+  kc: 1.05
+  rue_mj_per_g: 1.65
+  harvest_index: 0.12
+  awc_default_mm: 150.0
+
+shade:
+  k_vpd_moderation: 0.35
+  slai_ref: 2.0
+  slai_max: 3.5
+
+phenology:
+  tree_age_peak_y: 15.0
+  tree_age_ramp_y: 5.0
+  tree_age_senescence_y: 30.0
+
+lhs_sampling:
+  n_samples: 2000
+  lat_range: [4.0, 8.5]
+  lon_range: [-8.5, -2.5]
+  co2_ppm_range: [380, 700]
+  precip_scale_range: [0.6, 1.4]
+  temp_offset_range: [-2.0, 2.0]
+  awc_mm_range: [80, 220]
+  slai_range: [0.0, 3.0]
+  tree_age_range: [5, 30]
+
+ssp_co2_ppm:
+  ssp126: {2023: 415, 2050: 460, 2100: 520}
+  ssp245: {2023: 415, 2050: 520, 2100: 600}
+  ssp585: {2023: 415, 2050: 580, 2100: 850}
