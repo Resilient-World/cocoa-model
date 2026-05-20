@@ -228,6 +228,10 @@ class YieldSurrogateModel(nn.Module):
         pads missing channels with zeros (deprecation warning).
     static_features:
         Site covariates (default 10); index 0 = AWC (mm) for the mechanistic soil bucket.
+    galileo_dim:
+        Optional Galileo embedding width appended to site static features
+        (total input width = ``static_features + galileo_dim``). ``0`` preserves
+        the legacy 10-dimensional static vector.
     static_hidden, head_hidden, dropout:
         MLP / residual head hyperparameters.
     gru_hidden, gru_layers, attn_heads:
@@ -241,6 +245,7 @@ class YieldSurrogateModel(nn.Module):
         sequence_length: int = 365,
         climate_features: int = N_CLIMATE_CHANNELS,
         static_features: int = 10,
+        galileo_dim: int = 0,
         static_hidden: int = 64,
         head_hidden: int = 64,
         gru_hidden: int = 96,
@@ -259,7 +264,12 @@ class YieldSurrogateModel(nn.Module):
         self.climate_features = (
             N_CLIMATE_CHANNELS if self._legacy_input_width else climate_features
         )
-        self.static_features = static_features
+        if galileo_dim < 0:
+            raise ValueError(f"galileo_dim must be >= 0, got {galileo_dim}")
+        self.galileo_dim = galileo_dim
+        self.site_static_features = static_features
+        total_static = static_features + galileo_dim
+        self.static_features = total_static
 
         self.mechanistic = MechanisticCore()
 
@@ -277,7 +287,7 @@ class YieldSurrogateModel(nn.Module):
         self.climate_dropout = MCDropout(dropout)
 
         self.static_mlp = nn.Sequential(
-            nn.Linear(static_features, static_hidden),
+            nn.Linear(total_static, static_hidden),
             nn.ReLU(),
             MCDropout(dropout),
             nn.Linear(static_hidden, static_hidden),

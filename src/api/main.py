@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 from fastapi import FastAPI, HTTPException
 
 from api.config import APISettings
+from api.feature_resolver import build_resolver_from_settings
 from api.model_loader import load_yield_model
 from api.schemas import (
     ComplianceDdsRequest,
@@ -30,7 +31,11 @@ from models.yield_surrogate import YieldSurrogateModel
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = APISettings()
     app.state.settings = settings
-    app.state.yield_model = load_yield_model(settings.model_checkpoint_path)
+    app.state.feature_resolver = build_resolver_from_settings(settings)
+    app.state.yield_model = load_yield_model(
+        settings.model_checkpoint_path,
+        settings=settings,
+    )
     yield
 
 
@@ -56,7 +61,7 @@ def simulate_intervention_endpoint(
     request: SimulateInterventionRequest,
 ) -> SimulateInterventionResponse:
     """
-    Mock climate/soil retrieval, run yield surrogate inference for counterfactual
+    Resolve ERA5/static features, run yield surrogate inference for counterfactual
     and factual scenarios, and return avoided loss with a 90% confidence interval.
     """
     model: YieldSurrogateModel = app.state.yield_model
@@ -66,8 +71,10 @@ def simulate_intervention_endpoint(
         return simulate_intervention(
             request,
             model,
+            app.state.feature_resolver,
             num_samples=settings.mc_num_samples,
             yield_blend_weight=settings.yield_blend_weight,
+            climate_year=settings.climate_reference_year,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
