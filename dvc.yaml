@@ -89,3 +89,20 @@ stages:
       - src/analysis/psm_matching.py
     metrics:
       - reports/causal_eval.json
+
+  validate:
+    cmd: python -m validation.run_validate --reports-dir reports/validation
+    deps:
+      - models/segmentation.ckpt
+      - models/yield.pt
+      - reports/causal_eval.json
+      - data/external/icco_cocoa_production.csv
+      - data/external/cocoa_barometer_2024_anomalies.json
+      - data/external/giews_cocoa_drought_briefs.json
+      - src/validation/
+    outs:
+      - reports/validation/kalischek_benchmark.md
+      - reports/validation/icco_yield_backtest.md
+      - reports/validation/cocoa_barometer_check.md
+      - reports/validation/giews_drought_validation.md
+      - reports/validation/summary.md

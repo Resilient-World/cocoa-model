@@ -36,10 +36,12 @@ jobs:
             tests/test_feature_resolver.py \
             tests/test_did_impact.py \
             tests/test_quality_gates.py \
+            tests/test_validation.py \
             --cov=analysis \
             --cov=api \
             --cov=compliance \
             --cov=models \
+            --cov=validation \
             --cov-report=term-missing \
             --cov-fail-under=80
 
@@ -77,3 +79,18 @@ jobs:
           save_conformal(p, path)
           PY
           python -m models.validate_conformal_coverage models/conformal.json
+
+      - name: External validation suite
+        env:
+          PYTHONPATH: src
+        run: python -m validation.run_validate --reports-dir reports/validation
+
+      - name: Kalischek IoU gate (≥ 0.55)
+        env:
+          PYTHONPATH: src
+        run: python -m validation.kalischek_benchmark --report reports/validation/kalischek_benchmark.md
+
+      - name: ICCO MAPE gate (≤ 25%)
+        env:
+          PYTHONPATH: src
+        run: python -m validation.icco_yield_backtest --report reports/validation/icco_yield_backtest.md

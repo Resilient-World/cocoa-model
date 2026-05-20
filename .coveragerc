@@ -4,6 +4,7 @@ source =
     api
     compliance
     models
+    validation
 omit =
     */api/feature_resolver.py
     */api/geo_mock.py
