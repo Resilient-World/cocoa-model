@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -10,15 +11,21 @@ import torch
 from torch import Tensor
 
 from api.financial import calculate_financial_impact_usd
+from api.feature_resolver import climate_tensor_from_dataset_point
 from api.schemas import (
     AvoidedLossInterval,
+    AvoidedLossUncertaintyBand,
     ConfidenceInterval,
     ConformalConfidenceInterval,
     ConformalIntervalResponse,
     InterventionType,
     SimulateInterventionRequest,
     SimulateInterventionResponse,
+    SimulateScenarioRequest,
+    SimulateScenarioResponse,
+    YieldUncertaintyBand,
 )
+from counterfactual.cmip6_scenarios import ScenarioBuilder
 from models.yield_surrogate import CLIMATE_IDX, YieldSurrogateModel
 
 if TYPE_CHECKING:
@@ -159,6 +166,20 @@ def _blend_yield(mc_mean: float, current_yield: float, blend_weight: float) -> f
     return (1.0 - w) * mc_mean + w * current_yield
 
 
+def _blend_mc_numpy(samples: np.ndarray, current_yield: float, blend_weight: float) -> np.ndarray:
+    """Blend each Monte Carlo draw toward the observed yield (demo stabilization)."""
+    w = min(max(blend_weight, 0.0), 1.0)
+    return (1.0 - w) * samples + w * float(current_yield)
+
+
+def _mean_p10_p90(samples: np.ndarray) -> tuple[float, float, float]:
+    return (
+        float(np.mean(samples)),
+        float(np.percentile(samples, 10.0)),
+        float(np.percentile(samples, 90.0)),
+    )
+
+
 def simulate_intervention(
     request: SimulateInterventionRequest,
     model: YieldSurrogateModel,
@@ -261,4 +282,97 @@ def simulate_intervention(
             ),
         ),
         conformal_interval=conformal_block,
+    )
+
+
+@torch.no_grad()
+def simulate_scenario(
+    request: SimulateScenarioRequest,
+    model: YieldSurrogateModel,
+    feature_resolver: FarmFeatureResolver,
+    *,
+    historical_zarr_path: Path,
+    cmip6_zarr_path: Path,
+    num_samples: int = 50,
+    yield_blend_weight: float = 0.3,
+    climate_year: int | None = None,
+) -> SimulateScenarioResponse:
+    """
+    Future-climate avoided loss using CMIP6 delta-change on ERA5 (`ScenarioBuilder`) +
+    paired Monte Carlo forwards for mean / p10 / p90 bands.
+
+    Baseline is SSP-conditioned climate **without** intervention encoding; projected applies
+    the usual mechanistic intervention deltas on the adjusted climate tensor.
+    """
+    if yield_blend_weight > 0.0:
+        logger.warning(
+            "yield_blend_weight=%.2f is a demo crutch; set to 0.0 once a trained "
+            "checkpoint is loaded.",
+            yield_blend_weight,
+        )
+
+    if not historical_zarr_path.is_dir():
+        raise ValueError(
+            f"Historical ERA5 Zarr not found at {historical_zarr_path}. "
+            "Export ERA5-Land to that path or set ERA5_ZARR_PATH."
+        )
+    if not cmip6_zarr_path.is_dir():
+        raise ValueError(
+            f"CMIP6 Zarr store not found at {cmip6_zarr_path}. "
+            "Build an ensemble Zarr or set CMIP6_ZARR_PATH."
+        )
+
+    lat = request.farm_location.lat
+    lon = request.farm_location.lon
+    year = int(climate_year or 2023)
+    horizon = int(request.horizon_year)
+    window = (f"{horizon}-01-01", f"{horizon}-12-31")
+
+    builder = ScenarioBuilder(
+        str(historical_zarr_path.resolve()),
+        str(cmip6_zarr_path.resolve()),
+    )
+    ds_scenario = builder.build_scenario(request.scenario, window)
+    climate_scenario = climate_tensor_from_dataset_point(ds_scenario, lat, lon, year)
+
+    static_base = feature_resolver.resolve_static_with_galileo(lat, lon, year)
+    static_cf = _encode_static(
+        static_base,
+        current_yield=request.current_yield,
+        intervention_type=None,
+    )
+    static_factual = _encode_static(
+        static_base,
+        current_yield=request.current_yield,
+        intervention_type=request.intervention_type,
+    )
+
+    climate_baseline = climate_scenario
+    climate_projected = _apply_intervention_climate(climate_scenario, request.intervention_type)
+
+    samples_cf = predict_yield_samples(model, climate_baseline, static_cf, num_samples)
+    samples_factual = predict_yield_samples(model, climate_projected, static_factual, num_samples)
+
+    baseline_np = samples_cf.detach().cpu().numpy().reshape(-1)
+    projected_np = samples_factual.detach().cpu().numpy().reshape(-1)
+
+    baseline_blended = _blend_mc_numpy(baseline_np, request.current_yield, yield_blend_weight)
+    projected_blended = _blend_mc_numpy(projected_np, request.current_yield, yield_blend_weight)
+
+    b_mean, b_p10, b_p90 = _mean_p10_p90(baseline_blended)
+    p_mean, p_p10, p_p90 = _mean_p10_p90(projected_blended)
+
+    avoided_arr = np.maximum(projected_blended - baseline_blended, 0.0) * request.farm_size_ha
+    a_mean, a_p10, a_p90 = _mean_p10_p90(avoided_arr)
+
+    financial = calculate_financial_impact_usd(a_mean, request.cocoa_price_usd)
+
+    return SimulateScenarioResponse(
+        scenario=request.scenario,
+        horizon_year=request.horizon_year,
+        climate_reference_year=year,
+        baseline_yield_tonnes_per_ha=YieldUncertaintyBand(mean=b_mean, p10=b_p10, p90=b_p90),
+        projected_yield_tonnes_per_ha=YieldUncertaintyBand(mean=p_mean, p10=p_p10, p90=p_p90),
+        avoided_loss_tonnes=AvoidedLossUncertaintyBand(mean=a_mean, p10=a_p10, p90=a_p90),
+        financial_impact_usd_mean=financial,
     )
