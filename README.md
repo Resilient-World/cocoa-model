@@ -238,6 +238,28 @@ API settings are loaded via `pydantic-settings` in `api.config.APISettings`.
 | [`era5_ingest.py`](src/data/era5_ingest.py) | `python -m data.era5_ingest` | ERA5 daily → annual heat-stress days + precipitation GeoTIFF (Ghana & Côte d'Ivoire) |
 | [`sentinel_composite.py`](src/data/sentinel_composite.py) | `python -m data.sentinel_composite` | Cloud-masked S2 median + NDVI/EVI + S1 VV/VH composite (Ghana dry season) |
 | [`cocoa_dataset.py`](src/data/cocoa_dataset.py) | — | TorchGeo `CocoaImagery` / `CocoaMask` / `CocoaDataset` + `CocoaDataModule` |
+| [`cocoa_exposure.py`](src/data/cocoa_exposure.py) | — | FDP cocoa probability (2025a) via GEE; point sample + optional Zarr export |
+
+#### Cocoa exposure layer
+
+[`cocoa_exposure.py`](src/data/cocoa_exposure.py) ingests the Forest Data Partnership **Cocoa Probability model 2025a** — successor to Kalischek et al. (2023, *Nature Food*) — as a server-side Earth Engine ImageCollection (no raw tile downloads).
+
+| Item | Value |
+|------|--------|
+| Asset | `projects/forestdatapartnership/assets/cocoa/model_2025a` (`FDP_COCOA_COLLECTION`) |
+| Resolution | 10 m |
+| Years | 2020, 2023 (annual composites) |
+| Band | `probability` (0–1 cocoa occupancy) |
+| Default threshold | **0.65** (F1-optimal cut from Kalischek 2023, carried in FDP 2025a docs) |
+| Coverage | Côte d'Ivoire, Ghana, Indonesia, Ecuador, Peru, Colombia |
+
+**API:** `CocoaExposureIngest(aoi, year=2023, threshold=0.65)` exposes `probability_image()`, `binary_mask()`, `sample_point()`, `to_zarr()` (Xee), and `area_hectares()`.
+
+**Product wiring:** `api/feature_resolver.py` samples FDP probability at farm points (static vector index 9). When the pixel is masked or outside FDP coverage, `_cocoa_belt_probability` remains the last-resort heuristic (e.g. Cameroon, Nigeria).
+
+**License:** Non-commercial Earth Engine use — **CC-BY 4.0 NC** with attribution *"Produced by Google for the Forest Data Partnership"*. **Commercial / SaaS deployments** must accept the [Forest Data Partnership Datasets Commercial Terms of Use](https://services.google.com/fh/files/misc/forest_data_partnership_datasets_commerical_terms_of_use.pdf).
+
+Configure defaults via `.env` (`COCOA_EXPOSURE_YEAR`, `COCOA_EXPOSURE_THRESHOLD`).
 
 **ERA5 outputs (per pixel, per year):**
 
