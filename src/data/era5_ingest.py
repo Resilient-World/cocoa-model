@@ -362,3 +362,46 @@ def compute_derived_features(ds: xr.Dataset) -> xr.Dataset:
         out[f"sm_root_{window}d"] = out["sm_root"].rolling(time=window, min_periods=1).mean()
 
     return out
+
+
+def _geometry_from_geojson(path: Path) -> ee.Geometry:
+    """Load AOI polygon from GeoJSON via geopandas."""
+    import geopandas as gpd
+
+    gdf = gpd.read_file(path)
+    if gdf.empty:
+        raise ValueError(f"Empty GeoJSON: {path}")
+    geom = gdf.geometry.unary_union
+    return ee.Geometry(geom.__geo_interface__)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI: ingest ERA5-Land daily stack for an AOI to Zarr."""
+    import argparse
+    import logging
+    import sys
+
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    parser = argparse.ArgumentParser(description="ERA5-Land daily ingest → Zarr")
+    parser.add_argument("--aoi", type=Path, required=True, help="AOI GeoJSON path")
+    parser.add_argument("--start", required=True, help="Start date YYYY-MM-DD")
+    parser.add_argument("--end", required=True, help="End date YYYY-MM-DD (inclusive)")
+    parser.add_argument("--out", type=Path, required=True, help="Output Zarr directory")
+    parser.add_argument("--project", default=None, help="Earth Engine GCP project")
+    args = parser.parse_args(argv)
+
+    try:
+        aoi = _geometry_from_geojson(args.aoi)
+        ingest = ERA5Ingest(aoi, args.start, args.end, project=args.project)
+        ingest.to_zarr(str(args.out))
+        logging.getLogger(__name__).info("Wrote ERA5 Zarr to %s", args.out)
+        return 0
+    except Exception as exc:
+        logging.getLogger(__name__).error("%s", exc)
+        return 1
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(main())
