@@ -20,7 +20,19 @@ from analysis.psm_matching import (
     standardized_mean_differences,
     trim_common_support,
 )
-from analysis.sensitivity import EValueResult, e_value, rosenbaum_bounds
+from analysis.parallel_trends import (
+    PlaceboPretrendResult,
+    goodman_bacon_decomposition,
+    placebo_pretreatment_did,
+)
+from analysis.sensitivity import (
+    EValueResult,
+    NegativeControlResult,
+    e_value,
+    negative_control_outcome_test,
+    rosenbaum_bounds,
+    rosenbaum_gamma_at_alpha,
+)
 
 __all__ = [
     "AvoidedRevenueResult",
@@ -39,7 +51,13 @@ __all__ = [
     "propensity_score_match",
     "standardized_mean_differences",
     "trim_common_support",
+    "PlaceboPretrendResult",
+    "goodman_bacon_decomposition",
+    "placebo_pretreatment_did",
     "EValueResult",
+    "NegativeControlResult",
     "e_value",
+    "negative_control_outcome_test",
     "rosenbaum_bounds",
+    "rosenbaum_gamma_at_alpha",
 ]
