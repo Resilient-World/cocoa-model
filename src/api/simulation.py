@@ -351,8 +351,9 @@ def simulate_intervention(
     """
     Predict counterfactual vs factual yield and compute avoided loss + financial impact.
 
-    Uses :class:`~api.feature_resolver.FarmFeatureResolver` for ERA5/static features and
-    paired Monte Carlo samples for a 90% confidence interval on avoided loss.
+    Uses :class:`~api.feature_resolver.FarmFeatureResolver` for ERA5/static features
+    (``USE_REAL_FEATURES=true`` → Zarr/cache/GEE; ``false`` → ``api.geo_mock`` for tests)
+    and paired Monte Carlo samples for a 90% confidence interval on avoided loss.
     """
     if yield_blend_weight > 0.0:
         logger.warning(

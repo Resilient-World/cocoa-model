@@ -5,6 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
+# Re-export for settings validation
+ExposureBackend = Literal["fdp", "galileo", "aef", "ensemble"]
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -32,8 +35,14 @@ class APISettings(BaseSettings):
     mc_num_samples: int = 50
     yield_blend_weight: float = 0.0
 
-    # Feature resolution (replaces geo_mock on the simulation hot path)
+    # Feature resolution (geo_mock only when use_real_features=false)
+    use_real_features: bool = Field(
+        default=True,
+        validation_alias="USE_REAL_FEATURES",
+        description="Use ERA5/static Zarr + feature cache; false → api.geo_mock (tests)",
+    )
     era5_zarr_path: Path = _REPO_ROOT / "data" / "processed" / "era5_2020_2024.zarr"
+    features_cache_zarr_path: Path = _REPO_ROOT / "data" / "processed" / "features_cache.zarr"
     era5_counterfactual_zarr_path: Path = (
         _REPO_ROOT / "data" / "processed" / "era5_counterfactual" / "civ_ghana_1980_2024.zarr"
     )
@@ -50,6 +59,7 @@ class APISettings(BaseSettings):
     whisp_api_key: str | None = None
 
     cocoa_exposure_year: int = 2023
+    cocoa_exposure_backend: Literal["fdp", "galileo", "aef", "ensemble"] = "fdp"
     cocoa_exposure_threshold: float = Field(
         default=DEFAULT_THRESHOLD,
         ge=0.5,
