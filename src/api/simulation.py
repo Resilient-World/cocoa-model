@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
 from torch import Tensor
 
 from api.financial import calculate_financial_impact_usd
-from api.geo_mock import fetch_climate_and_soil
 from api.schemas import (
     AvoidedLossInterval,
     ConfidenceInterval,
@@ -19,19 +19,38 @@ from api.schemas import (
 )
 from models.yield_surrogate import CLIMATE_IDX, YieldSurrogateModel
 
+if TYPE_CHECKING:
+    from api.feature_resolver import FarmFeatureResolver
+
 logger = logging.getLogger(__name__)
 
-# Static feature indices (must match geo_mock + simulation encoding)
+# Static feature indices (must match feature_resolver + simulation encoding)
 AWC_STATIC_IDX = 0
 BASELINE_YIELD_STATIC_IDX = 2
 INTERVENTION_STATIC_IDX = 3
 STRESS_TOLERANCE_STATIC_IDX = 4
 
-# Lahive 2019 microclimate: typical shade effects (extreme cases up to ~7 °C / larger VPD cuts)
-SHADE_TMAX_DELTA_C = -2.0
-SHADE_VPD_DELTA_KPA = -1.0
-AGROFORESTRY_VPD_DELTA_KPA = -0.5
-AGROFORESTRY_AWC_DELTA_MM = 20.0
+# Intervention uplift registry (deltas on resolved ERA5 features)
+INTERVENTION_CLIMATE_DELTAS: dict[InterventionType, dict[str, float]] = {
+    InterventionType.shade_trees: {
+        "tmax": -1.5,
+        "vpd_mult": 0.85,
+        "sm_root": 0.03,
+    },
+    InterventionType.agroforestry: {
+        "tmax": -1.0,
+        "vpd_mult": 0.90,
+        "sm_root": 0.05,
+    },
+    InterventionType.drought_resistant_variety: {
+        "sm_root": 0.08,
+    },
+}
+
+INTERVENTION_STATIC_DELTAS: dict[InterventionType, dict[str, float]] = {
+    InterventionType.agroforestry: {"awc_mm": 20.0},
+    InterventionType.drought_resistant_variety: {"stress_tolerance": 1.0},
+}
 
 
 def _encode_static(
@@ -47,9 +66,10 @@ def _encode_static(
         out[0, INTERVENTION_STATIC_IDX] = 0.0
     else:
         out[0, INTERVENTION_STATIC_IDX] = 1.0
-        if intervention_type == InterventionType.agroforestry:
-            out[0, AWC_STATIC_IDX] = out[0, AWC_STATIC_IDX] + AGROFORESTRY_AWC_DELTA_MM
-        elif intervention_type == InterventionType.drought_resistant_variety:
+        static_deltas = INTERVENTION_STATIC_DELTAS.get(intervention_type, {})
+        if "awc_mm" in static_deltas:
+            out[0, AWC_STATIC_IDX] = out[0, AWC_STATIC_IDX] + static_deltas["awc_mm"]
+        if static_deltas.get("stress_tolerance"):
             out[0, STRESS_TOLERANCE_STATIC_IDX] = 1.0
     return out
 
@@ -58,17 +78,26 @@ def _apply_intervention_climate(
     climate: Tensor,
     intervention_type: InterventionType,
 ) -> Tensor:
-    """Microclimate adjustments for intervention scenarios (mechanistic channels)."""
+    """Apply mechanistic microclimate adjustments on resolved daily features."""
     out = climate.clone()
-    if intervention_type == InterventionType.shade_trees:
-        out[..., CLIMATE_IDX["tmax"]] = out[..., CLIMATE_IDX["tmax"]] + SHADE_TMAX_DELTA_C
-        out[..., CLIMATE_IDX["vpd"]] = (out[..., CLIMATE_IDX["vpd"]] + SHADE_VPD_DELTA_KPA).clamp(
-            min=0.05
+    deltas = INTERVENTION_CLIMATE_DELTAS.get(intervention_type, {})
+
+    if "tmax" in deltas:
+        out[..., CLIMATE_IDX["tmax"]] = out[..., CLIMATE_IDX["tmax"]] + deltas["tmax"]
+        out[..., CLIMATE_IDX["tmean"]] = 0.5 * (
+            out[..., CLIMATE_IDX["tmax"]] + out[..., CLIMATE_IDX["tmin"]]
         )
-    elif intervention_type == InterventionType.agroforestry:
+
+    if "vpd_mult" in deltas:
         out[..., CLIMATE_IDX["vpd"]] = (
-            out[..., CLIMATE_IDX["vpd"]] + AGROFORESTRY_VPD_DELTA_KPA
+            out[..., CLIMATE_IDX["vpd"]] * deltas["vpd_mult"]
         ).clamp(min=0.05)
+
+    if "sm_root" in deltas:
+        out[..., CLIMATE_IDX["sm_root"]] = (
+            out[..., CLIMATE_IDX["sm_root"]] + deltas["sm_root"]
+        ).clamp(0.05, 0.55)
+
     return out
 
 
@@ -100,14 +129,17 @@ def _blend_yield(mc_mean: float, current_yield: float, blend_weight: float) -> f
 def simulate_intervention(
     request: SimulateInterventionRequest,
     model: YieldSurrogateModel,
+    feature_resolver: FarmFeatureResolver,
     *,
     num_samples: int = 50,
     yield_blend_weight: float = 0.3,
+    climate_year: int | None = None,
 ) -> SimulateInterventionResponse:
     """
     Predict counterfactual vs factual yield and compute avoided loss + financial impact.
 
-    Uses paired Monte Carlo samples for a 90% confidence interval on avoided loss.
+    Uses :class:`~api.feature_resolver.FarmFeatureResolver` for ERA5/static features and
+    paired Monte Carlo samples for a 90% confidence interval on avoided loss.
     """
     if yield_blend_weight > 0.0:
         logger.warning(
@@ -118,7 +150,10 @@ def simulate_intervention(
 
     lat = request.farm_location.lat
     lon = request.farm_location.lon
-    climate_base, static_base = fetch_climate_and_soil(lat, lon)
+    year = climate_year or 2023
+
+    climate_base = feature_resolver.resolve_climate(lat, lon, year)
+    static_base = feature_resolver.resolve_static_with_galileo(lat, lon, year)
 
     static_cf = _encode_static(static_base, current_yield=request.current_yield, intervention_type=None)
     static_factual = _encode_static(
