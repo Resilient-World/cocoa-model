@@ -33,3 +33,5 @@ class APISettings(BaseSettings):
 
     use_galileo_embedding: bool = False
     galileo_embedding_dim: int = 128
+
+    conformal_json_path: Path = _REPO_ROOT / "models" / "conformal.json"
