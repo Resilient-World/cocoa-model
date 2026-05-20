@@ -1,0 +1,26 @@
+[run]
+source =
+    analysis
+    api
+    compliance
+    models
+omit =
+    */api/feature_resolver.py
+    */api/geo_mock.py
+    */api/model_loader.py
+    */api/config.py
+    */api/financial.py
+    */analysis/psm_matching.py
+    */models/case2_runner.py
+    */models/almanac_runner.py
+    */models/ensemble_surrogate.py
+    */models/cocoa_head.py
+    */models/galileo_*
+    */models/vendor/*
+    */training/*
+    */data/*
+    */counterfactual/*
+
+[report]
+fail_under = 80
+show_missing = true

@@ -311,3 +311,45 @@ class ZarrCounterfactualProvider:
         if "time" in point.dims or "time" in point.coords:
             point = point.sel(time=point["time"].dt.year == year)
         return point
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI: ATTRICI counterfactual detrend for factual ERA5 Zarr."""
+    import argparse
+    import sys
+    import tempfile
+
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    parser = argparse.ArgumentParser(description="ATTRICI counterfactual climate runner")
+    parser.add_argument("--input", type=Path, required=True, help="Factual ERA5 Zarr")
+    parser.add_argument("--gmt", type=Path, required=True, help="GMT SSA NetCDF for ATTRICI")
+    parser.add_argument("--out", type=Path, required=True, help="Output counterfactual Zarr")
+    parser.add_argument(
+        "--variables",
+        nargs="+",
+        default=list(SUPPORTED_VARIABLES),
+        help="ERA5 variables to detrend",
+    )
+    parser.add_argument("--overwrite", action="store_true")
+    args = parser.parse_args(argv)
+
+    work_dir = Path(tempfile.mkdtemp(prefix="attrici_runner_"))
+    runner = ATTRICIRunner(gmt_file=args.gmt, work_dir=work_dir)
+    try:
+        runner.run(
+            args.input,
+            args.variables,
+            args.out,
+            overwrite=args.overwrite,
+        )
+        logger.info("Wrote counterfactual Zarr to %s", args.out)
+        return 0
+    except Exception as exc:
+        logger.error("%s", exc)
+        return 1
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(main())
