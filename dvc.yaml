@@ -1,82 +1,95 @@
 # DVC pipeline — https://dvc.org/doc/user-guide/project-structure/pipelines
+# Core MLOps stages: GEE ingest markers → model training → backbone benchmark.
 
 stages:
+  stage_ingest_gee:
+    cmd: python scripts/ingest_gee.py
+    deps:
+      - scripts/ingest_gee.py
+    outs:
+      - data/raw/ingest_manifest.json
+      - data/raw/cocoa_aoi.geojson
+
+  stage_train_aef_head:
+    cmd: >
+      python scripts/train_aef_head.py
+      --synthetic
+      --epochs 5
+      --checkpoint models/aef_head.pt
+    deps:
+      - scripts/train_aef_head.py
+      - src/models/aef_cocoa_head.py
+      - src/data/alphaearth_embeddings.py
+    outs:
+      - models/aef_head.pt
+
+  stage_train_casej_surrogate:
+    cmd: >
+      python scripts/train_casej_surrogate.py
+      --generate
+      --n-generate 200
+      --epochs 5
+      --checkpoint models/casej_surrogate.pt
+    deps:
+      - scripts/train_casej_surrogate.py
+      - scripts/generate_casej_training_set.py
+      - src/models/casej_surrogate.py
+      - src/models/casej_process.py
+      - config/casej/params.yaml
+    outs:
+      - models/casej_surrogate.pt
+      - data/simulations/casej_lhs.parquet
+
+  stage_train_joint:
+    cmd: >
+      python scripts/train_joint.py
+      --synthetic
+      --max-epochs 5
+      --checkpoint models/joint.pt
+    deps:
+      - scripts/train_joint.py
+      - src/models/joint_exposure_yield.py
+      - src/models/cqr.py
+    outs:
+      - models/joint.pt
+
+  stage_benchmark:
+    cmd: >
+      python scripts/benchmark_backbones.py
+      --quick
+      --n-tiles 50
+      --aef-checkpoint models/aef_head.pt
+      --latest-out reports/backbones/benchmark_latest.md
+    deps:
+      - scripts/benchmark_backbones.py
+      - src/validation/kalischek_benchmark.py
+      - models/aef_head.pt
+    outs:
+      - reports/backbones/benchmark_latest.md
+
+  # Extended pipeline (optional repro)
   era5_ingest:
     cmd: >
       python -m data.era5_ingest
       --aoi data/raw/cocoa_aoi.geojson
       --start 2015-01-01
       --end 2024-12-31
-      --out data/processed/era5.zarr
+      --out data/processed/era5_2020_2024.zarr
     deps:
-      - src/data/era5_ingest.py
       - data/raw/cocoa_aoi.geojson
+      - src/data/era5_ingest.py
     outs:
-      - data/processed/era5.zarr
-
-  attrici_counterfactual:
-    cmd: >
-      python -m counterfactual.attrici_runner
-      --input data/processed/era5.zarr
-      --gmt data/external/gmt_ssa.nc
-      --out data/processed/era5_cf.zarr
-      --overwrite
-    deps:
-      - data/processed/era5.zarr
-      - src/counterfactual/attrici_runner.py
-      - data/external/gmt_ssa.nc
-    outs:
-      - data/processed/era5_cf.zarr
-
-  sentinel_composite:
-    cmd: >
-      python -m data.sentinel_composite
-      --export local
-      --out data/processed/s2_s1.tif
-    deps:
-      - src/data/sentinel_composite.py
-    outs:
-      - data/processed/s2_s1.tif
-
-  train_prithvi:
-    cmd: >
-      python -m training.train_prithvi_cocoa
-      --image-dir data/processed/s2_s1
-      --mask-dir data/processed/masks
-      --out models/segmentation.ckpt
-      --epochs 1
-      --train-length 10
-    deps:
-      - data/processed/s2_s1.tif
-      - src/training/train_prithvi_cocoa.py
-      - src/training/cocoa_prithvi_datamodule.py
-    outs:
-      - models/segmentation.ckpt
+      - data/processed/era5_2020_2024.zarr
 
   train_yield:
     cmd: >
       python -m training.train_yield --config-name yield
     deps:
       - config/training/yield.yaml
-      - data/external/icco_*.csv
       - src/training/train_yield.py
-      - src/data/yield_panel.py
       - src/models/yield_surrogate.py
-      - src/hazards/
     outs:
       - models/yield_surrogate_v1.pt
-
-  calibrate_conformal:
-    cmd: >
-      python -m models.conformal calibrate
-      --checkpoint models/yield_surrogate_v1.pt
-      --calib data/processed/calib.parquet
-      --out models/conformal.json
-    deps:
-      - models/yield_surrogate_v1.pt
-      - src/models/conformal.py
-    outs:
-      - models/conformal.json
 
   causal_evaluation:
     cmd: >
@@ -89,20 +102,3 @@ stages:
       - src/analysis/psm_matching.py
     metrics:
       - reports/causal_eval.json
-
-  validate:
-    cmd: python -m validation.run_validate --reports-dir reports/validation
-    deps:
-      - models/segmentation.ckpt
-      - models/yield_surrogate_v1.pt
-      - reports/causal_eval.json
-      - data/external/icco_cocoa_production.csv
-      - data/external/cocoa_barometer_2024_anomalies.json
-      - data/external/giews_cocoa_drought_briefs.json
-      - src/validation/
-    outs:
-      - reports/validation/kalischek_benchmark.md
-      - reports/validation/icco_yield_backtest.md
-      - reports/validation/cocoa_barometer_check.md
-      - reports/validation/giews_drought_validation.md
-      - reports/validation/summary.md

@@ -484,6 +484,7 @@ def run_benchmark(
     galileo_checkpoint: Path = DEFAULT_GALILEO_CKPT,
     aef_checkpoint: Path = DEFAULT_AEF_CKPT,
     report_dir: Path = DEFAULT_REPORT_DIR,
+    latest_out: Path | None = None,
     max_latency_tiles: int = 50,
     galileo_model_size: str = "base",
     write_legacy_report: bool = True,
@@ -515,6 +516,11 @@ def run_benchmark(
             legacy,
             galileo_checkpoint_present=gal_predictor._has_checkpoint,
         )
+    if latest_out is not None:
+        latest_out = Path(latest_out)
+        latest_out.parent.mkdir(parents=True, exist_ok=True)
+        latest_out.write_text(aef_out.read_text(encoding="utf-8"), encoding="utf-8")
+        logger.info("Copied benchmark report → %s", latest_out)
     return aef_out
 
 
@@ -527,6 +533,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--report-dir", type=Path, default=DEFAULT_REPORT_DIR)
     parser.add_argument("--quick", action="store_true", help="Evaluate 200 tiles with Galileo nano")
     parser.add_argument("--galileo-size", choices=("nano", "tiny", "base"), default="base")
+    parser.add_argument(
+        "--latest-out",
+        type=Path,
+        default=None,
+        help="Copy primary report to this path (e.g. reports/backbones/benchmark_latest.md)",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -538,6 +550,7 @@ def main(argv: list[str] | None = None) -> int:
         galileo_checkpoint=args.galileo_checkpoint,
         aef_checkpoint=args.aef_checkpoint,
         report_dir=args.report_dir,
+        latest_out=args.latest_out,
         galileo_model_size=gal_size,
     )
     return 0
