@@ -11,7 +11,7 @@ import pandas as pd
 from api.config import APISettings
 from api.cqr_loader import load_cqr_bundle
 from api.feature_resolver import build_resolver_from_settings
-from api.model_loader import load_yield_model
+from api.model_loader import load_casej_model, load_yield_model
 from api.schemas import (
     ComplianceDdsRequest,
     ComplianceDdsResponse,
@@ -33,6 +33,7 @@ from compliance.eudr import (
     validate_geolocation,
 )
 from models.conformal import load_conformal_if_exists
+from models.casej_surrogate import CASEJSurrogate
 from models.yield_surrogate import YieldSurrogateModel
 
 
@@ -43,6 +44,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.feature_resolver = build_resolver_from_settings(settings)
     app.state.yield_model = load_yield_model(
         settings.model_checkpoint_path,
+        settings=settings,
+    )
+    app.state.casej_model = load_casej_model(
+        settings.casej_checkpoint_path,
         settings=settings,
     )
     app.state.conformal = load_conformal_if_exists(settings.conformal_json_path)
@@ -107,7 +112,7 @@ def simulate_scenario_endpoint(request: SimulateScenarioRequest) -> SimulateScen
     Applies NASA/GDDP-CMIP6 monthly deltas via ``ScenarioBuilder`` to the historical ERA5 Zarr,
     then runs paired Monte Carlo yields for baseline vs intervention with mean / p10 / p90 bands.
     """
-    model: YieldSurrogateModel = app.state.yield_model
+    model: CASEJSurrogate = app.state.casej_model
     settings: APISettings = app.state.settings
 
     try:

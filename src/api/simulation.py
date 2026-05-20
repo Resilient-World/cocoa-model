@@ -30,6 +30,8 @@ from api.schemas import (
 from counterfactual.cmip6_scenarios import ScenarioBuilder
 from hazards import apply_biotic_losses
 from hazards.black_pod import ShadeSpecies
+from models.casej_process import co2_ppm_for_ssp
+from models.casej_surrogate import CASEJSurrogate
 from models.cqr import ConformalCalibrator, QuantileYieldSurrogate
 from models.yield_surrogate import CLIMATE_IDX, YieldSurrogateModel
 
@@ -180,6 +182,27 @@ def predict_yield_samples(
     model.eval()
     samples = torch.stack(
         [model(climate, static).squeeze(0) for _ in range(num_samples)],
+        dim=0,
+    )
+    if was_training:
+        model.train()
+    return samples
+
+
+@torch.no_grad()
+def predict_scenario_yield_samples(
+    model: CASEJSurrogate,
+    climate: Tensor,
+    static: Tensor,
+    co2_ppm: float,
+    num_samples: int,
+) -> Tensor:
+    """MC-dropout samples for CASEJ surrogate with explicit CO2 (t/ha)."""
+    was_training = model.training
+    model.eval()
+    co2 = torch.tensor([co2_ppm], dtype=climate.dtype, device=climate.device)
+    samples = torch.stack(
+        [model(climate, static, co2_ppm=co2).squeeze(0) for _ in range(num_samples)],
         dim=0,
     )
     if was_training:
@@ -468,7 +491,7 @@ def simulate_intervention(
 @torch.no_grad()
 def simulate_scenario(
     request: SimulateScenarioRequest,
-    model: YieldSurrogateModel,
+    model: CASEJSurrogate,
     feature_resolver: FarmFeatureResolver,
     *,
     historical_zarr_path: Path,
@@ -479,7 +502,8 @@ def simulate_scenario(
 ) -> SimulateScenarioResponse:
     """
     Future-climate avoided loss using CMIP6 delta-change on ERA5 (`ScenarioBuilder`) +
-    paired Monte Carlo forwards for mean / p10 / p90 bands.
+    paired Monte Carlo forwards through :class:`~models.casej_surrogate.CASEJSurrogate`
+    with SSP-specific CO2 (ppm).
 
     Baseline is SSP-conditioned climate **without** intervention encoding; projected applies
     the usual mechanistic intervention deltas on the adjusted climate tensor.
@@ -527,11 +551,18 @@ def simulate_scenario(
         intervention_type=request.intervention_type,
     )
 
-    climate_baseline = climate_scenario
+    scenario_co2 = co2_ppm_for_ssp(request.scenario, horizon)
+    climate_baseline = climate_scenario.clone()
     climate_projected = _apply_intervention_climate(climate_scenario, request.intervention_type)
+    for tensor in (climate_baseline, climate_projected):
+        tensor[..., CLIMATE_IDX["co2_ppm"]] = scenario_co2
 
-    samples_cf = predict_yield_samples(model, climate_baseline, static_cf, num_samples)
-    samples_factual = predict_yield_samples(model, climate_projected, static_factual, num_samples)
+    samples_cf = predict_scenario_yield_samples(
+        model, climate_baseline, static_cf, scenario_co2, num_samples
+    )
+    samples_factual = predict_scenario_yield_samples(
+        model, climate_projected, static_factual, scenario_co2, num_samples
+    )
 
     baseline_np = samples_cf.detach().cpu().numpy().reshape(-1)
     projected_np = samples_factual.detach().cpu().numpy().reshape(-1)

@@ -11,7 +11,8 @@ import xarray as xr
 from fastapi.testclient import TestClient
 
 from api.main import app
-from models.yield_surrogate import N_CLIMATE_CHANNELS, YieldSurrogateModel
+from models.casej_surrogate import CASEJSurrogate
+from models.yield_surrogate import N_CLIMATE_CHANNELS
 
 
 VALID_PAYLOAD = {
@@ -125,7 +126,7 @@ def test_simulate_scenario_happy_path(mock_sb_cls: MagicMock, scenario_client: T
     mock_sb_cls.return_value = inst
     inst.build_scenario.return_value = _scenario_grid_dataset()
 
-    app.state.yield_model = YieldSurrogateModel(
+    app.state.casej_model = CASEJSurrogate(
         sequence_length=365,
         climate_features=11,
         static_features=13,
