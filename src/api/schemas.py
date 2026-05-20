@@ -54,6 +54,34 @@ class ConfidenceInterval(BaseModel):
     avoided_loss_tonnes: AvoidedLossInterval
 
 
+class ConformalIntervalResponse(BaseModel):
+    """Split / Mondrian conformal interval with finite-sample coverage statement."""
+
+    point: float = Field(..., description="Point prediction (tonnes/ha or tonnes)")
+    lower: float = Field(..., description="Lower conformal bound")
+    upper: float = Field(..., description="Upper conformal bound")
+    coverage_target: float = Field(
+        default=0.9,
+        description="Target marginal coverage (1 − α)",
+    )
+    method: str = Field(
+        default="split_conformal",
+        description="Conformal method identifier",
+    )
+    coverage_guarantee: str = Field(
+        ...,
+        description="Human-readable finite-sample coverage guarantee",
+    )
+
+
+class ConformalConfidenceInterval(BaseModel):
+    """Conformal prediction intervals (90% by default when α=0.1)."""
+
+    baseline_yield_tonnes_per_ha: ConformalIntervalResponse | None = None
+    projected_yield_tonnes_per_ha: ConformalIntervalResponse | None = None
+    avoided_loss_tonnes: ConformalIntervalResponse | None = None
+
+
 class SimulateInterventionResponse(BaseModel):
     """Response from POST /simulate-intervention."""
 
@@ -76,6 +104,10 @@ class SimulateInterventionResponse(BaseModel):
         description="Monetary value of avoided loss (USD)",
     )
     confidence_interval: ConfidenceInterval
+    conformal_interval: ConformalConfidenceInterval | None = Field(
+        default=None,
+        description="Present when models/conformal.json is loaded at API startup",
+    )
 
     @field_validator("avoided_loss_tonnes", "financial_impact_usd", mode="before")
     @classmethod

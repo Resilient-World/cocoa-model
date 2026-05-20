@@ -102,6 +102,7 @@ def test_shade_trees_intervention_response_schema(client: TestClient) -> None:
         "avoided_loss_tonnes",
         "financial_impact_usd",
         "confidence_interval",
+        "conformal_interval",
     }
 
 

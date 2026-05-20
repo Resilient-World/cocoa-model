@@ -24,6 +24,7 @@ from compliance.eudr import (
     generate_dds,
     validate_geolocation,
 )
+from models.conformal import load_conformal_if_exists
 from models.yield_surrogate import YieldSurrogateModel
 
 
@@ -36,6 +37,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.model_checkpoint_path,
         settings=settings,
     )
+    app.state.conformal = load_conformal_if_exists(settings.conformal_json_path)
     yield
 
 
@@ -75,6 +77,7 @@ def simulate_intervention_endpoint(
             num_samples=settings.mc_num_samples,
             yield_blend_weight=settings.yield_blend_weight,
             climate_year=settings.climate_reference_year,
+            conformal=getattr(app.state, "conformal", None),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

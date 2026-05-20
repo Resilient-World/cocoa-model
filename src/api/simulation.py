@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
@@ -13,6 +13,8 @@ from api.financial import calculate_financial_impact_usd
 from api.schemas import (
     AvoidedLossInterval,
     ConfidenceInterval,
+    ConformalConfidenceInterval,
+    ConformalIntervalResponse,
     InterventionType,
     SimulateInterventionRequest,
     SimulateInterventionResponse,
@@ -21,6 +23,7 @@ from models.yield_surrogate import CLIMATE_IDX, YieldSurrogateModel
 
 if TYPE_CHECKING:
     from api.feature_resolver import FarmFeatureResolver
+    from models.conformal import ConformalPredictor
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +123,36 @@ def predict_yield_samples(
     return samples
 
 
+def _conformal_to_response(interval: Any) -> ConformalIntervalResponse:
+    return ConformalIntervalResponse(
+        point=interval.point,
+        lower=interval.lower,
+        upper=interval.upper,
+        coverage_target=interval.coverage_target,
+        method=interval.method,
+        coverage_guarantee=interval.coverage_guarantee,
+    )
+
+
+def _conformal_avoided_loss_interval(
+    baseline: ConformalIntervalResponse,
+    projected: ConformalIntervalResponse,
+    farm_size_ha: float,
+) -> ConformalIntervalResponse:
+    """Conservative conformal bounds on avoided loss from per-scenario yield intervals."""
+    avoided_lower = max(0.0, (projected.lower - baseline.upper) * farm_size_ha)
+    avoided_upper = max(0.0, (projected.upper - baseline.lower) * farm_size_ha)
+    point = max(0.0, (projected.point - baseline.point) * farm_size_ha)
+    return ConformalIntervalResponse(
+        point=point,
+        lower=avoided_lower,
+        upper=avoided_upper,
+        coverage_target=baseline.coverage_target,
+        method=f"derived:{baseline.method}",
+        coverage_guarantee=baseline.coverage_guarantee,
+    )
+
+
 def _blend_yield(mc_mean: float, current_yield: float, blend_weight: float) -> float:
     """Blend model output with observed yield for stable demo responses."""
     w = min(max(blend_weight, 0.0), 1.0)
@@ -134,6 +167,7 @@ def simulate_intervention(
     num_samples: int = 50,
     yield_blend_weight: float = 0.3,
     climate_year: int | None = None,
+    conformal: ConformalPredictor | None = None,
 ) -> SimulateInterventionResponse:
     """
     Predict counterfactual vs factual yield and compute avoided loss + financial impact.
@@ -186,6 +220,34 @@ def simulate_intervention(
     ci_lower = float(np.percentile(avoided_loss_samples, 5.0))
     ci_upper = float(np.percentile(avoided_loss_samples, 95.0))
 
+    conformal_block: ConformalConfidenceInterval | None = None
+    if conformal is not None:
+        from models.conformal import MondrianConformalYield
+
+        predict_kwargs: dict[str, Any] = {
+            "num_samples": num_samples,
+            "device": "cpu",
+        }
+        if isinstance(conformal, MondrianConformalYield):
+            predict_kwargs["lat"] = lat
+            predict_kwargs["lon"] = lon
+
+        cf_interval = conformal.predict(model, climate_cf, static_cf, **predict_kwargs)
+        factual_interval = conformal.predict(
+            model, climate_factual, static_factual, **predict_kwargs
+        )
+        baseline_cf = _conformal_to_response(cf_interval)
+        projected_cf = _conformal_to_response(factual_interval)
+        conformal_block = ConformalConfidenceInterval(
+            baseline_yield_tonnes_per_ha=baseline_cf,
+            projected_yield_tonnes_per_ha=projected_cf,
+            avoided_loss_tonnes=_conformal_avoided_loss_interval(
+                baseline_cf,
+                projected_cf,
+                request.farm_size_ha,
+            ),
+        )
+
     return SimulateInterventionResponse(
         baseline_yield_tonnes_per_ha=baseline_yield,
         projected_yield_tonnes_per_ha=projected_yield,
@@ -198,4 +260,5 @@ def simulate_intervention(
                 level=0.9,
             ),
         ),
+        conformal_interval=conformal_block,
     )
