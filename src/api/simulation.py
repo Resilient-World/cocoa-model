@@ -323,6 +323,17 @@ def _simulate_cqr(
     )
 
 
+def _optional_eudr_status(
+    request: SimulateInterventionRequest | SimulateScenarioRequest,
+    settings: Any,
+) -> Any:
+    if not getattr(request, "farm_polygon", None):
+        return None
+    from api.eudr import evaluate_eudr_status
+
+    return evaluate_eudr_status(request.farm_polygon, settings=settings)
+
+
 def simulate_intervention(
     request: SimulateInterventionRequest,
     model: YieldSurrogateModel,
@@ -335,6 +346,7 @@ def simulate_intervention(
     uq_method: UQMethod = "mcd",
     cqr_model: QuantileYieldSurrogate | None = None,
     cqr_calibrator: ConformalCalibrator | None = None,
+    settings: Any = None,
 ) -> SimulateInterventionResponse:
     """
     Predict counterfactual vs factual yield and compute avoided loss + financial impact.
@@ -468,6 +480,8 @@ def simulate_intervention(
             ),
         )
 
+    eudr_status = _optional_eudr_status(request, settings) if settings is not None else None
+
     return SimulateInterventionResponse(
         baseline_yield_tonnes_per_ha=baseline_yield,
         projected_yield_tonnes_per_ha=projected_yield,
@@ -488,6 +502,7 @@ def simulate_intervention(
             "baseline": _biotic_response_block(biotic_cf),
             "projected": _biotic_response_block(biotic_factual),
         },
+        eudr_status=eudr_status,
     )
 
 
@@ -589,6 +604,7 @@ def simulate_scenario(
     num_samples: int = 50,
     yield_blend_weight: float = 0.0,
     climate_year: int | None = None,
+    settings: Any = None,
 ) -> SimulateScenarioResponse:
     """
     Future-climate avoided loss using CMIP6 delta-change on ERA5 (`ScenarioBuilder`) +
@@ -679,6 +695,8 @@ def simulate_scenario(
         ci_high_tonnes=a_p90,
     )
 
+    eudr_status = _optional_eudr_status(request, settings) if settings is not None else None
+
     return SimulateScenarioResponse(
         scenario=request.scenario,
         horizon_year=request.horizon_year,
@@ -688,4 +706,5 @@ def simulate_scenario(
         avoided_loss_tonnes=AvoidedLossUncertaintyBand(mean=a_mean, p10=a_p10, p90=a_p90),
         financial_impact_usd_mean=fin.usd.point,
         financial_impact=financial_impact_to_schema(fin),
+        eudr_status=eudr_status,
     )

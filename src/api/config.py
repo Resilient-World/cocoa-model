@@ -46,6 +46,9 @@ class APISettings(BaseSettings):
     climate_reference_year: int = 2023
     earthengine_project: str | None = None
 
+    whisp_base_url: str = "https://whisp.openforis.org"
+    whisp_api_key: str | None = None
+
     cocoa_exposure_year: int = 2023
     cocoa_exposure_threshold: float = Field(
         default=DEFAULT_THRESHOLD,

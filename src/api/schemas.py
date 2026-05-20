@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -84,6 +84,10 @@ class SimulateInterventionRequest(BaseModel):
     country_code: Literal["GHA", "CIV", "CMR"] | None = Field(
         default=None,
         description="Producer country for pass-through; inferred from coordinates if omitted",
+    )
+    farm_polygon: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional GeoJSON Polygon; when set, response includes eudr_status (EUDR 2023/1115)",
     )
 
     # Optional cooperative-level mode: request recommendations for many farms at once.
@@ -202,6 +206,10 @@ class SimulateScenarioRequest(BaseModel):
     pricing_basis: PricingBasis = Field(default="spot")
     farm_gate: bool = Field(default=True)
     country_code: Literal["GHA", "CIV", "CMR"] | None = None
+    farm_polygon: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional GeoJSON Polygon; when set, response includes eudr_status",
+    )
     scenario: ScenarioSSP = Field(
         ...,
         description="CMIP6 SSP label passed through ScenarioBuilder",
@@ -302,6 +310,10 @@ class SimulateScenarioResponse(BaseModel):
         ...,
         description="Avoided-loss valuation in USD, GHS, and XOF",
     )
+    eudr_status: "EudrStatusBlock | None" = Field(
+        default=None,
+        description="Present when request includes farm_polygon (EUDR Art. 3 / Whisp)",
+    )
 
 
 class BioticLossAttribution(BaseModel):
@@ -357,6 +369,10 @@ class SimulateInterventionResponse(BaseModel):
             "keys ``baseline`` and ``projected``"
         ),
     )
+    eudr_status: "EudrStatusBlock | None" = Field(
+        default=None,
+        description="Present when request includes farm_polygon (EUDR Art. 3 / Whisp)",
+    )
 
     @field_validator("avoided_loss_tonnes", "financial_impact_usd", mode="before")
     @classmethod
@@ -367,6 +383,8 @@ class SimulateInterventionResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # EUDR compliance (EU) 2023/1115
 # ---------------------------------------------------------------------------
+
+from api.eudr import EudrStatusBlock  # noqa: E402
 
 from compliance.eudr import (  # noqa: E402
     DueDiligenceStatement,

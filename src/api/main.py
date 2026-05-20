@@ -24,6 +24,7 @@ from api.schemas import (
     SimulateScenarioRequest,
     SimulateScenarioResponse,
 )
+from api.eudr import router as eudr_router
 from api.simulation import (
     simulate_climate_attribution,
     simulate_intervention,
@@ -70,6 +71,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.include_router(eudr_router)
+
 
 @app.get("/health")
 def health() -> dict[str, str]:
@@ -103,6 +106,7 @@ def simulate_intervention_endpoint(
             uq_method=settings.resolved_uq_method(),
             cqr_model=getattr(app.state, "cqr_model", None),
             cqr_calibrator=getattr(app.state, "cqr_calibrator", None),
+            settings=settings,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -159,6 +163,7 @@ def simulate_scenario_endpoint(request: SimulateScenarioRequest) -> SimulateScen
             num_samples=settings.mc_num_samples,
             yield_blend_weight=settings.yield_blend_weight,
             climate_year=settings.climate_reference_year,
+            settings=settings,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

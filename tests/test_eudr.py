@@ -216,6 +216,129 @@ def test_compliance_dds_api_endpoint(api_client: TestClient) -> None:
     assert dds_inner["plot"]["plot_id"] == "API-CIV-001"
 
 
+# ---------------------------------------------------------------------------
+# Whisp-backed EUDR due diligence (Oct 2025 amendments)
+# ---------------------------------------------------------------------------
+
+from data.whisp_client import MockWhispClient, WhispPlotResult  # noqa: E402
+
+from api.eudr import (  # noqa: E402
+    EudrDueDiligenceRequest,
+    evaluate_eudr_status,
+    run_eudr_due_diligence,
+)
+from api.config import APISettings  # noqa: E402
+
+
+def _mock_whisp_clean() -> MockWhispClient:
+    return MockWhispClient(
+        default_result=WhispPlotResult(
+            report_id="mock-whisp-clean",
+            deforestation_flag=False,
+            protected_area_overlap=False,
+            risk_level="low",
+            eudr_risk_class="standard",
+            evidence_urls=("https://whisp.openforis.org/report/mock-whisp-clean",),
+            source_datasets=("WHISP", "Hansen GFC", "JRC GFC2020"),
+        )
+    )
+
+
+def _mock_whisp_enhanced() -> MockWhispClient:
+    return MockWhispClient(
+        default_result=WhispPlotResult(
+            report_id="mock-whisp-risk",
+            deforestation_flag=True,
+            protected_area_overlap=True,
+            risk_level="high",
+            eudr_risk_class="enhanced",
+            evidence_urls=("https://whisp.openforis.org/report/mock-whisp-risk",),
+            source_datasets=("WHISP", "Hansen GFC"),
+        )
+    )
+
+
+def test_run_eudr_due_diligence_mock_whisp() -> None:
+    import asyncio
+
+    settings = APISettings()
+    req = EudrDueDiligenceRequest(
+        farm_polygon=CDI_CLEAN_POLYGON,
+        commodity="cocoa",
+        use_gee_fdp_screening=False,
+    )
+    result = asyncio.run(
+        run_eudr_due_diligence(
+            req,
+            settings=settings,
+            whisp_client=_mock_whisp_clean(),
+        )
+    )
+    assert result.deforestation_post_2020 is False
+    assert result.protected_area_overlap is False
+    assert result.risk_class == "standard"
+    assert result.whisp_report_id == "mock-whisp-clean"
+    assert any("whisp.openforis.org" in url for url in result.evidence_urls)
+    assert result.traceability["forest_baseline_cutoff"] == "2020-12-31"
+    assert "whisp" in result.traceability
+
+
+def test_run_eudr_due_diligence_enhanced_risk() -> None:
+    import asyncio
+
+    settings = APISettings()
+    req = EudrDueDiligenceRequest(
+        farm_polygon=CDI_DEFORESTED_POLYGON,
+        commodity="cocoa",
+        use_gee_fdp_screening=False,
+    )
+    result = asyncio.run(
+        run_eudr_due_diligence(
+            req,
+            settings=settings,
+            whisp_client=_mock_whisp_enhanced(),
+        )
+    )
+    assert result.deforestation_post_2020 is True
+    assert result.protected_area_overlap is True
+    assert result.risk_class == "enhanced"
+
+
+def test_evaluate_eudr_status_sync() -> None:
+    settings = APISettings()
+    block = evaluate_eudr_status(
+        CDI_CLEAN_POLYGON,
+        settings=settings,
+        whisp_client=_mock_whisp_clean(),
+    )
+    assert block is not None
+    assert block.risk_class == "standard"
+    assert block.whisp_report_id == "mock-whisp-clean"
+
+
+def test_eudr_due_diligence_api_endpoint(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "api.eudr.build_whisp_client",
+        lambda _settings: _mock_whisp_clean(),
+    )
+    payload = {
+        "farm_polygon": CDI_CLEAN_POLYGON,
+        "commodity": "cocoa",
+        "use_gee_fdp_screening": False,
+    }
+    response = api_client.post("/eudr-due-diligence", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["deforestation_post_2020"] is False
+    assert data["risk_class"] == "standard"
+    assert data["whisp_report_id"] == "mock-whisp-clean"
+    assert isinstance(data["evidence_urls"], list)
+    assert len(data["evidence_urls"]) >= 1
+
+
 def test_compliance_dds_api_rejects_invalid_geolocation(api_client: TestClient) -> None:
     payload = {
         "plot": {
