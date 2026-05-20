@@ -29,6 +29,7 @@ class APISettings(BaseSettings):
     cmip6_zarr_path: Path = _REPO_ROOT / "data" / "processed" / "cmip6_ensemble.zarr"
     static_zarr_path: Path = _REPO_ROOT / "data" / "processed" / "site_static.zarr"
     feature_cache_dir: Path = _REPO_ROOT / "data" / "cache" / "api_features"
+    feature_store_root: Path | None = None
     climate_reference_year: int = 2023
     earthengine_project: str | None = None
 
