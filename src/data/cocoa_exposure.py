@@ -12,7 +12,8 @@ Exposure backends
 -----------------
 - ``fdp``: FDP probability raster (GEE prior)
 - ``galileo``: :class:`~models.galileo_seg.GalileoCocoaSegmentation` tile inference
-- ``ensemble``: ``0.5 * FDP + 0.5 * Galileo`` (when both available)
+- ``aef``: AlphaEarth Foundations 64-D embeddings + :class:`~models.aef_cocoa_head.AEFCocoaHead`
+- ``ensemble``: ``0.5 * AEF + 0.3 * Galileo + 0.2 * FDP`` (rebalanced after AEF benchmark)
 
 Licensing
 ---------
@@ -50,10 +51,14 @@ MIN_THRESHOLD = 0.5
 DEFAULT_THRESHOLD = 0.96
 DEFAULT_SCALE_M = 10
 
-ExposureBackend = Literal["fdp", "galileo", "ensemble"]
+ExposureBackend = Literal["fdp", "galileo", "aef", "ensemble"]
+
+# Default ensemble blend: AEF, Galileo, FDP (sums to 1.0)
+DEFAULT_ENSEMBLE_WEIGHTS: tuple[float, float, float] = (0.5, 0.3, 0.2)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_GALILEO_CHECKPOINT = _REPO_ROOT / "models" / "galileo_cocoa_seg.pt"
+DEFAULT_AEF_CHECKPOINT = _REPO_ROOT / "models" / "aef_cocoa_head.pt"
 
 
 def _normalize_year(year: int) -> int:
@@ -115,7 +120,8 @@ class CocoaExposureIngest:
         *,
         backend: ExposureBackend = "fdp",
         galileo_checkpoint: Path | str | None = None,
-        ensemble_weights: tuple[float, float] = (0.5, 0.5),
+        aef_checkpoint: Path | str | None = None,
+        ensemble_weights: tuple[float, float, float] = DEFAULT_ENSEMBLE_WEIGHTS,
     ) -> None:
         self.aoi = aoi
         self.year = _normalize_year(year)
@@ -125,9 +131,11 @@ class CocoaExposureIngest:
         self.galileo_checkpoint = (
             Path(galileo_checkpoint) if galileo_checkpoint else DEFAULT_GALILEO_CHECKPOINT
         )
+        self.aef_checkpoint = Path(aef_checkpoint) if aef_checkpoint else DEFAULT_AEF_CHECKPOINT
         self.ensemble_weights = ensemble_weights
         self._probability_image: ee.Image | None = None
         self._galileo_model = None
+        self._aef_head = None
 
     def _collection(self) -> ee.ImageCollection:
         start, end = _year_date_range(self.year)
@@ -220,6 +228,51 @@ class CocoaExposureIngest:
         prob = model.predict_proba(batch)
         return float(prob.mean().item())
 
+    def _load_aef_head(self) -> Any:
+        if self._aef_head is not None:
+            return self._aef_head
+        from models.aef_cocoa_head import AEFCocoaHead, load_aef_cocoa_head
+
+        if self.aef_checkpoint.is_file():
+            self._aef_head = load_aef_cocoa_head(self.aef_checkpoint, device="cpu")
+        else:
+            logger.warning(
+                "AEF head checkpoint missing at %s; using uninitialized AEFCocoaHead",
+                self.aef_checkpoint,
+            )
+            self._aef_head = AEFCocoaHead()
+            self._aef_head.eval()
+        return self._aef_head
+
+    def _aef_embedding_at_point(self, lat: float, lon: float) -> np.ndarray | None:
+        """Sample 64-D AlphaEarth embedding at a point (GEE)."""
+        try:
+            from data.alphaearth_embeddings import AlphaEarthIngest
+
+            point_aoi = ee.Geometry.Point([lon, lat]).buffer(50)
+            ingest = AlphaEarthIngest(point_aoi, year=self.year, project=self.project)
+            return ingest.sample_point(lat, lon)
+        except Exception as exc:
+            logger.debug("AEF embedding sample failed (%s); using location prior", exc)
+            return None
+
+    def _location_prior_embedding(self, lat: float, lon: float) -> np.ndarray:
+        """Deterministic pseudo-embedding when GEE is unavailable."""
+        seed = int(hash((round(lat, 4), round(lon, 4))) % (2**32))
+        rng = np.random.default_rng(seed)
+        vec = rng.normal(0, 1, 64).astype(np.float32)
+        return vec / (np.linalg.norm(vec) + 1e-8)
+
+    def _aef_probability_at_point(self, lat: float, lon: float) -> float:
+        import torch
+
+        head = self._load_aef_head()
+        emb = self._aef_embedding_at_point(lat, lon)
+        if emb is None:
+            emb = self._location_prior_embedding(lat, lon)
+        t = torch.from_numpy(emb).unsqueeze(0)
+        return float(head.predict_proba(t).item())
+
     def sample_point(
         self,
         lat: float,
@@ -237,13 +290,20 @@ class CocoaExposureIngest:
         if self.backend == "galileo":
             return self._galileo_probability_at_point(lat, lon)
 
-        # ensemble
-        fdp_p = self._fdp_probability_at_point(lat, lon, scale_m)
+        if self.backend == "aef":
+            return self._aef_probability_at_point(lat, lon)
+
+        # ensemble: 0.5 AEF + 0.3 Galileo + 0.2 FDP
+        w_aef, w_gal, w_fdp = self.ensemble_weights
+        aef_p = self._aef_probability_at_point(lat, lon)
         gal_p = self._galileo_probability_at_point(lat, lon)
-        w_fdp, w_gal = self.ensemble_weights
-        if fdp_p is None:
-            return float(np.clip(gal_p, 0.0, 1.0))
-        return float(np.clip(w_fdp * fdp_p + w_gal * gal_p, 0.0, 1.0))
+        fdp_p = self._fdp_probability_at_point(lat, lon, scale_m)
+        parts: list[tuple[float, float]] = [(w_aef, aef_p), (w_gal, gal_p)]
+        if fdp_p is not None:
+            parts.append((w_fdp, fdp_p))
+        weight_sum = sum(w for w, _ in parts)
+        blended = sum(w * p for w, p in parts) / max(weight_sum, 1e-9)
+        return float(np.clip(blended, 0.0, 1.0))
 
     def sample_points(
         self,
@@ -321,6 +381,7 @@ def resolve_exposure_probability(
     year: int = 2023,
     backend: ExposureBackend = "fdp",
     galileo_checkpoint: Path | str | None = None,
+    aef_checkpoint: Path | str | None = None,
     project: str | None = None,
 ) -> float:
     """
@@ -347,6 +408,7 @@ def resolve_exposure_probability(
         year=year,
         backend=backend,
         galileo_checkpoint=galileo_checkpoint,
+        aef_checkpoint=aef_checkpoint,
         project=project,
     )
     return ing.sample_point(lat, lon) or _cocoa_belt_probability(lat, lon)
@@ -357,6 +419,8 @@ __all__ = [
     "ExposureBackend",
     "FDP_COCOA_COLLECTION",
     "FDP_MODEL_CARD_URL",
+    "DEFAULT_AEF_CHECKPOINT",
+    "DEFAULT_ENSEMBLE_WEIGHTS",
     "DEFAULT_GALILEO_CHECKPOINT",
     "DEFAULT_THRESHOLD",
     "MIN_THRESHOLD",

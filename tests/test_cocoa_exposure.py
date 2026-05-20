@@ -17,7 +17,14 @@ def test_backend_defaults_to_fdp():
 
 def test_ensemble_weights_default():
     ing = CocoaExposureIngest(aoi=object(), backend="ensemble")  # type: ignore[arg-type]
-    assert ing.ensemble_weights == (0.5, 0.5)
+    assert ing.ensemble_weights == (0.5, 0.3, 0.2)
+
+
+def test_aef_backend_without_gee(monkeypatch: pytest.MonkeyPatch) -> None:
+    ing = CocoaExposureIngest(aoi=object(), backend="aef")  # type: ignore[arg-type]
+    monkeypatch.setattr(ing, "_aef_probability_at_point", lambda lat, lon: 0.55)
+    p = ing.sample_point(5.84, -5.36)
+    assert p == pytest.approx(0.55, abs=0.01)
 
 
 def test_galileo_point_inference_without_gee(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -37,12 +44,14 @@ def test_galileo_point_inference_without_gee(monkeypatch: pytest.MonkeyPatch) ->
     assert p == pytest.approx(0.42, abs=0.01)
 
 
-def test_ensemble_blends_fdp_and_galileo(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ensemble_blends_aef_galileo_and_fdp(monkeypatch: pytest.MonkeyPatch) -> None:
     ing = CocoaExposureIngest(aoi=object(), backend="ensemble")  # type: ignore[arg-type]
-    monkeypatch.setattr(ing, "_fdp_probability_at_point", lambda lat, lon, scale_m: 0.8)
+    monkeypatch.setattr(ing, "_aef_probability_at_point", lambda lat, lon: 0.9)
     monkeypatch.setattr(ing, "_galileo_probability_at_point", lambda lat, lon: 0.4)
+    monkeypatch.setattr(ing, "_fdp_probability_at_point", lambda lat, lon, scale_m: 0.2)
     p = ing.sample_point(5.84, -5.36)
-    assert p == pytest.approx(0.6, abs=0.01)
+    # 0.5*0.9 + 0.3*0.4 + 0.2*0.2 = 0.61
+    assert p == pytest.approx(0.61, abs=0.01)
 
 
 @pytest.mark.integration

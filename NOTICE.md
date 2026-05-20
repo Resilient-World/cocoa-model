@@ -31,3 +31,21 @@ SOFTWARE.
 
 **Citation:** Tseng et al. (2025), *Galileo: Learning Global and Local Features of Many
 Remote Sensing Modalities*, arXiv:2502.09356, https://arxiv.org/abs/2502.09356
+
+## AlphaEarth Foundations (Google DeepMind)
+
+Annual satellite embeddings are read from the Earth Engine collection
+`GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL` (AlphaEarth Foundations, July 2025;
+arXiv:2507.22291).
+
+**License:** [Creative Commons Attribution 4.0 International (CC-BY 4.0)](https://creativecommons.org/licenses/by/4.0/).
+
+**Required attribution:** *"AlphaEarth Foundations, Google DeepMind"* (and citation of
+arXiv:2507.22291 where appropriate).
+
+**Commercial use:** CC-BY 4.0 permits commercial use, modification, and distribution
+provided attribution is preserved. This is distinct from the Forest Data Partnership
+FDP cocoa model (CC-BY 4.0 **NC**). SaaS and insurance workflows using AEF embeddings
+should include the attribution above in product documentation and any public materials
+that surface model provenance. Confirm your Earth Engine / Google Cloud terms separately
+for API access and export quotas.
