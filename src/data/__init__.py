@@ -14,7 +14,14 @@ from data.cocoa_exposure import (
     DEFAULT_GALILEO_CHECKPOINT,
     ExposureBackend,
     FDP_COCOA_COLLECTION,
+    REGIONS,
+    RegionPreset,
+    is_fdp_covered,
+    normalize_region_key,
+    region_geometry,
+    region_latlon_bounds,
     resolve_exposure_probability,
+    sample_cocoa_probability_at_point,
 )
 
 __all__ = [
@@ -29,5 +36,12 @@ __all__ = [
     "DEFAULT_GALILEO_CHECKPOINT",
     "ExposureBackend",
     "FDP_COCOA_COLLECTION",
+    "REGIONS",
+    "RegionPreset",
+    "is_fdp_covered",
+    "normalize_region_key",
+    "region_geometry",
+    "region_latlon_bounds",
     "resolve_exposure_probability",
+    "sample_cocoa_probability_at_point",
 ]

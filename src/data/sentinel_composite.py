@@ -1,9 +1,9 @@
 """
-Build a cloud-free Sentinel-2 / Sentinel-1 composite for Ghana (dry season).
+Build a cloud-free Sentinel-2 / Sentinel-1 composite for a cocoa region (dry season).
 
 Creates a median Sentinel-2 SR composite with QA60 cloud masking, NDVI/EVI
 indices, merges with median Sentinel-1 GRD VV/VH backscatter, and exports a
-multi-band GeoTIFF.
+region-tagged multi-band GeoTIFF (``data/processed/s2_s1_<region>.tif``).
 """
 
 from __future__ import annotations
@@ -20,6 +20,13 @@ from data.era5_ingest import (
     export_local_geotiff,
     export_to_google_drive,
 )
+from data.cocoa_exposure import (
+    REGIONS,
+    normalize_region_key,
+    processed_sentinel_tif_path,
+    region_bounds_dict,
+    region_geometry,
+)
 from data.gee_auth import (
     EarthEngineAuthError,
     EarthEngineNotAuthenticatedError,
@@ -29,13 +36,8 @@ from data.gee_auth import (
 S2_SR_COLLECTION = "COPERNICUS/S2_SR_HARMONIZED"
 S1_GRD_COLLECTION = "COPERNICUS/S1_GRD"
 
-# Ghana — [west, south, east, north]
-GHANA_BOUNDS: dict[str, float] = {
-    "west": -3.25,
-    "south": 4.7,
-    "east": 1.2,
-    "north": 11.2,
-}
+# Backwards-compatible alias for Ghana bounds
+GHANA_BOUNDS: dict[str, float] = region_bounds_dict("ghana")
 
 # Dry season: December 2023 – March 2024 (end date exclusive)
 DRY_SEASON_START = "2023-12-01"
@@ -58,8 +60,13 @@ class SentinelCompositeError(RuntimeError):
     """Raised when composite construction or export fails."""
 
 
+def region_roi(region: str) -> ee.Geometry:
+    """Return an Earth Engine rectangle for a named region."""
+    return region_geometry(region)
+
+
 def ghana_geometry(bounds: dict[str, float] | None = None) -> ee.Geometry:
-    """Return an Earth Engine rectangle covering Ghana."""
+    """Return an Earth Engine rectangle covering Ghana (legacy helper)."""
     b = bounds or GHANA_BOUNDS
     return ee.Geometry.Rectangle([b["west"], b["south"], b["east"], b["north"]])
 
@@ -267,6 +274,7 @@ def export_composite(
 
 def run_sentinel_export(
     *,
+    region: str = "ghana",
     export: ExportDestination = "drive",
     start_date: str = DRY_SEASON_START,
     end_date: str = DRY_SEASON_END,
@@ -276,17 +284,19 @@ def run_sentinel_export(
     wait: bool = True,
     project: str | None = None,
 ) -> ee.batch.Task | Path:
-    """Initialize Earth Engine, build composite, and export."""
+    """Initialize Earth Engine, build composite, and export for ``region``."""
+    region_key = normalize_region_key(region)
     initialize_earth_engine(project=project)
-    roi = ghana_geometry()
+    roi = region_roi(region_key)
     composite = build_ghana_dry_season_composite(roi, start_date, end_date)
-    description = drive_description or "ghana_s2_s1_dry_2023_2024"
+    description = drive_description or f"{region_key}_s2_s1_dry_2023_2024"
+    local_out = output_path or processed_sentinel_tif_path(region_key)
     return export_composite(
         composite,
         export=export,
         description=description,
         drive_folder=drive_folder,
-        output_path=output_path,
+        output_path=local_out,
         region=roi,
         wait=wait,
     )
@@ -296,8 +306,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Cloud-free Sentinel-2 median composite (QA60) with NDVI/EVI plus "
-            "Sentinel-1 VV/VH median backscatter for Ghana, dry season Dec 2023–Mar 2024."
+            "Sentinel-1 VV/VH median backscatter for a cocoa region, dry season Dec 2023–Mar 2024."
         )
+    )
+    parser.add_argument(
+        "--region",
+        choices=sorted(REGIONS.keys()),
+        default="ghana",
+        help="Named cocoa region (default: ghana)",
     )
     parser.add_argument(
         "--start",
@@ -348,6 +364,7 @@ def main(argv: list[str] | None = None) -> int:
         args.export = "local"
     try:
         result = run_sentinel_export(
+            region=args.region,
             export=args.export,
             start_date=args.start,
             end_date=args.end,

@@ -236,8 +236,8 @@ API settings are loaded via `pydantic-settings` in `api.config.APISettings`.
 | Module | CLI | Role |
 |--------|-----|------|
 | [`gee_auth.py`](src/data/gee_auth.py) | `python -m data.gee_auth` | Initialize EE; verify Ghana elevation |
-| [`era5_ingest.py`](src/data/era5_ingest.py) | `python -m data.era5_ingest` | ERA5 daily → annual heat-stress days + precipitation GeoTIFF (Ghana & Côte d'Ivoire) |
-| [`sentinel_composite.py`](src/data/sentinel_composite.py) | `python -m data.sentinel_composite` | Cloud-masked S2 median + NDVI/EVI + S1 VV/VH composite (Ghana dry season) |
+| [`era5_ingest.py`](src/data/era5_ingest.py) | `python -m data.era5_ingest --region ghana …` | ERA5 daily Zarr per region (`data/processed/era5_<region>_<years>.zarr`) |
+| [`sentinel_composite.py`](src/data/sentinel_composite.py) | `python -m data.sentinel_composite --region civ` | Cloud-masked S2/S1 composite → `data/processed/s2_s1_<region>.tif` |
 | [`cocoa_dataset.py`](src/data/cocoa_dataset.py) | — | TorchGeo `CocoaImagery` / `CocoaMask` / `CocoaDataset` + `CocoaDataModule` |
 | [`cocoa_exposure.py`](src/data/cocoa_exposure.py) | — | FDP cocoa probability (2025a) via GEE; point sample + optional Zarr export |
 
@@ -252,11 +252,13 @@ API settings are loaded via `pydantic-settings` in `api.config.APISettings`.
 | Years | 2020, 2023 (annual composites) |
 | Band | `probability` (0–1 cocoa occupancy) |
 | Default threshold | **0.96** ([FDP 2025a model card](https://github.com/google/forest-data-partnership/tree/main/models/cocoa) F1-optimal precision/recall) |
-| Coverage | Côte d'Ivoire, Ghana, Indonesia, Ecuador, Peru, Colombia |
+| Coverage | Ghana, Côte d'Ivoire, Cameroon, Nigeria, Indonesia, Ecuador, Peru, Colombia (`REGIONS` in `cocoa_exposure.py`) |
+
+**Regions:** `data.cocoa_exposure.REGIONS` defines bounding-box `ee.Geometry` presets for each country. CLI: `--region ghana|civ|cameroon|nigeria|indonesia|ecuador|peru|colombia` on `era5_ingest` and `sentinel_composite`.
 
 **API:** `CocoaExposureIngest(aoi, year=2023, threshold=0.96)` exposes `probability_image()`, `binary_mask()`, `sample_point()`, `to_zarr()` (Xee), and `area_hectares()`.
 
-**Product wiring:** `api/feature_resolver.py` samples FDP probability at farm points (static vector index 9). When the pixel is masked or outside FDP coverage, `_cocoa_belt_probability` remains the last-resort heuristic (e.g. Cameroon, Nigeria).
+**Product wiring:** `api/feature_resolver.py` calls `sample_cocoa_probability_at_point()` (static index 9). Inside FDP-native `REGIONS`, FDP (or configured backend) is used; **outside** those bounds, exposure falls back to **AlphaEarth embeddings + Galileo** (globally available). Masked FDP pixels still use the belt heuristic.
 
 **License:** Non-commercial Earth Engine use — **CC-BY 4.0 NC** with attribution *"Produced by Google for the Forest Data Partnership"*. **Commercial / SaaS deployments** must accept the [Forest Data Partnership Datasets Commercial Terms of Use](https://services.google.com/fh/files/misc/forest_data_partnership_datasets_commerical_terms_of_use.pdf).
 
@@ -264,14 +266,15 @@ Configure defaults via `.env` (`COCOA_EXPOSURE_YEAR`, `COCOA_EXPOSURE_THRESHOLD`
 
 #### Backbone choice (cocoa exposure refinement)
 
-Segmentation backbones are compared on a **5000-tile held-out** set over Côte d'Ivoire and Ghana with Kalischek et al. (2023) in-situ labels. Run:
+Segmentation backbones are compared on a **5000-tile held-out** set per FDP region (or all regions) with Kalischek et al. (2023) in-situ labels. Run:
 
 ```bash
-python scripts/benchmark_backbones.py --n-tiles 5000   # full held-out (overnight)
-python scripts/benchmark_backbones.py --quick          # 200 tiles, Galileo-nano (~5 min)
+python scripts/benchmark_backbones.py --n-tiles 5000 --region ghana
+python scripts/benchmark_backbones.py --all-regions --quick   # 200 tiles/region, Galileo-nano
+python scripts/benchmark_backbones.py --quick                 # 200 tiles, all regions pooled
 ```
 
-Latest reports: [`reports/backbones/benchmark_aef_<date>.md`](reports/backbones/) (mean error + mIoU/F1) and legacy [`benchmark_<date>.md`](reports/backbones/).
+Latest reports: [`reports/backbones/benchmark_<region>_<date>.md`](reports/backbones/) and [`benchmark_aef_<region>_<date>.md`](reports/backbones/) (mean error + mIoU/F1).
 
 | Role | Backbone | Notes |
 |------|----------|--------|

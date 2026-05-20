@@ -314,6 +314,63 @@ def compute_derived_features(ds: xr.Dataset) -> xr.Dataset:
     return out
 
 
+class Era5ExportError(RuntimeError):
+    """Raised when Earth Engine raster export fails."""
+
+
+def export_to_google_drive(
+    image: ee.Image,
+    *,
+    description: str,
+    folder: str,
+    region: ee.Geometry,
+    scale: int,
+    wait: bool = True,
+) -> ee.batch.Task:
+    """Start a Drive export task for an ``ee.Image``."""
+    task = ee.batch.Export.image.toDrive(
+        image=image,
+        description=description,
+        folder=folder,
+        region=region,
+        scale=scale,
+        maxPixels=1e13,
+    )
+    task.start()
+    if wait:
+        task.join()
+        if task.status().get("state") == "FAILED":
+            raise Era5ExportError(task.status().get("error_message", "Drive export failed"))
+    return task
+
+
+def export_local_geotiff(
+    image: ee.Image,
+    output_path: str | Path,
+    *,
+    region: ee.Geometry,
+    scale: int,
+) -> Path:
+    """Download an ``ee.Image`` to a local GeoTIFF via ``getDownloadURL``."""
+    import urllib.request
+
+    dest = Path(output_path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    url = image.getDownloadURL(
+        {
+            "scale": scale,
+            "region": region,
+            "format": "GEO_TIFF",
+            "maxPixels": 1e13,
+        }
+    )
+    try:
+        urllib.request.urlretrieve(url, dest)
+    except Exception as exc:
+        raise Era5ExportError(str(exc)) from exc
+    return dest
+
+
 def _geometry_from_geojson(path: Path) -> ee.Geometry:
     """Load AOI polygon from GeoJSON via geopandas."""
     import geopandas as gpd
@@ -326,25 +383,63 @@ def _geometry_from_geojson(path: Path) -> ee.Geometry:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI: ingest ERA5-Land daily stack for an AOI to Zarr."""
+    """CLI: ingest ERA5-Land daily stack for an AOI or named region to Zarr."""
     import argparse
     import logging
     import sys
 
+    from data.cocoa_exposure import (
+        REGIONS,
+        normalize_region_key,
+        processed_era5_zarr_path,
+        region_geometry,
+    )
+
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description="ERA5-Land daily ingest → Zarr")
-    parser.add_argument("--aoi", type=Path, required=True, help="AOI GeoJSON path")
+    parser.add_argument(
+        "--region",
+        choices=sorted(REGIONS.keys()),
+        default=None,
+        help="Named cocoa region (bounding box from data.cocoa_exposure.REGIONS)",
+    )
+    parser.add_argument("--aoi", type=Path, default=None, help="AOI GeoJSON path (overrides --region)")
     parser.add_argument("--start", required=True, help="Start date YYYY-MM-DD")
     parser.add_argument("--end", required=True, help="End date YYYY-MM-DD (inclusive)")
-    parser.add_argument("--out", type=Path, required=True, help="Output Zarr directory")
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="Output Zarr directory (default: data/processed/era5_<region>.zarr)",
+    )
     parser.add_argument("--project", default=None, help="Earth Engine GCP project")
     args = parser.parse_args(argv)
 
+    if args.aoi is None and args.region is None:
+        parser.error("Provide --region or --aoi")
+    if args.aoi is not None and args.region is not None:
+        parser.error("Use only one of --region or --aoi")
+
     try:
-        aoi = _geometry_from_geojson(args.aoi)
+        region_key: str | None = None
+        if args.aoi is not None:
+            aoi = _geometry_from_geojson(args.aoi)
+        else:
+            region_key = normalize_region_key(args.region)
+            aoi = region_geometry(region_key)
+
+        if args.out is not None:
+            out_path = args.out
+        elif region_key is not None:
+            start_y = int(args.start[:4])
+            end_y = int(args.end[:4])
+            out_path = processed_era5_zarr_path(region_key, start_year=start_y, end_year=end_y)
+        else:
+            parser.error("--out is required when using a custom --aoi GeoJSON")
+
         ingest = ERA5Ingest(aoi, args.start, args.end, project=args.project)
-        ingest.to_zarr(str(args.out))
-        logging.getLogger(__name__).info("Wrote ERA5 Zarr to %s", args.out)
+        ingest.to_zarr(str(out_path))
+        logging.getLogger(__name__).info("Wrote ERA5 Zarr to %s", out_path)
         return 0
     except Exception as exc:
         logging.getLogger(__name__).error("%s", exc)

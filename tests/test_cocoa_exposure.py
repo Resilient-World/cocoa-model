@@ -3,7 +3,17 @@ import os
 import pytest
 import ee  # noqa: F401
 
-from data.cocoa_exposure import CocoaExposureIngest, FDP_COCOA_COLLECTION
+from data.cocoa_exposure import (
+    CocoaExposureIngest,
+    FDP_COCOA_COLLECTION,
+    GLOBAL_AEF_GAL_WEIGHTS,
+    REGIONS,
+    is_fdp_covered,
+    normalize_region_key,
+    point_in_region,
+    region_latlon_bounds,
+    sample_cocoa_probability_at_point,
+)
 
 
 def test_collection_id_is_fdp_2025a():
@@ -81,9 +91,34 @@ def test_feature_resolver_uses_fdp_when_available(monkeypatch):
     assert 0.0 <= vec[9] <= 1.0
 
 
-def test_feature_resolver_falls_back_outside_fdp_coverage():
-    from api.feature_resolver import _cocoa_belt_probability
+def test_regions_include_fdp_countries():
+    assert set(REGIONS) >= {
+        "ghana",
+        "civ",
+        "cameroon",
+        "nigeria",
+        "indonesia",
+        "ecuador",
+        "peru",
+        "colombia",
+    }
+    assert normalize_region_key("gha") == "ghana"
 
-    # Cameroon: outside the 6-country FDP coverage (CIV, GHA, IDN, ECU, PER, COL)
-    p = _cocoa_belt_probability(4.05, 9.71)
-    assert 0.0 <= p <= 1.0
+
+def test_point_in_region_ghana():
+    assert point_in_region(6.0, -1.0, "ghana")
+    assert not point_in_region(6.0, -1.0, "indonesia")
+
+
+def test_is_fdp_covered_cameroon():
+    assert is_fdp_covered(4.05, 9.71)
+
+
+def test_global_fallback_outside_all_regions(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("data.cocoa_exposure.is_fdp_covered", lambda lat, lon: False)
+    monkeypatch.setattr(
+        "data.cocoa_exposure._global_aef_galileo_probability",
+        lambda lat, lon, **kwargs: 0.61,
+    )
+    p = sample_cocoa_probability_at_point(45.0, 2.0)
+    assert p == pytest.approx(0.61, abs=0.01)
