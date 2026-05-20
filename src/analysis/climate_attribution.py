@@ -3,11 +3,12 @@ Bridge ATTRICI counterfactual climate into DiD-style impact decomposition.
 
 Separates observed yield changes into (a) climate-change-attributable loss and
 (b) intervention-attributable avoided loss, using paired Monte Carlo dropout on
-:class:`models.yield_surrogate.YieldSurrogateModel`.
+:class:`models.yield_surrogate.YieldSurrogateModel` (11-channel ERA5 / ATTRICI stack).
 """
 
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -15,32 +16,85 @@ import pandas as pd
 import torch
 from torch import Tensor
 
+from data.era5_ingest import (
+    FAO_ALBEDO,
+    FAO_GAMMA,
+    KELVIN_OFFSET,
+    MAGNUS_A,
+    MAGNUS_B,
+    MAGNUS_C,
+    WIND10_TO_WIND2_FACTOR,
+)
+from models.yield_surrogate import CLIMATE_CHANNEL_NAMES, CLIMATE_IDX, N_CLIMATE_CHANNELS
+
 if TYPE_CHECKING:
     import xarray as xr
 
     from models.yield_surrogate import YieldSurrogateModel
 
-# DiD / legacy surrogate channel order (see yield_surrogate._LEGACY_4_NAMES)
-_DID_CLIMATE_VARS: tuple[str, ...] = ("tmax", "tmin", "precip", "srad")
+# Legacy DiD four-channel order (deprecated)
+_LEGACY_4_NAMES: tuple[str, ...] = ("tmax", "tmin", "precip", "srad")
+
 _VAR_ALIASES: dict[str, tuple[str, ...]] = {
     "tmax": ("tmax", "tasmax", "tas"),
     "tmin": ("tmin", "tasmin"),
+    "tmean": ("tmean", "tas"),
     "precip": ("precip", "pr"),
     "srad": ("srad", "rsds"),
+    "rh_mean": ("rh_mean", "hurs"),
+    "wind10m": ("wind10m", "sfcwind"),
+    "vpd": ("vpd", "vpd_mean"),
+    "et0": ("et0",),
+    "sm_root": ("sm_root",),
+    "co2_ppm": ("co2_ppm",),
 }
+
 _SEQUENCE_LENGTH = 365
 
 
+def _saturation_vapor_pressure_kpa(tmean_c: np.ndarray) -> np.ndarray:
+    return MAGNUS_A * np.exp(MAGNUS_B * tmean_c / (MAGNUS_C + tmean_c))
+
+
+def _vpd_kpa(tmean_c: np.ndarray, rh_pct: np.ndarray) -> np.ndarray:
+    rh = np.clip(rh_pct, 0.0, 100.0)
+    es = _saturation_vapor_pressure_kpa(tmean_c)
+    return es * (1.0 - rh / 100.0)
+
+
+def _fao_et0_numpy(
+    tmean_c: np.ndarray,
+    rh_pct: np.ndarray,
+    wind10m: np.ndarray,
+    srad_mj: np.ndarray,
+) -> np.ndarray:
+    """FAO-56 Penman–Monteith reference ET0 (mm/day); mirrors :func:`data.era5_ingest._fao_et0_daily`."""
+    es = _saturation_vapor_pressure_kpa(tmean_c)
+    ea = es * (rh_pct / 100.0)
+    vpd = np.maximum(es - ea, 0.0)
+    delta = es * MAGNUS_B * MAGNUS_C / (tmean_c + MAGNUS_C) ** 2
+    u2 = wind10m * WIND10_TO_WIND2_FACTOR
+    rn = srad_mj * (1.0 - FAO_ALBEDO)
+    t_k = tmean_c + KELVIN_OFFSET
+    num_rad = delta * rn * 0.408
+    num_aero = FAO_GAMMA * (900.0 / t_k) * u2 * vpd
+    den = delta + FAO_GAMMA * (1.0 + 0.34 * u2)
+    return (num_rad + num_aero) / den
+
+
 def _resolve_var(ds: xr.Dataset, canonical: str) -> str:
-    if canonical in ds.data_vars:
-        return canonical
-    for alt in _VAR_ALIASES.get(canonical, (canonical,)):
-        if alt in ds.data_vars:
-            return alt
+    cf_name = f"{canonical}_cf"
+    candidates = (cf_name, canonical) + _VAR_ALIASES.get(canonical, (canonical,))
+    seen: set[str] = set()
+    for name in candidates:
+        if name in seen:
+            continue
+        seen.add(name)
+        if name in ds.data_vars:
+            return name
     raise KeyError(
         f"Climate variable {canonical!r} not in dataset "
-        f"(tried {_VAR_ALIASES.get(canonical, (canonical,))}); "
-        f"available: {list(ds.data_vars)})"
+        f"(tried {candidates}); available: {list(ds.data_vars)}"
     )
 
 
@@ -52,6 +106,93 @@ def _lat_lon_names(ds: xr.Dataset) -> tuple[str, str]:
     raise ValueError(f"No latitude/longitude coordinates in dataset: {list(ds.coords)}")
 
 
+def _select_site_year(ds: xr.Dataset, lat: float, lon: float, year: int) -> xr.Dataset:
+    lat_name, lon_name = _lat_lon_names(ds)
+    point = ds.sel({lat_name: lat, lon_name: lon}, method="nearest")
+    if "time" not in point.dims and "time" not in point.coords:
+        raise ValueError("Dataset has no time dimension")
+    annual = point.sel(time=point["time"].dt.year == year)
+    n_days = int(annual.sizes.get("time", 0))
+    if n_days < _SEQUENCE_LENGTH:
+        raise ValueError(
+            f"Need at least {_SEQUENCE_LENGTH} daily timesteps for year={year}, got {n_days}"
+        )
+    return annual.isel(time=slice(0, _SEQUENCE_LENGTH))
+
+
+def _daily_values(annual: xr.Dataset, canonical: str) -> np.ndarray:
+    var_name = _resolve_var(annual, canonical)
+    return np.asarray(annual[var_name].values, dtype=np.float32).reshape(-1)
+
+
+def extract_daily_climate_11ch(
+    ds: xr.Dataset,
+    lat: float,
+    lon: float,
+    year: int,
+    *,
+    factual_reference: xr.Dataset | None = None,
+) -> np.ndarray:
+    """
+    Nearest-grid daily climate for one site-year in :data:`CLIMATE_CHANNEL_NAMES` order.
+
+    Detrended state variables (``tmax``, ``tmin``, ``precip``, ``srad``, ``rh_mean``,
+    ``wind10m``, ``vpd`` when present) are read from ``ds`` with ISIMIP/ERA5 aliases
+    (``tasmax``, ``hurs``, ``rsds``, ``sfcwind``, ``pr``, and ``*_cf`` counterfactual names).
+
+    Variables ATTRICI does not detrend are handled as follows:
+
+    - ``tmean``: always ``(tmax + tmin) / 2`` from the daily series in ``ds``.
+    - ``et0``: always recomputed with FAO-56 Penman–Monteith using ``tmean``, ``rh_mean``,
+      ``wind10m``, and ``srad`` from ``ds`` (same formulation as :mod:`data.era5_ingest`).
+    - ``sm_root`` and ``co2_ppm``: taken from ``factual_reference`` when provided
+      (counterfactual runs); otherwise from ``ds``. These drivers are assumed unaffected
+      by the GMT detrending experiment.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``[365, 11]`` float32, channel order matching :class:`~models.yield_surrogate.YieldSurrogateModel`.
+    """
+    annual = _select_site_year(ds, lat, lon, year)
+
+    tmax = _daily_values(annual, "tmax")
+    tmin = _daily_values(annual, "tmin")
+    precip = np.maximum(_daily_values(annual, "precip"), 0.0)
+    srad = np.maximum(_daily_values(annual, "srad"), 0.0)
+    rh = np.clip(_daily_values(annual, "rh_mean"), 0.0, 100.0)
+    wind = np.maximum(_daily_values(annual, "wind10m"), 0.0)
+
+    tmean = 0.5 * (tmax + tmin)
+    vpd = _vpd_kpa(tmean, rh)
+    et0 = np.maximum(_fao_et0_numpy(tmean, rh, wind, srad), 0.0)
+
+    if factual_reference is not None:
+        ref = _select_site_year(factual_reference, lat, lon, year)
+        sm_root = _daily_values(ref, "sm_root")
+        co2_ppm = _daily_values(ref, "co2_ppm")
+    else:
+        sm_root = _daily_values(annual, "sm_root")
+        co2_ppm = _daily_values(annual, "co2_ppm")
+
+    channel_map = {
+        "tmax": tmax,
+        "tmin": tmin,
+        "tmean": tmean,
+        "precip": precip,
+        "srad": srad,
+        "vpd": vpd,
+        "et0": et0,
+        "sm_root": sm_root,
+        "wind10m": wind,
+        "rh_mean": rh,
+        "co2_ppm": co2_ppm,
+    }
+    return np.stack([channel_map[name] for name in CLIMATE_CHANNEL_NAMES], axis=-1).astype(
+        np.float32
+    )
+
+
 def extract_daily_climate_4ch(
     ds: xr.Dataset,
     lat: float,
@@ -59,31 +200,22 @@ def extract_daily_climate_4ch(
     year: int,
 ) -> np.ndarray:
     """
-    Nearest-grid daily climate for one site-year.
+    Deprecated: use :func:`extract_daily_climate_11ch`.
 
-    Returns
-    -------
-    numpy.ndarray
-        ``[365, 4]`` in order ``(tmax, tmin, precip, srad)``, float32.
+    Returns ``[365, 4]`` in legacy order ``(tmax, tmin, precip, srad)`` with other
+    channels zero-filled (not suitable for :class:`~models.yield_surrogate.YieldSurrogateModel`).
     """
-    lat_name, lon_name = _lat_lon_names(ds)
-    point = ds.sel({lat_name: lat, lon_name: lon}, method="nearest")
-    if "time" not in point.dims and "time" not in point.coords:
-        raise ValueError("Dataset has no time dimension")
-
-    annual = point.sel(time=point["time"].dt.year == year)
-    n_days = int(annual.sizes.get("time", 0))
-    if n_days < _SEQUENCE_LENGTH:
-        raise ValueError(
-            f"Need at least {_SEQUENCE_LENGTH} daily timesteps for year={year}, got {n_days}"
-        )
-    annual = annual.isel(time=slice(0, _SEQUENCE_LENGTH))
-
-    channels: list[np.ndarray] = []
-    for canonical in _DID_CLIMATE_VARS:
-        var_name = _resolve_var(annual, canonical)
-        channels.append(np.asarray(annual[var_name].values, dtype=np.float32))
-    return np.stack(channels, axis=-1)
+    warnings.warn(
+        "extract_daily_climate_4ch is deprecated; use extract_daily_climate_11ch for the "
+        "full ERA5 11-channel stack required by YieldSurrogateModel.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    full = extract_daily_climate_11ch(ds, lat, lon, year)
+    out = np.zeros((_SEQUENCE_LENGTH, N_CLIMATE_CHANNELS), dtype=np.float32)
+    for i, name in enumerate(_LEGACY_4_NAMES):
+        out[:, CLIMATE_IDX[name]] = full[:, CLIMATE_IDX[name]]
+    return out[:, [CLIMATE_IDX[n] for n in _LEGACY_4_NAMES]]
 
 
 @torch.no_grad()
@@ -98,10 +230,23 @@ def _paired_mc_yields(
     device: str,
 ) -> tuple[float, float, float, float, float]:
     """
-    Paired MC dropout: same ``manual_seed`` before each factual/counterfactual forward.
+    Paired MC dropout on factual vs counterfactual climate tensors.
 
-    Returns means, marginal stds, and SE of the mean difference with paired covariance.
+    Parameters
+    ----------
+    climate_factual, climate_counterfactual:
+        ``[B, 365, 11]`` daily stacks (see :data:`CLIMATE_CHANNEL_NAMES`).
     """
+    if climate_factual.shape[-1] != N_CLIMATE_CHANNELS:
+        raise ValueError(
+            f"climate_factual last dim must be {N_CLIMATE_CHANNELS}, got {climate_factual.shape[-1]}"
+        )
+    if climate_counterfactual.shape[-1] != N_CLIMATE_CHANNELS:
+        raise ValueError(
+            f"climate_counterfactual last dim must be {N_CLIMATE_CHANNELS}, "
+            f"got {climate_counterfactual.shape[-1]}"
+        )
+
     yield_model.eval()
     yield_model.to(device)
     climate_factual = climate_factual.to(device)
@@ -157,28 +302,13 @@ def climate_attributable_loss(
     Per-farm-year counterfactual yield gap with paired MC-dropout uncertainty.
 
     Gap (tonnes/ha) is ``E[Y | factual climate] - E[Y | counterfactual climate]``.
-    Paired seeds align dropout masks between factual and counterfactual forwards.
+    Climate tensors are built with :func:`extract_daily_climate_11ch` (11 channels).
 
     Parameters
     ----------
     factual_climate, counterfactual_climate:
-        Daily gridded climate (must contain tmax/tmin/precip/srad or aliases).
-    yield_model:
-        Trained :class:`~models.yield_surrogate.YieldSurrogateModel`.
-    static_features:
-        ``[N, 10]`` static covariates aligned with ``farm_coords`` rows.
-    farm_coords:
-        Columns ``farm_id``, ``lat``, ``lon``, ``year``.
-    n_mc_samples:
-        Monte Carlo dropout passes per site-year.
-    device:
-        Torch device for inference.
-
-    Returns
-    -------
-    pandas.DataFrame
-        Columns: ``farm_id``, ``year``, ``y_factual_mean``, ``y_factual_std``,
-        ``y_cf_mean``, ``y_cf_std``, ``climate_loss_tpha``, ``climate_loss_se``.
+        Daily gridded ERA5 / ATTRICI datasets (detrended ``*_cf`` variables on the
+        counterfactual side).
     """
     required = {"farm_id", "lat", "lon", "year"}
     missing = required - set(farm_coords.columns)
@@ -200,11 +330,17 @@ def climate_attributable_loss(
         year = int(row["year"])
         static_row = static_features[row_idx]
 
-        factual_4 = extract_daily_climate_4ch(factual_climate, lat, lon, year)
-        cf_4 = extract_daily_climate_4ch(counterfactual_climate, lat, lon, year)
+        factual_11 = extract_daily_climate_11ch(factual_climate, lat, lon, year)
+        cf_11 = extract_daily_climate_11ch(
+            counterfactual_climate,
+            lat,
+            lon,
+            year,
+            factual_reference=factual_climate,
+        )
 
-        climate_f = torch.from_numpy(factual_4).unsqueeze(0)
-        climate_cf = torch.from_numpy(cf_4).unsqueeze(0)
+        climate_f = torch.from_numpy(factual_11).unsqueeze(0)
+        climate_cf = torch.from_numpy(cf_11).unsqueeze(0)
         static_t = torch.from_numpy(static_row.astype(np.float32)).unsqueeze(0)
 
         seed = _farm_seed(farm_id, year)
@@ -250,25 +386,6 @@ def decompose_avoided_loss(
     the mean per-farm-year climate yield gap. ``total_avoided_loss`` sums the
     intervention effect with the climate component when interventions buffer
     climate stress (additive decomposition for reporting).
-
-    Parameters
-    ----------
-    did_att:
-        DiD average treatment effect on the treated (t/ha).
-    did_att_ci:
-        ``(lower, upper)`` confidence interval for ``did_att``.
-    climate_loss_df:
-        Output of :func:`climate_attributable_loss`.
-    n_bootstrap:
-        Resamples for the climate-attributable CI.
-    random_state:
-        RNG seed for bootstrap.
-
-    Returns
-    -------
-    dict
-        Keys: ``intervention_att``, ``intervention_att_ci``, ``climate_attributable_mean``,
-        ``climate_attributable_ci``, ``total_avoided_loss``.
     """
     if climate_loss_df.empty:
         raise ValueError("climate_loss_df is empty")
@@ -288,7 +405,6 @@ def decompose_avoided_loss(
 
     climate_ci = (float(np.percentile(boot_means, 2.5)), float(np.percentile(boot_means, 97.5)))
 
-    # Intervention buffers climate stress: report combined avoided loss
     total_avoided = float(did_att + climate_mean)
 
     return {
