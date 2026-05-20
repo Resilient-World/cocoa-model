@@ -20,9 +20,9 @@ class APISettings(BaseSettings):
 
     api_host: str = "0.0.0.0"
     api_port: int = 8000
-    model_checkpoint_path: str | None = None
+    model_checkpoint_path: str = "models/yield_surrogate_v1.pt"
     mc_num_samples: int = 50
-    yield_blend_weight: float = 0.3
+    yield_blend_weight: float = 0.0
 
     # Feature resolution (replaces geo_mock on the simulation hot path)
     era5_zarr_path: Path = _REPO_ROOT / "data" / "processed" / "era5_2020_2024.zarr"

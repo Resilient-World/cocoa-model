@@ -239,7 +239,7 @@ def simulate_intervention(
     feature_resolver: FarmFeatureResolver,
     *,
     num_samples: int = 50,
-    yield_blend_weight: float = 0.3,
+    yield_blend_weight: float = 0.0,
     climate_year: int | None = None,
     conformal: ConformalPredictor | None = None,
 ) -> SimulateInterventionResponse:
@@ -366,7 +366,7 @@ def simulate_scenario(
     historical_zarr_path: Path,
     cmip6_zarr_path: Path,
     num_samples: int = 50,
-    yield_blend_weight: float = 0.3,
+    yield_blend_weight: float = 0.0,
     climate_year: int | None = None,
 ) -> SimulateScenarioResponse:
     """
