@@ -12,7 +12,7 @@ import torch
 import xarray as xr
 from torch import Tensor
 
-from api.financial import calculate_financial_impact_usd
+from api.financial import calculate_financial_impact, financial_impact_to_schema
 from api.feature_resolver import climate_tensor_from_dataset_point
 from api.schemas import (
     AvoidedLossInterval,
@@ -301,13 +301,23 @@ def simulate_intervention(
     avoided_loss_samples = avoided_per_ha_samples * request.farm_size_ha
 
     avoided_loss_tonnes = max(0.0, (projected_yield - baseline_yield) * request.farm_size_ha)
-    financial_impact_usd = calculate_financial_impact_usd(
-        avoided_loss_tonnes,
-        request.cocoa_price_usd,
-    )
 
     ci_lower = float(np.percentile(avoided_loss_samples, 5.0))
     ci_upper = float(np.percentile(avoided_loss_samples, 95.0))
+
+    fin = calculate_financial_impact(
+        avoided_loss_tonnes,
+        currency=request.currency,
+        pricing_basis=request.pricing_basis,
+        farm_gate=request.farm_gate,
+        country_code=request.country_code,
+        lat=lat,
+        lon=lon,
+        cocoa_price_usd=request.cocoa_price_usd,
+        ci_low_tonnes=ci_lower,
+        ci_high_tonnes=ci_upper,
+    )
+    financial_impact_usd = fin.usd.point
 
     conformal_block: ConformalConfidenceInterval | None = None
     if conformal is not None:
@@ -342,6 +352,7 @@ def simulate_intervention(
         projected_yield_tonnes_per_ha=projected_yield,
         avoided_loss_tonnes=avoided_loss_tonnes,
         financial_impact_usd=financial_impact_usd,
+        financial_impact=financial_impact_to_schema(fin),
         confidence_interval=ConfidenceInterval(
             avoided_loss_tonnes=AvoidedLossInterval(
                 lower=ci_lower,
@@ -437,7 +448,18 @@ def simulate_scenario(
     avoided_arr = np.maximum(projected_blended - baseline_blended, 0.0) * request.farm_size_ha
     a_mean, a_p10, a_p90 = _mean_p10_p90(avoided_arr)
 
-    financial = calculate_financial_impact_usd(a_mean, request.cocoa_price_usd)
+    fin = calculate_financial_impact(
+        a_mean,
+        currency=request.currency,
+        pricing_basis=request.pricing_basis,
+        farm_gate=request.farm_gate,
+        country_code=request.country_code,
+        lat=lat,
+        lon=lon,
+        cocoa_price_usd=request.cocoa_price_usd,
+        ci_low_tonnes=a_p10,
+        ci_high_tonnes=a_p90,
+    )
 
     return SimulateScenarioResponse(
         scenario=request.scenario,
@@ -446,5 +468,6 @@ def simulate_scenario(
         baseline_yield_tonnes_per_ha=YieldUncertaintyBand(mean=b_mean, p10=b_p10, p90=b_p90),
         projected_yield_tonnes_per_ha=YieldUncertaintyBand(mean=p_mean, p10=p_p10, p90=p_p90),
         avoided_loss_tonnes=AvoidedLossUncertaintyBand(mean=a_mean, p10=a_p10, p90=a_p90),
-        financial_impact_usd_mean=financial,
+        financial_impact_usd_mean=fin.usd.point,
+        financial_impact=financial_impact_to_schema(fin),
     )
