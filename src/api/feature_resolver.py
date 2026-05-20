@@ -2,8 +2,8 @@
 Resolve farm-level climate, static site, and optional Galileo features for API inference.
 
 Climate: pre-exported Zarr at ``data/processed/era5_2020_2024.zarr`` with live
-Earth Engine + Xee fallback (diskcache). Static: SoilGrids, SRTM, Hansen, Kalischek
-cocoa suitability via GEE point samples (cached). Galileo: frozen embeddings keyed
+Earth Engine + Xee fallback (diskcache). Static: SoilGrids, SRTM, Hansen, FDP cocoa
+probability (2025a) via GEE point samples (cached). Galileo: frozen embeddings keyed
 by H3 cell when enabled.
 """
 
@@ -23,9 +23,10 @@ import xee  # noqa: F401 — registers the ``ee`` Xarray backend
 from diskcache import Cache
 from torch import Tensor
 
+from data.cocoa_exposure import CocoaExposureIngest, FDP_COCOA_COLLECTION
 from data.era5_ingest import ERA5Ingest
-from data.gee_auth import initialize_earth_engine
 from data.feature_store import FeatureStore
+from data.gee_auth import initialize_earth_engine
 from models.yield_surrogate import CLIMATE_CHANNEL_NAMES
 
 logger = logging.getLogger(__name__)
@@ -44,9 +45,6 @@ DEFAULT_CACHE_DIR = _REPO_ROOT / "data" / "cache" / "api_features"
 SOILGRIDS_IMAGE = "projects/soilgrids-isric/soilgrids_world"
 HANSEN_IMAGE = "UMD/hansen/global_forest_change_2023_v1_11"
 SRTM_IMAGE = "USGS/SRTMGL1_003"
-# Kalischek et al. 2023 cocoa suitability — override via env if published to GEE
-KALISCHEK_COCOA_ASSET: str | None = None
-
 # Zarr variable aliases → surrogate channel name
 _ZARR_CLIMATE_ALIASES: dict[str, tuple[str, ...]] = {
     "tmax": ("tmax",),
@@ -208,7 +206,7 @@ class FarmFeatureResolver:
         self._cache.set(cache_key, tensor.numpy())
         return tensor
 
-    def resolve_static(self, lat: float, lon: float) -> Tensor:
+    def resolve_static(self, lat: float, lon: float, year: int | None = None) -> Tensor:
         """Site static covariates ``[1, 10]`` (AWC + soil/terrain/cocoa; indices 2–4 for API encoding)."""
         cache_key = f"static:{lat:.6f}:{lon:.6f}"
         cached = self._cache.get(cache_key)
@@ -239,7 +237,7 @@ class FarmFeatureResolver:
             _, static = fetch_climate_and_soil(lat, lon)
             vec = np.asarray(static.squeeze(0).numpy(), dtype=np.float32)
         except Exception:
-            vec = self._static_from_gee(lat, lon)
+            vec = self._static_from_gee(lat, lon, year=year)
         self._cache.set(cache_key, vec)
         return torch.from_numpy(vec).unsqueeze(0)
 
@@ -282,7 +280,7 @@ class FarmFeatureResolver:
         year: int,
     ) -> Tensor:
         """Concatenate site static ``[1,10]`` with Galileo ``[1,D]`` when enabled."""
-        site = self.resolve_static(lat, lon)
+        site = self.resolve_static(lat, lon, year=year)
         if not self.config.use_galileo_embedding:
             return site
         gal = self.resolve_galileo_embedding(lat, lon, year)
@@ -338,9 +336,10 @@ class FarmFeatureResolver:
             cocoa_prob=float(point.get("cocoa_prob", 0.5)),
         )
 
-    def _static_from_gee(self, lat: float, lon: float) -> np.ndarray:
+    def _static_from_gee(self, lat: float, lon: float, *, year: int | None = None) -> np.ndarray:
         initialize_earth_engine(project=self.config.gee_project)
         point = ee.Geometry.Point([lon, lat])
+        fdp_year = year if year in (2020, 2023) else 2023
 
         soil = ee.Image(SOILGRIDS_IMAGE)
         sand = soil.select("sand_0-5cm_mean").rename("sand")
@@ -356,10 +355,6 @@ class FarmFeatureResolver:
             ["sand", "clay", "soc", "ph", "elev", "slope", "treecover"]
         )
 
-        if KALISCHEK_COCOA_ASSET:
-            cocoa = ee.Image(KALISCHEK_COCOA_ASSET).rename("cocoa")
-            stack = stack.addBands(cocoa)
-
         sample = stack.reduceRegion(ee.Reducer.first(), point, scale=250).getInfo() or {}
 
         sand_pct = float(sample.get("sand", 40.0))
@@ -369,7 +364,22 @@ class FarmFeatureResolver:
         elev = float(sample.get("elev", 200.0))
         slope_deg = float(sample.get("slope", 2.0))
         treecover = float(sample.get("treecover", 60.0))
-        cocoa_prob = float(sample.get("cocoa", _cocoa_belt_probability(lat, lon)))
+
+        exposure = CocoaExposureIngest(
+            point.buffer(50),
+            year=fdp_year,
+            project=self.config.gee_project,
+        )
+        fdp_prob = exposure.sample_point(lat, lon, scale_m=10)
+        if fdp_prob is None:
+            logger.debug(
+                "FDP cocoa sample masked/outside coverage (%s, year=%s); using belt heuristic",
+                FDP_COCOA_COLLECTION,
+                fdp_year,
+            )
+            cocoa_prob = _cocoa_belt_probability(lat, lon)
+        else:
+            cocoa_prob = fdp_prob
 
         return self._pack_static_vector(
             sand_pct=sand_pct,
