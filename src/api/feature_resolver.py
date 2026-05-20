@@ -23,7 +23,11 @@ import xee  # noqa: F401 — registers the ``ee`` Xarray backend
 from diskcache import Cache
 from torch import Tensor
 
-from data.cocoa_exposure import CocoaExposureIngest, FDP_COCOA_COLLECTION
+from data.cocoa_exposure import (
+    CocoaExposureIngest,
+    DEFAULT_THRESHOLD,
+    FDP_COCOA_COLLECTION,
+)
 from data.era5_ingest import ERA5Ingest
 from data.feature_store import FeatureStore
 from data.gee_auth import initialize_earth_engine
@@ -80,6 +84,8 @@ class FeatureResolverConfig:
     galileo_embedding_dim: int = 128
     galileo_h3_resolution: int = 7
     gee_project: str | None = None
+    cocoa_exposure_year: int = 2023
+    cocoa_exposure_threshold: float = DEFAULT_THRESHOLD
 
 
 def _lat_lon_coord_names(ds: xr.Dataset) -> tuple[str, str]:
@@ -383,7 +389,11 @@ class FarmFeatureResolver:
     def _static_from_gee(self, lat: float, lon: float, *, year: int | None = None) -> np.ndarray:
         initialize_earth_engine(project=self.config.gee_project)
         point = ee.Geometry.Point([lon, lat])
-        fdp_year = year if year in (2020, 2023) else 2023
+        fdp_year = (
+            self.config.cocoa_exposure_year
+            if self.config.cocoa_exposure_year in (2020, 2023)
+            else (year if year in (2020, 2023) else 2023)
+        )
 
         soil = ee.Image(SOILGRIDS_IMAGE)
         sand = soil.select("sand_0-5cm_mean").rename("sand")
@@ -412,6 +422,7 @@ class FarmFeatureResolver:
         exposure = CocoaExposureIngest(
             point.buffer(50),
             year=fdp_year,
+            threshold=self.config.cocoa_exposure_threshold,
             project=self.config.gee_project,
         )
         fdp_prob = exposure.sample_point(lat, lon, scale_m=10)
@@ -502,6 +513,10 @@ def build_resolver_from_settings(settings: Any) -> FarmFeatureResolver:
             gee_project=getattr(settings, "earthengine_project", None),
             farm_registry_path=Path(
                 getattr(settings, "farm_registry_path", DEFAULT_FARM_REGISTRY)
+            ),
+            cocoa_exposure_year=int(getattr(settings, "cocoa_exposure_year", 2023)),
+            cocoa_exposure_threshold=float(
+                getattr(settings, "cocoa_exposure_threshold", DEFAULT_THRESHOLD)
             ),
         )
     )

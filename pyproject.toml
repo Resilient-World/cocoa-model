@@ -65,6 +65,7 @@ dev = [
     "ruff>=0.3",
     "ipython>=8.0",
     "jupyter>=1.0",
+    "matplotlib>=3.8",
 ]
 # ATTRICI is GPLv3 — subprocess-only in src/; install for integration tests only
 attrici = [

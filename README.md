@@ -250,10 +250,10 @@ API settings are loaded via `pydantic-settings` in `api.config.APISettings`.
 | Resolution | 10 m |
 | Years | 2020, 2023 (annual composites) |
 | Band | `probability` (0–1 cocoa occupancy) |
-| Default threshold | **0.65** (F1-optimal cut from Kalischek 2023, carried in FDP 2025a docs) |
+| Default threshold | **0.96** ([FDP 2025a model card](https://github.com/google/forest-data-partnership/tree/main/models/cocoa) F1-optimal precision/recall) |
 | Coverage | Côte d'Ivoire, Ghana, Indonesia, Ecuador, Peru, Colombia |
 
-**API:** `CocoaExposureIngest(aoi, year=2023, threshold=0.65)` exposes `probability_image()`, `binary_mask()`, `sample_point()`, `to_zarr()` (Xee), and `area_hectares()`.
+**API:** `CocoaExposureIngest(aoi, year=2023, threshold=0.96)` exposes `probability_image()`, `binary_mask()`, `sample_point()`, `to_zarr()` (Xee), and `area_hectares()`.
 
 **Product wiring:** `api/feature_resolver.py` samples FDP probability at farm points (static vector index 9). When the pixel is masked or outside FDP coverage, `_cocoa_belt_probability` remains the last-resort heuristic (e.g. Cameroon, Nigeria).
 
@@ -274,7 +274,7 @@ Latest report: [`reports/backbones/benchmark_2026-05-20.md`](reports/backbones/b
 | Role | Backbone | Notes |
 |------|----------|--------|
 | **Production (active)** | **Galileo-Base** + binary seg head | Multimodal S2×10, S1 VV/VH, ERA5 monthly (5 vars → Galileo time bands), DEM; 10 m `P(cocoa)` via [`galileo_seg.py`](src/models/galileo_seg.py) |
-| **Prior (weak supervision)** | FDP 2025a | GEE `model_2025a`; threshold 0.65 |
+| **Prior (weak supervision)** | FDP 2025a | GEE `model_2025a`; threshold 0.96 |
 | **Baseline** | Prithvi-EO-2.0 | TerraTorch `prithvi_eo_v2_100_tl` (6-band stem in benchmark when full checkpoint absent) |
 
 **Exposure API:** `CocoaExposureIngest(..., backend="fdp" | "galileo" | "ensemble")`. Ensemble blends `0.5 × FDP_prob + 0.5 × Galileo_prob` at each point. Default ingest remains `fdp`; set `backend="galileo"` or `"ensemble"` for refined exposure. Fine-tune weights: `models/galileo_cocoa_seg.pt` (`python -m training.train_galileo_cocoa`).
