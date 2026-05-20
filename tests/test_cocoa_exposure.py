@@ -17,6 +17,41 @@ def test_threshold_default_matches_kalischek_f1_optimal():
     assert ing.year == 2023
 
 
+def test_backend_defaults_to_fdp():
+    ing = CocoaExposureIngest(aoi=object(), backend="fdp")  # type: ignore[arg-type]
+    assert ing.backend == "fdp"
+
+
+def test_ensemble_weights_default():
+    ing = CocoaExposureIngest(aoi=object(), backend="ensemble")  # type: ignore[arg-type]
+    assert ing.ensemble_weights == (0.5, 0.5)
+
+
+def test_galileo_point_inference_without_gee(monkeypatch: pytest.MonkeyPatch) -> None:
+    import torch
+
+    class _StubModel:
+        @staticmethod
+        def build_batch_dict(**kwargs: object) -> dict:
+            return kwargs
+
+        def predict_proba(self, batch_dict: dict) -> torch.Tensor:
+            return torch.tensor([[[[0.42]]]])
+
+    ing = CocoaExposureIngest(aoi=object(), backend="galileo")  # type: ignore[arg-type]
+    monkeypatch.setattr(ing, "_load_galileo_model", lambda: _StubModel())
+    p = ing.sample_point(5.84, -5.36)
+    assert p == pytest.approx(0.42, abs=0.01)
+
+
+def test_ensemble_blends_fdp_and_galileo(monkeypatch: pytest.MonkeyPatch) -> None:
+    ing = CocoaExposureIngest(aoi=object(), backend="ensemble")  # type: ignore[arg-type]
+    monkeypatch.setattr(ing, "_fdp_probability_at_point", lambda lat, lon, scale_m: 0.8)
+    monkeypatch.setattr(ing, "_galileo_probability_at_point", lambda lat, lon: 0.4)
+    p = ing.sample_point(5.84, -5.36)
+    assert p == pytest.approx(0.6, abs=0.01)
+
+
 @pytest.mark.integration
 def test_sample_point_in_civ_cocoa_belt():
     if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS") and not os.getenv("EARTHENGINE_PROJECT"):

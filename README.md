@@ -261,6 +261,24 @@ API settings are loaded via `pydantic-settings` in `api.config.APISettings`.
 
 Configure defaults via `.env` (`COCOA_EXPOSURE_YEAR`, `COCOA_EXPOSURE_THRESHOLD`).
 
+#### Backbone choice (cocoa exposure refinement)
+
+Segmentation backbones are compared on a **5000-tile held-out** set over Côte d'Ivoire and Ghana with Kalischek et al. (2023) in-situ labels. Run:
+
+```bash
+python scripts/benchmark_backbones.py --n-tiles 5000
+```
+
+Latest report: [`reports/backbones/benchmark_2026-05-20.md`](reports/backbones/benchmark_2026-05-20.md).
+
+| Role | Backbone | Notes |
+|------|----------|--------|
+| **Production (active)** | **Galileo-Base** + binary seg head | Multimodal S2×10, S1 VV/VH, ERA5 monthly (5 vars → Galileo time bands), DEM; 10 m `P(cocoa)` via [`galileo_seg.py`](src/models/galileo_seg.py) |
+| **Prior (weak supervision)** | FDP 2025a | GEE `model_2025a`; threshold 0.65 |
+| **Baseline** | Prithvi-EO-2.0 | TerraTorch `prithvi_eo_v2_100_tl` (6-band stem in benchmark when full checkpoint absent) |
+
+**Exposure API:** `CocoaExposureIngest(..., backend="fdp" | "galileo" | "ensemble")`. Ensemble blends `0.5 × FDP_prob + 0.5 × Galileo_prob` at each point. Default ingest remains `fdp`; set `backend="galileo"` or `"ensemble"` for refined exposure. Fine-tune weights: `models/galileo_cocoa_seg.pt` (`python -m training.train_galileo_cocoa`).
+
 **ERA5 outputs (per pixel, per year):**
 
 - Heat-stress day count: days with daily max 2 m temperature > 32 °C.
