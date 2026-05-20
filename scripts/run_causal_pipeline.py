@@ -132,7 +132,7 @@ def run_pipeline(
     att_agreement_ok = att_delta <= se_pool
 
     outcome_sd = float(snapshot["yield_tonnes_per_ha"].std(ddof=1))
-    evalue = e_value(aipw.att, aipw.att_ci_low, outcome_sd=outcome_sd)
+    evalue = e_value(aipw.att, aipw.att_se, outcome_sd=outcome_sd)
     rosenbaum = rosenbaum_bounds(matched_did)
 
     report_path = write_att_report(
