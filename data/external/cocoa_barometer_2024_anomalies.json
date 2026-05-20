@@ -1,0 +1,53 @@
+{
+  "source": "Cocoa Barometer 2024 (illustrative regional anomaly signs for validation)",
+  "regions": {
+    "GHA": {
+      "2015": "neutral",
+      "2016": "positive",
+      "2017": "positive",
+      "2018": "negative",
+      "2019": "negative",
+      "2020": "positive",
+      "2021": "neutral",
+      "2022": "negative",
+      "2023": "negative",
+      "2024": "negative"
+    },
+    "CIV": {
+      "2015": "neutral",
+      "2016": "positive",
+      "2017": "positive",
+      "2018": "neutral",
+      "2019": "positive",
+      "2020": "positive",
+      "2021": "neutral",
+      "2022": "positive",
+      "2023": "neutral",
+      "2024": "neutral"
+    },
+    "CMR": {
+      "2015": "neutral",
+      "2016": "neutral",
+      "2017": "neutral",
+      "2018": "neutral",
+      "2019": "neutral",
+      "2020": "neutral",
+      "2021": "neutral",
+      "2022": "neutral",
+      "2023": "neutral",
+      "2024": "neutral"
+    },
+    "NGA": {
+      "2015": "neutral",
+      "2016": "neutral",
+      "2017": "neutral",
+      "2018": "negative",
+      "2019": "negative",
+      "2020": "negative",
+      "2021": "negative",
+      "2022": "negative",
+      "2023": "negative",
+      "2024": "negative"
+    }
+  }
+}

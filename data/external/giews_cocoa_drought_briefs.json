@@ -1,0 +1,19 @@
+{
+  "source": "FAO GIEWS country briefs — cocoa-belt drought episodes (validation signs)",
+  "episodes": [
+    {
+      "label": "2015-16 El Nino",
+      "years": [2015, 2016],
+      "countries": ["GHA", "CIV", "CMR", "NGA"],
+      "expected_climate_stress": "high",
+      "expected_loss_sign": "positive"
+    },
+    {
+      "label": "2023-24 dryness",
+      "years": [2023, 2024],
+      "countries": ["GHA", "CIV"],
+      "expected_climate_stress": "high",
+      "expected_loss_sign": "positive"
+    }
+  ]
+}
