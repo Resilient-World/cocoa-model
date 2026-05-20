@@ -33,7 +33,11 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
     "httpx>=0.27",
+    "pydantic>=2.0",
     "pydantic-settings>=2.0",
+    "shapely>=2.0",
+    "pycountry>=24.0",
+    "pyyaml>=6.0",
     "statsmodels>=0.14",  # event-study OLS with cluster-robust SEs
     "pooch>=1.8",
     "requests>=2.31",
@@ -83,7 +87,7 @@ package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["data*", "models*", "api*", "training*", "analysis*", "counterfactual*"]
+include = ["data*", "models*", "api*", "training*", "analysis*", "counterfactual*", "compliance*"]
 
 [tool.ruff]
 line-length = 100
