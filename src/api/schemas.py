@@ -41,6 +41,44 @@ class SimulateInterventionRequest(BaseModel):
         description="Market cocoa price in USD per tonne",
     )
 
+    # Optional cooperative-level mode: request recommendations for many farms at once.
+    # When present, the API can return a per-farm ranking using CATE estimates from tabular covariates.
+    batch_farms: list[dict] | None = Field(
+        default=None,
+        description="Optional list of farm records (cooperative rollouts); used by /rank-interventions",
+    )
+
+
+class RankInterventionsRequest(BaseModel):
+    """Request body for POST /rank-interventions (cooperative-level targeting)."""
+
+    rows: list[dict] = Field(..., description="Tabular rows with outcome, treatment, covariates, and farm metadata")
+    outcome: str = Field(..., description="Outcome column name in rows (e.g. yield delta)")
+    treatment: str = Field(..., description="Treatment indicator column name (0/1)")
+    covariates: list[str] = Field(..., description="Covariate column names used for CATE")
+    method: Literal["r_learner", "causal_forest"] = Field(default="r_learner")
+    n_folds: int = Field(default=5, ge=2, le=10)
+    cocoa_price_usd: float = Field(..., ge=0.0)
+    intervention_cost_usd_per_farm: float = Field(default=0.0, ge=0.0)
+    farm_area_col: str = Field(default="farm_size_ha", description="Column name for farm area in hectares")
+
+
+class RankedFarmRecommendation(BaseModel):
+    farm_id: str | int | None = None
+    net_uplift_usd: float
+    gross_uplift_usd: float
+    avoided_loss_tonnes: float
+    tau_hat_tonnes_per_ha: float
+    se: float
+
+
+class RankInterventionsResponse(BaseModel):
+    """Response from POST /rank-interventions."""
+
+    method: str
+    n: int
+    ranked: list[RankedFarmRecommendation]
+
 
 class AvoidedLossInterval(BaseModel):
     """Confidence interval for avoided loss (tonnes)."""
