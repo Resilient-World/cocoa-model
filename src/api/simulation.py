@@ -21,6 +21,8 @@ from api.schemas import (
     ConformalConfidenceInterval,
     ConformalIntervalResponse,
     InterventionType,
+    SimulateClimateAttributionRequest,
+    SimulateClimateAttributionResponse,
     SimulateInterventionRequest,
     SimulateInterventionResponse,
     SimulateScenarioRequest,
@@ -30,6 +32,7 @@ from api.schemas import (
 from counterfactual.cmip6_scenarios import ScenarioBuilder
 from hazards import apply_biotic_losses
 from hazards.black_pod import ShadeSpecies
+from analysis.climate_attribution import extract_daily_climate_11ch
 from models.casej_process import co2_ppm_for_ssp
 from models.casej_surrogate import CASEJSurrogate
 from models.cqr import ConformalCalibrator, QuantileYieldSurrogate
@@ -485,6 +488,93 @@ def simulate_intervention(
             "baseline": _biotic_response_block(biotic_cf),
             "projected": _biotic_response_block(biotic_factual),
         },
+    )
+
+
+@torch.no_grad()
+def simulate_climate_attribution(
+    request: SimulateClimateAttributionRequest,
+    model: YieldSurrogateModel,
+    feature_resolver: FarmFeatureResolver,
+    *,
+    counterfactual_zarr_path: Path,
+    num_samples: int = 50,
+    yield_blend_weight: float = 0.0,
+    climate_year: int | None = None,
+) -> SimulateClimateAttributionResponse:
+    """
+    Separate climate-change-driven yield loss from intervention avoided loss.
+
+    Compares yields under factual ERA5 vs ATTRICI counterfactual (no-anthropogenic-forcing
+    world), then adds intervention uplift from :func:`simulate_intervention`.
+    """
+    if not counterfactual_zarr_path.is_dir():
+        raise ValueError(
+            f"Counterfactual ERA5 Zarr not found at {counterfactual_zarr_path}. "
+            "Pre-compute via scripts/run_attrici_civ_ghana.py."
+        )
+
+    lat = request.farm_location.lat
+    lon = request.farm_location.lon
+    year = int(climate_year or 2023)
+
+    climate_factual_tensor = feature_resolver.resolve_climate(lat, lon, year)
+    static_base = feature_resolver.resolve_static_with_galileo(lat, lon, year)
+    static_cf = _encode_static(
+        static_base,
+        current_yield=request.current_yield,
+        intervention_type=None,
+    )
+
+    cf_ds = xr.open_zarr(counterfactual_zarr_path, consolidated=True)
+    factual_ds = _climate_tensor_to_dataset(climate_factual_tensor, year)
+    cf_daily = extract_daily_climate_11ch(
+        cf_ds,
+        lat,
+        lon,
+        year,
+        factual_reference=factual_ds,
+    )
+    climate_cf_world = torch.from_numpy(cf_daily).unsqueeze(0)
+
+    samples_f = predict_yield_samples(model, climate_factual_tensor, static_cf, num_samples)
+    samples_cf = predict_yield_samples(model, climate_cf_world, static_cf, num_samples)
+
+    y_f = float(_blend_mc_numpy(samples_f.detach().cpu().numpy(), request.current_yield, yield_blend_weight).mean())
+    y_cf = float(_blend_mc_numpy(samples_cf.detach().cpu().numpy(), request.current_yield, yield_blend_weight).mean())
+    attributed_per_ha = max(0.0, y_cf - y_f)
+
+    intervention = simulate_intervention(
+        request,
+        model,
+        feature_resolver,
+        num_samples=num_samples,
+        yield_blend_weight=yield_blend_weight,
+        climate_year=year,
+    )
+    intervention_avoided = float(intervention.avoided_loss_tonnes)
+    total_avoided = attributed_per_ha * request.farm_size_ha + intervention_avoided
+
+    fin = calculate_financial_impact(
+        total_avoided,
+        currency=request.currency,
+        pricing_basis=request.pricing_basis,
+        farm_gate=request.farm_gate,
+        country_code=request.country_code,
+        lat=lat,
+        lon=lon,
+        cocoa_price_usd=request.cocoa_price_usd,
+    )
+
+    return SimulateClimateAttributionResponse(
+        factual_yield_tonnes_per_ha=y_f,
+        counterfactual_yield_tonnes_per_ha=y_cf,
+        attributed_loss_tonnes_per_ha=attributed_per_ha,
+        intervention_avoided_loss_tonnes=intervention_avoided,
+        total_avoided_loss_tonnes=total_avoided,
+        climate_reference_year=year,
+        financial_impact_usd=fin.usd.point,
+        financial_impact=financial_impact_to_schema(fin),
     )
 
 

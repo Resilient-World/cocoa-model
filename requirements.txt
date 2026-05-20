@@ -35,6 +35,9 @@ statsmodels>=0.14  # event-study OLS with cluster-robust SEs
 pooch>=1.8
 requests>=2.31
 
+# ATTRICI v2.0.1 (GPLv3) — install only in isolated venv / optional extra; never import in src/
+# attrici @ git+https://github.com/ISI-MIP/attrici.git@v2.0.1
+
 # Optional (Callaway-Sant'Anna upgrade — not pinned yet):
 # differences>=0.2.0
 # linearmodels>=6.0

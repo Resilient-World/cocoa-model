@@ -16,7 +16,7 @@ from analysis.climate_attribution import (
     extract_daily_climate_11ch,
     extract_daily_climate_4ch,
 )
-from data.attrici_counterfactual import _fao_et0_array
+from data.attrici_fast_detrend import _fao_et0_array
 from models.yield_surrogate import CLIMATE_CHANNEL_NAMES, CLIMATE_IDX, N_CLIMATE_CHANNELS
 
 EXPECTED_COLUMNS = {

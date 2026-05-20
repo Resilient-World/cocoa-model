@@ -17,12 +17,18 @@ from api.schemas import (
     ComplianceDdsResponse,
     RankInterventionsRequest,
     RankInterventionsResponse,
+    SimulateClimateAttributionRequest,
+    SimulateClimateAttributionResponse,
     SimulateInterventionRequest,
     SimulateInterventionResponse,
     SimulateScenarioRequest,
     SimulateScenarioResponse,
 )
-from api.simulation import simulate_intervention, simulate_scenario
+from api.simulation import (
+    simulate_climate_attribution,
+    simulate_intervention,
+    simulate_scenario,
+)
 from analysis.heterogeneity import estimate_cate
 from analysis.policy_targeting import rank_farms_by_uplift
 from compliance.eudr import (
@@ -97,6 +103,34 @@ def simulate_intervention_endpoint(
             uq_method=settings.resolved_uq_method(),
             cqr_model=getattr(app.state, "cqr_model", None),
             cqr_calibrator=getattr(app.state, "cqr_calibrator", None),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post(
+    "/simulate-climate-attribution",
+    response_model=SimulateClimateAttributionResponse,
+    summary="Decompose avoided loss into climate-attributed vs intervention components",
+)
+def simulate_climate_attribution_endpoint(
+    request: SimulateClimateAttributionRequest,
+) -> SimulateClimateAttributionResponse:
+    """
+    Compares factual ERA5 yields vs ATTRICI counterfactual (no anthropogenic forcing) and
+    adds intervention avoided loss from the standard paired-forward path.
+    """
+    model: YieldSurrogateModel = app.state.yield_model
+    settings: APISettings = app.state.settings
+    try:
+        return simulate_climate_attribution(
+            request,
+            model,
+            app.state.feature_resolver,
+            counterfactual_zarr_path=settings.era5_counterfactual_zarr_path,
+            num_samples=settings.mc_num_samples,
+            yield_blend_weight=settings.yield_blend_weight,
+            climate_year=request.climate_year or settings.climate_reference_year,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

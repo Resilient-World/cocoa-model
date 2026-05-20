@@ -23,17 +23,18 @@ logger = logging.getLogger(__name__)
 
 # ERA5 / ingest names requested for counterfactual detrending
 SUPPORTED_VARIABLES: frozenset[str] = frozenset(
-    {"tmax", "tmin", "precip", "rh_mean", "srad", "wind10m"}
+    {"tmax", "tmin", "tmean", "precip", "rh_mean", "srad", "wind10m"}
 )
 
-# ATTRICI v2 ISIMIP short names (subprocess ``--variable`` argument)
+# ATTRICI v2 ISIMIP short names (subprocess ``detrend --variable`` argument)
 _ERA5_TO_ATTRICI: dict[str, str] = {
     "tmax": "tasmax",
     "tmin": "tasmin",
+    "tmean": "tas",
     "precip": "pr",
     "rh_mean": "hurs",
     "srad": "rsds",
-    "wind10m": "sfcwind",
+    "wind10m": "sfcWind",
 }
 
 
@@ -73,11 +74,15 @@ class ATTRICIRunner:
         work_dir: Path,
         attrici_bin: str = "attrici",
         n_workers: int = 4,
+        backend: str = "scipy",
+        modes: int = 4,
     ) -> None:
         self.attrici_bin = attrici_bin
         self.gmt_file = Path(gmt_file)
         self.work_dir = Path(work_dir)
         self.n_workers = n_workers
+        self.backend = backend
+        self.modes = modes
         self._logs_dir = self.work_dir / "logs"
 
     def _attrici_version(self) -> str:
@@ -103,26 +108,35 @@ class ATTRICIRunner:
         tmp_nc: Path,
         tmp_out_nc: Path,
     ) -> None:
+        """ATTRICI v2.0.1: ``detrend`` then ``merge-output`` (GPL subprocess only)."""
         attrici_var = _ERA5_TO_ATTRICI[era5_var]
         log_path = self._logs_dir / f"{era5_var}.log"
-        cmd = [
+        detrend_dir = self.work_dir / "detrend" / era5_var
+        detrend_dir.mkdir(parents=True, exist_ok=True)
+        detrend_cmd = [
             self.attrici_bin,
-            "--gmt",
+            "detrend",
+            "--gmt-file",
             str(self.gmt_file),
-            "--input",
+            "--input-file",
             str(tmp_nc),
+            "--output-dir",
+            str(detrend_dir),
             "--variable",
             attrici_var,
-            "--output",
-            str(tmp_out_nc),
-            "--workers",
-            str(self.n_workers),
+            "--modes",
+            str(self.modes),
+            "--solver",
+            self.backend,
+            "--report-variables",
+            "cfact",
+            "--overwrite",
         ]
         self._logs_dir.mkdir(parents=True, exist_ok=True)
         with log_path.open("w", encoding="utf-8") as log_file:
-            log_file.write(f"# command: {' '.join(cmd)}\n\n")
+            log_file.write(f"# detrend: {' '.join(detrend_cmd)}\n\n")
             result = subprocess.run(
-                cmd,
+                detrend_cmd,
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -131,9 +145,36 @@ class ATTRICIRunner:
         if result.returncode != 0:
             raise subprocess.CalledProcessError(
                 result.returncode,
-                cmd,
+                detrend_cmd,
                 None,
-                f"ATTRICI failed for {era5_var}; see {log_path}",
+                f"ATTRICI detrend failed for {era5_var}; see {log_path}",
+            )
+        ts_dir = detrend_dir / "timeseries" / attrici_var
+        if not ts_dir.is_dir():
+            raise FileNotFoundError(
+                f"ATTRICI detrend missing timeseries at {ts_dir} for {era5_var}"
+            )
+        merge_cmd = [
+            self.attrici_bin,
+            "merge-output",
+            str(ts_dir),
+            str(tmp_out_nc),
+        ]
+        with log_path.open("a", encoding="utf-8") as log_file:
+            log_file.write(f"\n# merge-output: {' '.join(merge_cmd)}\n\n")
+            result = subprocess.run(
+                merge_cmd,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                text=True,
+                check=False,
+            )
+        if result.returncode != 0:
+            raise subprocess.CalledProcessError(
+                result.returncode,
+                merge_cmd,
+                None,
+                f"ATTRICI merge-output failed for {era5_var}; see {log_path}",
             )
 
     def _materialize_variable_nc(
@@ -157,7 +198,7 @@ class ATTRICIRunner:
             return out[[era5_var]]
         # ATTRICI may emit ISIMIP / internal names (e.g. cfact, tasmax)
         attrici_var = _ERA5_TO_ATTRICI[era5_var]
-        for candidate in (era5_var, attrici_var, "cfact"):
+        for candidate in (era5_var, attrici_var, "cfact", "counterfactual"):
             if candidate in out.data_vars:
                 renamed = out[[candidate]].rename({candidate: era5_var})
                 return renamed

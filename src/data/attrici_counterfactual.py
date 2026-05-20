@@ -1,570 +1,305 @@
 """
-ATTRICI-style counterfactual climate (Mengel et al. 2021, Earth Syst. Dynam.).
+ATTRICI v2.0.1 counterfactual climate via subprocess (GPLv3 boundary).
 
-Detrends daily climate variables against a smoothed global-mean temperature (GMT)
-series and maps observations to a pre-industrial GMT level. Uses the published
-``attrici`` package in ``bayesian`` mode when installed; otherwise a vendored
-quantile-mapping detrender in ``fast`` mode (same public API, with a logged warning).
+Never ``import attrici`` in this module — all detrending is delegated to the
+``attrici`` CLI (PyMC5/Scipy backend per v2.0.1). See ``NOTICE.md`` and
+``docs/licensing/ATTRICI_GPL_BOUNDARY.md``.
 
-Derived variables (``vpd_mean``, ``et0``, ``cwd``) are recomputed from detrended
-state variables — never detrended directly.
+Methodology: Mengel et al. (2021), *Geosci. Model Dev.* 14, 5269–5284.
 """
 
 from __future__ import annotations
 
-import argparse
+import hashlib
+import json
 import logging
-import sys
-import time
+import shutil
+import tempfile
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Sequence
+from typing import Any, Sequence
 
-import numpy as np
-import pandas as pd
-import requests
 import xarray as xr
 
-from data.era5_ingest import (
-    FAO_ALBEDO,
-    FAO_GAMMA,
-    KELVIN_OFFSET,
-    MAGNUS_A,
-    MAGNUS_B,
-    MAGNUS_C,
-    WIND10_TO_WIND2_FACTOR,
+from counterfactual.attrici_runner import (
+    ATTRICIRunner,
+    SUPPORTED_VARIABLES,
+    load_counterfactual,
 )
+from data.attrici_fast_detrend import recompute_derived_counterfactuals
 
 logger = logging.getLogger(__name__)
 
-MENGEL_2021_REF = "Mengel et al. 2021, Earth Syst. Dynam. (ATTRICI)"
+MENGEL_2021_REF = "Mengel et al. (2021), Geosci. Model Dev. 14, 5269–5284 (ATTRICI)"
 
-GISTEMP_URL = "https://data.giss.nasa.gov/gistemp/tabledata_v4/GLB.Ts+dSST.csv"
-GISTEMP_CACHE_DIR = Path("data/external/gistemp")
-GISTEMP_CACHE_FILE = GISTEMP_CACHE_DIR / "GLB.Ts+dSST.csv"
-GISTEMP_CACHE_MAX_AGE_S = 24 * 3600
-
-DEFAULT_VARIABLES: tuple[str, ...] = ("tmax", "tmin", "precip")
-QUANTILE_LEVELS = np.linspace(0.05, 0.95, 19)
-
-try:
-    from attrici import estimator as _attrici_estimator  # type: ignore[import-untyped]
-
-    _HAS_ATTRICI = True
-except ImportError:
-    _attrici_estimator = None
-    _HAS_ATTRICI = False
-
-try:
-    from scipy import stats as scipy_stats
-    from scipy.signal import savgol_filter
-except ImportError:  # pragma: no cover - scipy is a transitive dep of scikit-learn
-    scipy_stats = None  # type: ignore[assignment]
-    savgol_filter = None  # type: ignore[assignment]
+# CASEJ / ALMANAC / yield-surrogate ERA5 names ↔ ISIMIP short names (ATTRICI v2 CLI)
+ERA5_VARIABLES: tuple[str, ...] = (
+    "tmax",
+    "tmin",
+    "tmean",
+    "precip",
+    "rh_mean",
+    "srad",
+    "wind10m",
+)
+ISIMIP_ALIASES: dict[str, str] = {
+    "tas": "tmean",
+    "tasmax": "tmax",
+    "tasmin": "tmin",
+    "pr": "precip",
+    "hurs": "rh_mean",
+    "rsds": "srad",
+    "sfcwind": "wind10m",
+}
 
 
-def _using_fallback_detrender() -> bool:
-    if not _HAS_ATTRICI:
-        logger.warning(
-            "%s: `attrici` package not installed; using vendored quantile-mapping "
-            "detrender in `fast` mode only. Install optional extra: pip install -e '.[attrici]'",
-            MENGEL_2021_REF,
-        )
-        return True
-    return False
+@dataclass(frozen=True)
+class RegionBounds:
+    """Geographic subset for counterfactual generation."""
+
+    lat_min: float
+    lat_max: float
+    lon_min: float
+    lon_max: float
+
+    def as_dict(self) -> dict[str, float]:
+        return {
+            "lat_min": self.lat_min,
+            "lat_max": self.lat_max,
+            "lon_min": self.lon_min,
+            "lon_max": self.lon_max,
+        }
 
 
-def _saturation_vapor_pressure_kpa_array(tmean_c: xr.DataArray) -> xr.DataArray:
-    return MAGNUS_A * np.exp(MAGNUS_B * tmean_c / (MAGNUS_C + tmean_c))
+@dataclass(frozen=True)
+class TimeRange:
+    """Inclusive calendar-year window."""
+
+    start_year: int
+    end_year: int
+
+    def as_dict(self) -> dict[str, int]:
+        return {"start_year": self.start_year, "end_year": self.end_year}
 
 
-def _vpd_from_tmean_rh(tmean_c: xr.DataArray, rh_pct: xr.DataArray) -> xr.DataArray:
-    rh = rh_pct.clip(0, 100)
-    es = _saturation_vapor_pressure_kpa_array(tmean_c)
-    return es * (1.0 - rh / 100.0)
-
-
-def _fao_et0_array(
-    tmean_c: xr.DataArray,
-    rh_pct: xr.DataArray,
-    wind10m: xr.DataArray,
-    srad_mj: xr.DataArray,
-) -> xr.DataArray:
-    """FAO-56 Penman–Monteith reference ET0 (mm/day), numpy/xarray port of era5_ingest."""
-    es = _saturation_vapor_pressure_kpa_array(tmean_c)
-    ea = es * (rh_pct / 100.0)
-    vpd = (es - ea).clip(min=0)
-    delta = es * MAGNUS_B * MAGNUS_C / (tmean_c + MAGNUS_C) ** 2
-    u2 = wind10m * WIND10_TO_WIND2_FACTOR
-    rn = srad_mj * (1.0 - FAO_ALBEDO)
-    t_k = tmean_c + KELVIN_OFFSET
-    num_rad = delta * rn * 0.408
-    num_aero = FAO_GAMMA * (900.0 / t_k) * u2 * vpd
-    den = delta + FAO_GAMMA * (1.0 + 0.34 * u2)
-    return (num_rad + num_aero) / den
-
-
-def load_gistemp_loti(
-    start_year: int = 1880,
-    smooth_window: int = 21,
-) -> pd.Series:
-    """
-    Load NASA GISTEMP v4 global LOTI (°C anomaly + base) and apply Savitzky–Golay smoothing.
-
-    Cached on disk for 24 hours under ``data/external/gistemp/``.
-    """
-    GISTEMP_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    if GISTEMP_CACHE_FILE.is_file():
-        age = time.time() - GISTEMP_CACHE_FILE.stat().st_mtime
-        if age > GISTEMP_CACHE_MAX_AGE_S:
-            logger.info("GISTEMP cache stale (%.0fh); re-downloading", age / 3600)
-        else:
-            raw = GISTEMP_CACHE_FILE.read_text(encoding="utf-8")
-    else:
-        raw = None
-
-    if raw is None:
-        logger.info("Downloading GISTEMP LOTI from %s", GISTEMP_URL)
-        response = requests.get(GISTEMP_URL, timeout=60)
-        response.raise_for_status()
-        raw = response.text
-        GISTEMP_CACHE_FILE.write_text(raw, encoding="utf-8")
-
-    lines = [ln for ln in raw.splitlines() if ln.strip() and not ln.startswith((" ", "Year"))]
-    # File header rows start with Year; data rows: Year, Jan..Dec, J-D
-    records: list[tuple[int, float]] = []
-    for line in lines:
-        parts = [p.strip() for p in line.split(",")]
-        if not parts[0].isdigit():
+def normalize_variables(variables: Sequence[str]) -> tuple[str, ...]:
+    """Map ISIMIP short names to ERA5 ingest names."""
+    out: list[str] = []
+    for v in variables:
+        key = v.strip().lower()
+        era5 = ISIMIP_ALIASES.get(key, key)
+        if era5 not in SUPPORTED_VARIABLES:
+            logger.warning("Variable %s not in ATTRICI runner support; skipping", v)
             continue
-        year = int(parts[0])
-        if year < start_year:
+        if era5 == "tmean":
+            # Runner detrends tas via tmean if present; prefer tmax+tmin for derived recompute
+            if "tmax" not in out:
+                out.append("tmax")
+            if "tmin" not in out:
+                out.append("tmin")
             continue
-        # Annual mean from monthly columns (skip Year and J-D)
-        months = []
-        for val in parts[1:13]:
-            if val in ("", "***", "*****"):
-                continue
-            try:
-                months.append(float(val))
-            except ValueError:
-                continue
-        if months:
-            records.append((year, float(np.mean(months))))
-
-    if not records:
-        raise ValueError(f"No GISTEMP annual values found from {start_year}")
-
-    years, values = zip(*records)
-    series = pd.Series(values, index=np.array(years, dtype=int), name="gmt_loti")
-
-    if savgol_filter is not None and len(series) >= smooth_window:
-        # polyorder=3 per ATTRICI preprocessing
-        smoothed = savgol_filter(series.values, window_length=smooth_window, polyorder=3)
-        series = pd.Series(smoothed, index=series.index, name="gmt_loti")
-    else:
-        if savgol_filter is None:
-            logger.warning(
-                "scipy not available; using rolling mean instead of Savitzky–Golay for GISTEMP"
-            )
-        series = series.rolling(window=smooth_window, center=True, min_periods=1).mean()
-
-    return series
-
-
-def _preindustrial_gmt(gmt: pd.Series, data_years: np.ndarray | None = None) -> float:
-    """GMT baseline: early segment of overlap with data, else classic pre-industrial years."""
-    if data_years is not None and data_years.size > 0:
-        ymin = int(np.nanmin(data_years))
-        ymax_early = ymin + 30
-        overlap = gmt[(gmt.index >= ymin) & (gmt.index <= ymax_early)]
-        if len(overlap) >= 5:
-            return float(overlap.mean())
-    early = gmt[gmt.index <= 1900]
-    if len(early) >= 10:
-        return float(early.mean())
-    return float(gmt.iloc[: min(30, len(gmt))].mean())
-
-
-def _doy_circular_distance(doy_a: np.ndarray, doy_b: int, window: int) -> np.ndarray:
-    half = window // 2
-    diff = np.abs(doy_a - doy_b)
-    return np.minimum(diff, 366 - diff) <= half
-
-
-def _fast_pixel_detrend(
-    values: np.ndarray,
-    years: np.ndarray,
-    doys: np.ndarray,
-    gmt_values: np.ndarray,
-    gmt_preindustrial: float,
-    window_days: int,
-    is_precip: bool,
-) -> np.ndarray:
-    """
-    Per-pixel quantile-mapping detrend (Mengel et al. 2021 style).
-
-    Within each DOY window, regress quantiles of ``values`` on GMT, map each
-    observation to the pre-industrial GMT quantile.
-    """
-    if scipy_stats is None:
-        raise ImportError(
-            "fast mode requires scipy (transitive via scikit-learn). "
-            "Install scipy or use pip install -e '.[attrici]'."
-        )
-
-    n = values.size
-    out = np.empty(n, dtype=np.float64)
-    gmt_values = np.asarray(gmt_values, dtype=np.float64)
-
-    for i in range(n):
-        win = _doy_circular_distance(doys, int(doys[i]), window_days)
-        y_w = values[win]
-        g_w = gmt_values[win]
-        if y_w.size < 10:
-            out[i] = values[i]
-            continue
-
-        gmt_o = gmt_values[i]
-        p = scipy_stats.percentileofscore(y_w, values[i], kind="mean") / 100.0
-
-        # Quantile–GMT regression: Q_tau(g) = a_tau + b_tau * g
-        q_preds_pi: list[float] = []
-        for tau in QUANTILE_LEVELS:
-            q_tgt = np.quantile(y_w, tau)
-            # local linear fit of quantile vs GMT using overlapping bins
-            g_bins = np.linspace(g_w.min(), g_w.max(), min(8, len(np.unique(g_w))))
-            bin_centers: list[float] = []
-            bin_qs: list[float] = []
-            for j in range(len(g_bins) - 1):
-                mask = (g_w >= g_bins[j]) & (g_w < g_bins[j + 1])
-                if mask.sum() < 3:
-                    continue
-                bin_centers.append(float(g_w[mask].mean()))
-                bin_qs.append(float(np.quantile(y_w[mask], tau)))
-            if len(bin_centers) < 2:
-                q_preds_pi.append(float(np.quantile(y_w, tau)))
-                continue
-            slope, intercept = np.polyfit(bin_centers, bin_qs, 1)
-            q_preds_pi.append(intercept + slope * gmt_preindustrial)
-
-        y_cf = float(np.interp(p, QUANTILE_LEVELS, q_preds_pi))
-        if is_precip:
-            y_cf = max(0.0, y_cf)
-        out[i] = y_cf
-
-    # Remove residual linear GMT sensitivity (Mengel et al. first-order component)
-    valid = np.isfinite(gmt_values) & np.isfinite(values)
-    if valid.sum() >= 10:
-        slope, _ = np.polyfit(gmt_values[valid], values[valid], 1)
-        out = out - slope * (gmt_values - gmt_preindustrial)
-
-    if is_precip:
-        out = np.maximum(0.0, out)
-
-    return out
-
-
-def _years_and_doy_from_time(time: xr.DataArray) -> tuple[np.ndarray, np.ndarray]:
-    t_index = pd.DatetimeIndex(time.values)
-    years = t_index.year.to_numpy()
-    doys = t_index.dayofyear.to_numpy()
-    return years, doys
-
-
-def _gmt_for_timesteps(years: np.ndarray, gmt: pd.Series) -> np.ndarray:
-    return np.array([gmt.get(int(y), np.nan) for y in years], dtype=np.float64)
+        if era5 not in out:
+            out.append(era5)
+    return tuple(out)
 
 
 class ATTRICICounterfactual:
     """
-    Fit and apply GMT-driven counterfactual transforms to a daily ``xarray.Dataset``.
+    Build/cache counterfactual ERA5 Zarr from factual ERA5-Land via ATTRICI v2 CLI.
 
     Parameters
     ----------
-    gmt_series:
-        Annual global mean temperature (°C), indexed by calendar year.
-    variables:
-        Data variables to detrend (must exist in the input dataset).
-    mode:
-        ``fast`` — vendored quantile-mapping detrender; ``bayesian`` — ``attrici`` package.
-    window_days:
-        DOY window width for local detrending in ``fast`` mode.
-    random_state:
-        RNG seed (reserved for ``bayesian`` mode).
+    factual_zarr:
+        Path to factual daily ERA5-Land (or compatible) Zarr store.
+    gmt_file:
+        SSA-smoothed global-mean temperature NetCDF for ATTRICI ``detrend``.
+    cache_dir:
+        Directory for content-addressed counterfactual Zarr caches.
+    attrici_bin:
+        ATTRICI executable (default ``attrici`` on ``PATH``, or ``.venv-attrici/bin/attrici``).
+    backend:
+        ATTRICI solver: ``scipy`` (fast) or ``pymc5``.
+    n_workers:
+        Reserved for grid-parallel extensions; passed where supported.
     """
 
     def __init__(
         self,
-        gmt_series: pd.Series,
-        variables: Sequence[str] = DEFAULT_VARIABLES,
-        mode: Literal["fast", "bayesian"] = "fast",
-        window_days: int = 31,
-        random_state: int = 42,
+        factual_zarr: Path | str,
+        *,
+        gmt_file: Path | str,
+        cache_dir: Path | str | None = None,
+        attrici_bin: str | None = None,
+        backend: str = "scipy",
+        n_workers: int = 4,
     ) -> None:
-        self.gmt_series = gmt_series.sort_index()
-        self.variables = tuple(variables)
-        self.mode = mode
-        self.window_days = window_days
-        self.random_state = random_state
-        self._gmt_preindustrial: float | None = None
-        self._fitted = False
+        self.factual_zarr = Path(factual_zarr)
+        self.gmt_file = Path(gmt_file)
+        self.cache_dir = Path(cache_dir or "data/cache/attrici_counterfactual")
+        self.attrici_bin = attrici_bin or "attrici"
+        self.backend = backend
+        self.n_workers = n_workers
 
-        if mode == "fast":
-            _using_fallback_detrender()
-        elif mode == "bayesian" and not _HAS_ATTRICI:
-            raise NotImplementedError(
-                "bayesian mode requires the attrici package. "
-                "Install with `pip install -e '.[attrici]'` or use mode='fast'."
+    def cache_key(
+        self,
+        variables: Sequence[str],
+        *,
+        region: RegionBounds | None = None,
+        time_range: TimeRange | None = None,
+    ) -> str:
+        """Stable hash over inputs (variable set, region, time, factual path mtime)."""
+        payload: dict[str, Any] = {
+            "factual": str(self.factual_zarr.resolve()),
+            "variables": sorted(normalize_variables(variables)),
+            "gmt": str(self.gmt_file.resolve()),
+            "backend": self.backend,
+            "attrici_version": "v2.0.1",
+        }
+        if self.factual_zarr.exists():
+            payload["factual_mtime"] = self.factual_zarr.stat().st_mtime
+        if region is not None:
+            payload["region"] = region.as_dict()
+        if time_range is not None:
+            payload["time_range"] = time_range.as_dict()
+        raw = json.dumps(payload, sort_keys=True).encode("utf-8")
+        return hashlib.sha256(raw).hexdigest()[:16]
+
+    def cached_zarr_path(
+        self,
+        variables: Sequence[str],
+        *,
+        region: RegionBounds | None = None,
+        time_range: TimeRange | None = None,
+    ) -> Path:
+        key = self.cache_key(variables, region=region, time_range=time_range)
+        return self.cache_dir / f"cf_{key}.zarr"
+
+    def _subset_factual(
+        self,
+        variables: Sequence[str],
+        *,
+        region: RegionBounds | None,
+        time_range: TimeRange | None,
+        out_zarr: Path,
+    ) -> Path:
+        """Write a (possibly subset) factual Zarr for ATTRICI input."""
+        ds = xr.open_zarr(self.factual_zarr, consolidated=True)
+        lat_name = "latitude" if "latitude" in ds.dims or "latitude" in ds.coords else "lat"
+        lon_name = "longitude" if "longitude" in ds.dims or "longitude" in ds.coords else "lon"
+
+        if region is not None:
+            ds = ds.sel(
+                {
+                    lat_name: slice(region.lat_min, region.lat_max),
+                    lon_name: slice(region.lon_min, region.lon_max),
+                }
+            )
+        if time_range is not None and "time" in ds.coords:
+            ds = ds.sel(time=slice(str(time_range.start_year), str(time_range.end_year)))
+
+        keep = [v for v in normalize_variables(variables) if v in ds.data_vars]
+        if not keep:
+            raise KeyError(
+                f"No requested variables in factual Zarr; wanted {variables}, "
+                f"have {list(ds.data_vars)}"
+            )
+        out = ds[keep]
+        if out_zarr.exists():
+            shutil.rmtree(out_zarr)
+        out.to_zarr(out_zarr, mode="w")
+        return out_zarr
+
+    def build_counterfactual_zarr(
+        self,
+        variables: Sequence[str] | None = None,
+        *,
+        region: RegionBounds | None = None,
+        time_range: TimeRange | None = None,
+        output_zarr: Path | None = None,
+        overwrite: bool = False,
+    ) -> Path:
+        """
+        Run ATTRICI subprocess and return path to counterfactual Zarr (cached).
+
+        Counterfactual variables are stored per ERA5 name; merge with factual and
+        call :func:`data.attrici_fast_detrend.recompute_derived_counterfactuals` for
+        ``vpd_mean_cf`` / ``et0_cf`` when needed.
+        """
+        vars_norm = normalize_variables(variables or ERA5_VARIABLES)
+        out_path = output_zarr or self.cached_zarr_path(
+            vars_norm, region=region, time_range=time_range
+        )
+        if out_path.exists() and not overwrite:
+            logger.info("Using cached ATTRICI counterfactual %s", out_path)
+            return out_path
+
+        if not self.factual_zarr.is_dir():
+            raise FileNotFoundError(f"Factual ERA5 Zarr not found: {self.factual_zarr}")
+        if not self.gmt_file.is_file():
+            raise FileNotFoundError(
+                f"GMT file for ATTRICI not found: {self.gmt_file}. "
+                "Build via ATTRICI ``ssa`` or set ATTRICI_GMT_FILE."
             )
 
-    def fit(self, ds: xr.Dataset) -> ATTRICICounterfactual:
-        """Record GMT baseline and validate variables (lightweight fit)."""
-        years, _ = _years_and_doy_from_time(ds["time"])
-        self._gmt_preindustrial = _preindustrial_gmt(self.gmt_series, years)
-        missing = [v for v in self.variables if v not in ds.data_vars]
-        if missing:
-            raise KeyError(f"Dataset missing variables for fit: {missing}")
-        self._fitted = True
-        logger.info(
-            "ATTRICICounterfactual fit: mode=%s, gmt_pi=%.3f°C, variables=%s",
-            self.mode,
-            self._gmt_preindustrial,
-            self.variables,
-        )
-        return self
-
-    def transform(self, ds: xr.Dataset) -> xr.Dataset:
-        """Return dataset with ``{var}_cf`` counterfactual variables."""
-        if not self._fitted:
-            raise RuntimeError("Call fit() before transform()")
-        if self.mode == "bayesian":
-            return self._transform_bayesian(ds)
-        return self._transform_fast(ds)
-
-    def fit_transform(self, ds: xr.Dataset) -> xr.Dataset:
-        return self.fit(ds).transform(ds)
-
-    def _transform_fast(self, ds: xr.Dataset) -> xr.Dataset:
-        assert self._gmt_preindustrial is not None
-        years, doys = _years_and_doy_from_time(ds["time"])
-        gmt_t = _gmt_for_timesteps(years, self.gmt_series)
-
-        out = ds.copy()
-        spatial_dims = [d for d in ("latitude", "longitude", "lat", "lon") if d in ds.dims]
-        if len(spatial_dims) < 2:
-            raise ValueError("Dataset must have latitude/longitude (or lat/lon) dimensions")
-
-        for var in self.variables:
-            if var not in ds.data_vars:
-                logger.warning("Skipping missing variable %s", var)
-                continue
-            da = ds[var]
-            is_precip = var == "precip"
-
-            def _apply_pixel(values: np.ndarray) -> np.ndarray:
-                return _fast_pixel_detrend(
-                    values,
-                    years,
-                    doys,
-                    gmt_t,
-                    self._gmt_preindustrial,
-                    self.window_days,
-                    is_precip,
-                )
-
-            cf = xr.apply_ufunc(
-                _apply_pixel,
-                da,
-                input_core_dims=[["time"]],
-                output_core_dims=[["time"]],
-                vectorize=True,
-                dask="parallelized",
-                output_dtypes=[np.float64],
-            )
-            cf.name = f"{var}_cf"
-            cf.attrs.update(da.attrs)
-            cf.attrs["counterfactual_method"] = "ATTRICI-style quantile mapping (fast)"
-            cf.attrs["gmt_preindustrial"] = self._gmt_preindustrial
-            out[cf.name] = cf
-
-        return out
-
-    def _transform_bayesian(self, ds: xr.Dataset) -> xr.Dataset:
-        if not _HAS_ATTRICI or _attrici_estimator is None:
-            raise NotImplementedError(
-                "bayesian mode requires the attrici package. "
-                "Install with `pip install -e '.[attrici]'` or use mode='fast'."
-            )
-        # attrici v1/v2 grid estimators differ; surface a clear path until wired.
-        estimator_cls = getattr(_attrici_estimator, "Estimator", None) or getattr(
-            _attrici_estimator, "Attrici", None
-        )
-        if estimator_cls is None:
-            raise NotImplementedError(
-                "attrici.estimator does not expose a known Estimator class for xarray grids. "
-                "Use mode='fast' for the vendored quantile-mapping detrender."
-            )
-        raise NotImplementedError(
-            "bayesian mode via attrici.estimator is not yet wired for full xarray grids. "
-            "Use mode='fast' (Mengel et al. 2021 quantile-mapping detrender)."
-        )
-
-
-def recompute_derived_counterfactuals(ds_cf: xr.Dataset) -> xr.Dataset:
-    """
-    Recompute ``vpd_mean_cf``, ``et0_cf``, and ``cwd_cf`` from detrended state variables.
-
-    Requires ``tmax_cf``, ``tmin_cf``; uses ``rh_mean_cf``, ``srad_cf``, ``wind10m_cf``,
-    and ``precip_cf`` when present. Never detrends derived variables directly.
-    """
-    out = ds_cf.copy()
-    if "tmax_cf" not in out or "tmin_cf" not in out:
-        return out
-
-    tmean_cf = (out["tmax_cf"] + out["tmin_cf"]) / 2.0
-    out["tmean_cf"] = tmean_cf
-
-    if "rh_mean_cf" in out:
-        out["vpd_mean_cf"] = _vpd_from_tmean_rh(tmean_cf, out["rh_mean_cf"])
-    elif "rh_mean" in out and "rh_mean_cf" not in out:
-        pass
-
-    need_et0 = {"rh_mean_cf", "wind10m_cf", "srad_cf"} <= set(out.data_vars)
-    if need_et0:
-        out["et0_cf"] = _fao_et0_array(
-            tmean_cf,
-            out["rh_mean_cf"],
-            out["wind10m_cf"],
-            out["srad_cf"],
-        )
-        if "precip_cf" in out:
-            out["cwd_cf"] = out["et0_cf"] - out["precip_cf"]
-        elif "precip" in out:
-            out["cwd_cf"] = out["et0_cf"] - out["precip"]
-
-    return out
-
-
-def hazard_return_period_shift(
-    ds: xr.Dataset,
-    variable: str,
-    threshold: float,
-    direction: Literal["above", "below"] = "above",
-) -> xr.Dataset:
-    """
-    Per-pixel exceedance probabilities and attribution metrics.
-
-    Returns
-    -------
-    xarray.Dataset
-        ``p_factual``, ``p_counterfactual``, ``risk_ratio``, ``fraction_attributable_risk``
-        (FAR = 1 - p_cf / p_fac).
-    """
-    cf_var = f"{variable}_cf"
-    if variable not in ds.data_vars:
-        raise KeyError(f"Variable {variable!r} not in dataset")
-    if cf_var not in ds.data_vars:
-        raise KeyError(f"Counterfactual {cf_var!r} not in dataset; run transform() first")
-
-    fac = ds[variable]
-    cf = ds[cf_var]
-
-    if direction == "above":
-        mask_fac = fac > threshold
-        mask_cf = cf > threshold
-    else:
-        mask_fac = fac < threshold
-        mask_cf = cf < threshold
-
-    p_factual = mask_fac.mean(dim="time")
-    p_counterfactual = mask_cf.mean(dim="time")
-    eps = 1e-12
-    risk_ratio = p_factual / (p_counterfactual + eps)
-    far = 1.0 - (p_counterfactual / (p_factual + eps))
-
-    return xr.Dataset(
-        {
-            "p_factual": p_factual,
-            "p_counterfactual": p_counterfactual,
-            "risk_ratio": risk_ratio,
-            "fraction_attributable_risk": far,
-            "far": far,
-        },
-        attrs={
-            "variable": variable,
-            "threshold": threshold,
-            "direction": direction,
-            "reference": MENGEL_2021_REF,
-        },
-    )
-
-
-def _parse_cli_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Build ATTRICI-style counterfactual daily climate Zarr from factual ERA5 Zarr."
-    )
-    parser.add_argument(
-        "--era5-zarr",
-        type=Path,
-        required=True,
-        help="Input factual ERA5-Land daily Zarr (e.g. data/processed/era5_daily.zarr).",
-    )
-    parser.add_argument(
-        "--out-zarr",
-        type=Path,
-        required=True,
-        help="Output Zarr with factual variables plus *_cf counterfactuals.",
-    )
-    parser.add_argument(
-        "--variables",
-        type=str,
-        default="tmax,tmin,precip",
-        help="Comma-separated variables to detrend (default: tmax,tmin,precip).",
-    )
-    parser.add_argument(
-        "--mode",
-        type=str,
-        default="fast",
-        choices=("fast", "bayesian"),
-        help="Detrending mode (default: fast).",
-    )
-    return parser.parse_args(argv)
-
-
-def main(argv: list[str] | None = None) -> int:
-    args = _parse_cli_args(argv)
-    variables = tuple(v.strip() for v in args.variables.split(",") if v.strip())
-    if not variables:
-        print("No variables specified.", file=sys.stderr)
-        return 1
-
-    if not args.era5_zarr.exists():
-        print(f"Input Zarr not found: {args.era5_zarr}", file=sys.stderr)
-        return 1
-
-    gmt = load_gistemp_loti()
-    logger.info("Loaded smoothed GISTEMP LOTI (%d years)", len(gmt))
-
-    ds = xr.open_zarr(args.era5_zarr, consolidated=True)
-    model = ATTRICICounterfactual(gmt, variables=variables, mode=args.mode)  # type: ignore[arg-type]
-    cf = model.fit_transform(ds)
-
-    out = ds.copy()
-    for name, da in cf.data_vars.items():
-        out[name] = da
-
-    if {"tmax_cf", "tmin_cf"} <= set(out.data_vars):
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        work = Path(tempfile.mkdtemp(prefix="attrici_cf_", dir=self.cache_dir))
         try:
-            out = recompute_derived_counterfactuals(out)
-        except KeyError as exc:
-            logger.warning("Skipping derived counterfactual recompute: %s", exc)
+            factual_subset = work / "factual_subset.zarr"
+            self._subset_factual(vars_norm, region=region, time_range=time_range, out_zarr=factual_subset)
 
-    args.out_zarr.parent.mkdir(parents=True, exist_ok=True)
-    out.to_zarr(args.out_zarr, mode="w")
-    logger.info("Wrote counterfactual stack to %s", args.out_zarr)
-    return 0
+            runner = ATTRICIRunner(
+                gmt_file=self.gmt_file,
+                work_dir=work / "attrici_work",
+                attrici_bin=self.attrici_bin,
+                n_workers=self.n_workers,
+                backend=self.backend,
+            )
+            runner.run(factual_subset, vars_norm, out_path, overwrite=True)
+
+            # Merge factual + *_cf suffix for downstream 11-channel extraction
+            self._finalize_merged_store(factual_subset, out_path, vars_norm)
+            logger.info("ATTRICI counterfactual ready at %s", out_path)
+            return out_path
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+    def _finalize_merged_store(
+        self,
+        factual_subset: Path,
+        cf_zarr: Path,
+        variables: Sequence[str],
+    ) -> None:
+        """Add ``{var}_cf`` arrays alongside factual variables in ``cf_zarr``."""
+        xr = __import__("xarray", fromlist=["xarray"])
+        fac = xr.open_zarr(factual_subset)
+        cf_parts = load_counterfactual(cf_zarr)
+        merged = fac.copy()
+        for var in variables:
+            if var in cf_parts.data_vars:
+                merged[f"{var}_cf"] = cf_parts[var].rename(f"{var}_cf")
+        try:
+            merged = recompute_derived_counterfactuals(merged)
+        except Exception as exc:
+            logger.warning("Derived counterfactual recompute skipped: %s", exc)
+        if cf_zarr.exists():
+            shutil.rmtree(cf_zarr)
+        merged.attrs["counterfactual_method"] = "ATTRICI v2.0.1 subprocess"
+        merged.attrs["reference"] = MENGEL_2021_REF
+        merged.to_zarr(cf_zarr, mode="w")
+
+    def open_counterfactual(self, path: Path | None = None, **kwargs: Any) -> xr.Dataset:
+        """Open a built counterfactual store (default: cache lookup)."""
+        zarr_path = path or self.build_counterfactual_zarr(**kwargs)
+        return xr.open_zarr(zarr_path, consolidated=True)
 
 
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    sys.exit(main())
+__all__ = [
+    "ATTRICICounterfactual",
+    "ERA5_VARIABLES",
+    "ISIMIP_ALIASES",
+    "MENGEL_2021_REF",
+    "RegionBounds",
+    "TimeRange",
+    "normalize_variables",
+    "recompute_derived_counterfactuals",
+]

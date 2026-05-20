@@ -70,7 +70,7 @@ dev = [
 ]
 # ATTRICI is GPLv3 — subprocess-only in src/; install for integration tests only
 attrici = [
-    "attrici>=1.1",
+    "attrici @ git+https://github.com/ISI-MIP/attrici.git@v2.0.1",
 ]
 # Fields of The World parcel delineation (subprocess CLI boundary)
 ftw = [
