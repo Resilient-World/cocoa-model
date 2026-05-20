@@ -44,7 +44,10 @@ logger = logging.getLogger(__name__)
 FDP_COCOA_COLLECTION = "projects/forestdatapartnership/assets/cocoa/model_2025a"
 PROBABILITY_BAND = "probability"
 SUPPORTED_YEARS: tuple[int, ...] = (2020, 2023)
-DEFAULT_THRESHOLD = 0.65
+# FDP 2025a model card: F1-optimal precision/recall ≈ 0.96 (not Kalischek 2023)
+FDP_MODEL_CARD_URL = "https://github.com/google/forest-data-partnership/tree/main/models/cocoa"
+MIN_THRESHOLD = 0.5
+DEFAULT_THRESHOLD = 0.96
 DEFAULT_SCALE_M = 10
 
 ExposureBackend = Literal["fdp", "galileo", "ensemble"]
@@ -65,6 +68,25 @@ def _year_date_range(year: int) -> tuple[str, str]:
     return f"{y}-01-01", f"{y}-12-31"
 
 
+def validate_threshold(threshold: float) -> float:
+    """
+    Validate FDP probability → binary mask threshold.
+
+    Raises
+    ------
+    ValueError
+        If ``threshold`` is below :data:`MIN_THRESHOLD` (0.5).
+    """
+    value = float(threshold)
+    if value < MIN_THRESHOLD:
+        raise ValueError(
+            f"threshold must be >= {MIN_THRESHOLD} (FDP probability scale), got {value}"
+        )
+    if value > 1.0:
+        raise ValueError(f"threshold must be <= 1.0, got {value}")
+    return value
+
+
 def _cocoa_belt_probability(lat: float, lon: float) -> float:
     """Heuristic cocoa suitability outside FDP mask (West Africa + Americas belt)."""
     in_africa = -12.0 <= lat <= 12.0 and -12.0 <= lon <= 5.0
@@ -80,8 +102,8 @@ class CocoaExposureIngest:
     """
     Ingest FDP cocoa probability for an AOI and calendar year.
 
-    Default threshold 0.65 matches Kalischek et al. (2023) F1-optimal operating point
-    carried forward in the FDP 2025a product documentation.
+    Default threshold 0.96 is the F1-optimal operating point documented in the
+    FDP 2025a model card (see :data:`FDP_MODEL_CARD_URL`).
     """
 
     def __init__(
@@ -97,7 +119,7 @@ class CocoaExposureIngest:
     ) -> None:
         self.aoi = aoi
         self.year = _normalize_year(year)
-        self.threshold = threshold
+        self.threshold = validate_threshold(threshold)
         self.project = project
         self.backend = backend
         self.galileo_checkpoint = (
@@ -334,8 +356,11 @@ __all__ = [
     "CocoaExposureIngest",
     "ExposureBackend",
     "FDP_COCOA_COLLECTION",
+    "FDP_MODEL_CARD_URL",
     "DEFAULT_GALILEO_CHECKPOINT",
     "DEFAULT_THRESHOLD",
+    "MIN_THRESHOLD",
     "SUPPORTED_YEARS",
     "resolve_exposure_probability",
+    "validate_threshold",
 ]

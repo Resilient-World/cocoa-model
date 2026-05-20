@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from data.cocoa_exposure import DEFAULT_THRESHOLD
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -32,6 +35,14 @@ class APISettings(BaseSettings):
     feature_store_root: Path | None = None
     climate_reference_year: int = 2023
     earthengine_project: str | None = None
+
+    cocoa_exposure_year: int = 2023
+    cocoa_exposure_threshold: float = Field(
+        default=DEFAULT_THRESHOLD,
+        ge=0.5,
+        le=1.0,
+        description="FDP 2025a probability threshold for binary cocoa mask",
+    )
 
     use_galileo_embedding: bool = False
     galileo_embedding_dim: int = 128

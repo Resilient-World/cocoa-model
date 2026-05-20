@@ -357,7 +357,7 @@ def write_benchmark_report(
             "",
             "## Notes",
             "",
-            "- **FDP-only** uses the 2025a prior thresholded at 0.65 (Kalischek F1-optimal).",
+            "- **FDP-only** uses the 2025a prior thresholded at 0.96 (FDP model card F1-optimal).",
             "- **Galileo-Base** uses :class:`models.galileo_seg.GalileoCocoaSegmentation` "
             "(S2×10 + S1 + ERA5 monthly×5 + DEM).",
             "- **Prithvi-EO-2.0** row uses a 6-band proxy stem when TerraTorch checkpoints "

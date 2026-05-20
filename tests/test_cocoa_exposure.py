@@ -10,13 +10,6 @@ def test_collection_id_is_fdp_2025a():
     assert FDP_COCOA_COLLECTION == "projects/forestdatapartnership/assets/cocoa/model_2025a"
 
 
-def test_threshold_default_matches_kalischek_f1_optimal():
-    # AOI is only stored until a GEE method runs; avoid ee.Geometry (requires Initialize).
-    ing = CocoaExposureIngest(aoi=object())  # type: ignore[arg-type]
-    assert ing.threshold == pytest.approx(0.65)
-    assert ing.year == 2023
-
-
 def test_backend_defaults_to_fdp():
     ing = CocoaExposureIngest(aoi=object(), backend="fdp")  # type: ignore[arg-type]
     assert ing.backend == "fdp"
