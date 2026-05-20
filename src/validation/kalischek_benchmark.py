@@ -32,10 +32,11 @@ HOLDOUT_FRACTION = 0.10
 REFERENCE_THRESHOLD = 0.5
 PREDICTION_THRESHOLD = 0.5
 
-# Ghana + CDI cocoa belt sampling windows (lat, lon)
+from data.cocoa_exposure import REGIONS as COCOA_REGIONS, region_latlon_bounds
+
+# Benchmark sampling windows (lat_min, lat_max, lon_min, lon_max) — all FDP regions
 REGIONS: dict[str, tuple[float, float, float, float]] = {
-    "GHA": (4.5, 8.5, -3.5, 1.5),
-    "CIV": (4.0, 10.5, -8.5, -2.5),
+    key: region_latlon_bounds(key) for key in COCOA_REGIONS
 }
 
 
@@ -98,11 +99,15 @@ class HeuristicKalischekReference:
     """Belt suitability proxy when GEE asset is unavailable."""
 
     def sample_reference(self, lats: np.ndarray, lons: np.ndarray) -> np.ndarray:
-        in_gha = (lats >= REGIONS["GHA"][0]) & (lats <= REGIONS["GHA"][1])
-        in_gha &= (lons >= REGIONS["GHA"][2]) & (lons <= REGIONS["GHA"][3])
-        in_civ = (lats >= REGIONS["CIV"][0]) & (lats <= REGIONS["CIV"][1])
-        in_civ &= (lons >= REGIONS["CIV"][2]) & (lons <= REGIONS["CIV"][3])
-        prob = np.where(in_gha | in_civ, 0.72, 0.18)
+        in_belt = np.zeros(lats.shape, dtype=bool)
+        for lat_min, lat_max, lon_min, lon_max in REGIONS.values():
+            in_belt |= (
+                (lats >= lat_min)
+                & (lats <= lat_max)
+                & (lons >= lon_min)
+                & (lons <= lon_max)
+            )
+        prob = np.where(in_belt, 0.72, 0.18)
         prob += np.clip((7.0 - np.abs(lats - 6.5)) * 0.03, 0, 0.15)
         return np.clip(prob, 0.0, 1.0)
 

@@ -35,10 +35,10 @@ import xee  # noqa: F401 — registers the ``ee`` Xarray backend
 from torch import Tensor
 
 from data.cocoa_exposure import (
-    CocoaExposureIngest,
     DEFAULT_THRESHOLD,
     ExposureBackend,
     FDP_COCOA_COLLECTION,
+    sample_cocoa_probability_at_point,
 )
 from data.era5_ingest import ERA5Ingest
 from data.feature_store import FeatureStore
@@ -592,15 +592,14 @@ class FarmFeatureResolver:
         dist_info = protected_dist_m.getInfo()
         protected_km = float(dist_info) / 1000.0 if dist_info is not None else 50.0
 
-        exposure = CocoaExposureIngest(
-            point.buffer(50),
+        cocoa_prob = sample_cocoa_probability_at_point(
+            lat,
+            lon,
             year=fdp_year,
             threshold=self.config.cocoa_exposure_threshold,
-            project=self.config.gee_project,
             backend=self.config.cocoa_exposure_backend,
+            project=self.config.gee_project,
         )
-        fdp_prob = exposure.sample_point(lat, lon, scale_m=10)
-        cocoa_prob = fdp_prob if fdp_prob is not None else _cocoa_belt_probability(lat, lon)
 
         return ResolvedStaticFeatures(
             clay_pct=float(sample.get("clay", 25.0)),

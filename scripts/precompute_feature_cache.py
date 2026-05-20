@@ -45,14 +45,25 @@ from models.yield_surrogate import CLIMATE_CHANNEL_NAMES, N_CLIMATE_CHANNELS
 
 logger = logging.getLogger(__name__)
 
+from data.cocoa_exposure import REGIONS, normalize_region_key, region_latlon_bounds
+
+# lat_min, lat_max, lon_min, lon_max — aligned with data.cocoa_exposure.REGIONS
 REGION_BBOXES: dict[str, tuple[float, float, float, float]] = {
-    # lat_min, lat_max, lon_min, lon_max
-    "gha": (4.5, 11.5, -3.5, 1.5),
-    "civ": (4.0, 11.0, -8.5, -2.5),
-    "cmr": (1.5, 13.0, 8.0, 16.5),
-    "nga": (4.0, 14.0, 2.5, 14.5),
-    "idn": (-11.0, 7.0, 95.0, 141.0),
+    key: region_latlon_bounds(key) for key in REGIONS
 }
+# CLI short aliases
+REGION_BBOXES.update(
+    {
+        "gha": REGION_BBOXES["ghana"],
+        "civ": REGION_BBOXES["civ"],
+        "cmr": REGION_BBOXES["cameroon"],
+        "nga": REGION_BBOXES["nigeria"],
+        "idn": REGION_BBOXES["indonesia"],
+        "ecu": REGION_BBOXES["ecuador"],
+        "per": REGION_BBOXES["peru"],
+        "col": REGION_BBOXES["colombia"],
+    }
+)
 
 
 def grid_cells(
@@ -187,9 +198,13 @@ def main(argv: list[str] | None = None) -> int:
     region_keys = [r.strip().lower() for r in args.regions.split(",") if r.strip()]
     cells: list[tuple[float, float]] = []
     for key in region_keys:
-        if key not in REGION_BBOXES:
-            parser.error(f"Unknown region {key!r}; choose from {list(REGION_BBOXES)}")
-        cells.extend(grid_cells(REGION_BBOXES[key], step=args.step))
+        try:
+            norm = normalize_region_key(key)
+        except KeyError:
+            if key not in REGION_BBOXES:
+                parser.error(f"Unknown region {key!r}; choose from {sorted(REGIONS)}")
+            norm = key
+        cells.extend(grid_cells(REGION_BBOXES.get(key, REGION_BBOXES[norm]), step=args.step))
 
     unique = list({round_to_grid(lat, lon, args.step): (lat, lon) for lat, lon in cells}.values())
     cells = subsample_cells(unique, args.max_points, args.seed)

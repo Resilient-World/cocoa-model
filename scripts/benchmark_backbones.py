@@ -2,11 +2,11 @@
 """
 Head-to-head benchmark: AlphaEarth (AEF), Prithvi-EO-2.0, Galileo-Base, and FDP cocoa segmentation.
 
-Evaluates on a held-out spatial sample (default 5000 tiles) over Côte d'Ivoire and Ghana
+Evaluates on a held-out spatial sample (default 5000 tiles) per FDP region or all regions
 with Kalischek et al. (2023) in-situ reference labels (GEE asset or belt heuristic).
 
-Writes ``reports/backbones/benchmark_<date>.md`` (legacy) and
-``reports/backbones/benchmark_aef_<date>.md`` with mean error, mIoU, F1, boundary IoU,
+Writes ``reports/backbones/benchmark_<region>_<date>.md`` and
+``reports/backbones/benchmark_aef_<region>_<date>.md`` with mean error, mIoU, F1, boundary IoU,
 latency, and parameter counts.
 
 Example::
@@ -33,6 +33,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT / "src"))
 
+from data.cocoa_exposure import REGIONS as COCOA_REGIONS
 from validation.kalischek_benchmark import (
     HeuristicKalischekReference,
     REGIONS,
@@ -259,21 +260,33 @@ class PrithviProxyPredictor:
         return prob.astype(np.float32)
 
 
+def _region_sampling_keys(region: str | None) -> list[str]:
+    """Lowercase cocoa region keys to sample (excludes legacy GHA/CIV aliases)."""
+    if region is not None:
+        from data.cocoa_exposure import normalize_region_key
+
+        return [normalize_region_key(region)]
+    return sorted(COCOA_REGIONS.keys())
+
+
 def sample_holdout_tiles(
     n_tiles: int,
     *,
     seed: int = 42,
     holdout_fraction: float = 0.10,
+    region: str | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return (lats, lons, labels[H,W]) for holdout cells over CIV+GHA."""
+    """Return (lats, lons, labels[H,W]) for holdout cells over one or all FDP regions."""
     rng = np.random.default_rng(seed)
     ref = HeuristicKalischekReference()
-    per_region = max(1, n_tiles // len(REGIONS))
+    keys = _region_sampling_keys(region)
+    per_region = max(1, n_tiles // len(keys))
     lats_all: list[float] = []
     lons_all: list[float] = []
     labels: list[np.ndarray] = []
 
-    for region, (lat_min, lat_max, lon_min, lon_max) in REGIONS.items():
+    for region_key in keys:
+        lat_min, lat_max, lon_min, lon_max = REGIONS[region_key]
         drawn = 0
         attempts = 0
         while drawn < per_region and attempts < per_region * 50:
@@ -290,11 +303,11 @@ def sample_holdout_tiles(
             lons_all.append(lo)
             labels.append(label)
             drawn += 1
-        _ = region
 
-    while len(lats_all) < n_tiles:
-        la = float(rng.uniform(4.0, 10.0))
-        lo = float(rng.uniform(-8.5, 1.5))
+    while len(lats_all) < n_tiles and keys:
+        lat_min, lat_max, lon_min, lon_max = REGIONS[keys[0]]
+        la = float(rng.uniform(lat_min, lat_max))
+        lo = float(rng.uniform(lon_min, lon_max))
         if not spatial_holdout_mask(np.array([la]), np.array([lo]), fraction=holdout_fraction, seed=seed)[
             0
         ]:
@@ -359,6 +372,7 @@ def write_benchmark_report(
     results: list[BackboneResult],
     path: Path,
     *,
+    region: str | None = None,
     galileo_checkpoint_present: bool = False,
 ) -> Path:
     by_miou = max(results, key=lambda r: (r.miou, r.f1, -r.latency_ms_median))
@@ -370,10 +384,15 @@ def write_benchmark_report(
         winner = galileo
     else:
         winner = by_miou
+    region_label = (
+        COCOA_REGIONS[region].display_name
+        if region and region in COCOA_REGIONS
+        else "all FDP regions"
+    )
     lines = [
-        f"# Cocoa backbone benchmark ({date.today().isoformat()})",
+        f"# Cocoa backbone benchmark — {region_label} ({date.today().isoformat()})",
         "",
-        "Held-out spatial tiles over **Côte d'Ivoire + Ghana** with Kalischek et al. "
+        f"Held-out spatial tiles over **{region_label}** with Kalischek et al. "
         "(2023) in-situ reference (GEE asset or belt heuristic). "
         f"**Production backbone: {winner.name}** "
         "(fine-tuned Galileo-Base; FDP 2025a as weak prior).",
@@ -422,6 +441,7 @@ def write_aef_benchmark_report(
     results: list[BackboneResult],
     path: Path,
     *,
+    region: str | None = None,
     aef_checkpoint_present: bool = False,
 ) -> Path:
     """Report including AEF with mean error (AlphaEarth Foundations benchmark)."""
@@ -433,10 +453,16 @@ def write_aef_benchmark_report(
     else:
         leader = by_miou
 
+    region_label = (
+        COCOA_REGIONS[region].display_name
+        if region and region in COCOA_REGIONS
+        else "all FDP regions"
+    )
     lines = [
-        f"# Cocoa backbone benchmark — AlphaEarth Foundations ({date.today().isoformat()})",
+        f"# Cocoa backbone benchmark — AlphaEarth Foundations, {region_label} "
+        f"({date.today().isoformat()})",
         "",
-        "Held-out spatial tiles over **Côte d'Ivoire + Ghana** vs Kalischek et al. "
+        f"Held-out spatial tiles over **{region_label}** vs Kalischek et al. "
         "(2023) in-situ reference. AlphaEarth Foundations (arXiv:2507.22291) provides "
         "pre-computed 64-D annual embeddings on Earth Engine "
         "(`GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL`) — near-zero inference cost vs ViT backbones.",
@@ -481,6 +507,7 @@ def run_benchmark(
     *,
     n_tiles: int = 5000,
     seed: int = 42,
+    region: str | None = None,
     galileo_checkpoint: Path = DEFAULT_GALILEO_CKPT,
     aef_checkpoint: Path = DEFAULT_AEF_CKPT,
     report_dir: Path = DEFAULT_REPORT_DIR,
@@ -489,7 +516,10 @@ def run_benchmark(
     galileo_model_size: str = "base",
     write_legacy_report: bool = True,
 ) -> Path:
-    lats, lons, labels = sample_holdout_tiles(n_tiles, seed=seed)
+    from data.cocoa_exposure import normalize_region_key
+
+    region_key = normalize_region_key(region) if region else None
+    lats, lons, labels = sample_holdout_tiles(n_tiles, seed=seed, region=region_key)
     ref = HeuristicKalischekReference()
     aef_predictor = AEFHeadPredictor(aef_checkpoint)
     gal_predictor = GalileoSegPredictor(galileo_checkpoint, model_size=galileo_model_size)
@@ -503,17 +533,21 @@ def run_benchmark(
         evaluate_predictor(p, lats, lons, labels, max_latency_tiles=max_latency_tiles)
         for p in predictors
     ]
-    aef_out = report_dir / f"benchmark_aef_{date.today().isoformat()}.md"
+    today = date.today().isoformat()
+    tag = region_key or "all"
+    aef_out = report_dir / f"benchmark_aef_{tag}_{today}.md"
     write_aef_benchmark_report(
         results,
         aef_out,
+        region=region_key,
         aef_checkpoint_present=aef_predictor._has_checkpoint,
     )
     if write_legacy_report:
-        legacy = report_dir / f"benchmark_{date.today().isoformat()}.md"
+        legacy = report_dir / f"benchmark_{tag}_{today}.md"
         write_benchmark_report(
             results,
             legacy,
+            region=region_key,
             galileo_checkpoint_present=gal_predictor._has_checkpoint,
         )
     if latest_out is not None:
@@ -539,20 +573,46 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Copy primary report to this path (e.g. reports/backbones/benchmark_latest.md)",
     )
+    parser.add_argument(
+        "--region",
+        default=None,
+        help="Single region key (ghana, civ, cameroon, …); default runs all regions",
+    )
+    parser.add_argument(
+        "--all-regions",
+        action="store_true",
+        help="Run one benchmark per region in data.cocoa_exposure.REGIONS",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     n = 200 if args.quick else args.n_tiles
     gal_size = "nano" if args.quick else args.galileo_size
-    run_benchmark(
-        n_tiles=n,
-        seed=args.seed,
-        galileo_checkpoint=args.galileo_checkpoint,
-        aef_checkpoint=args.aef_checkpoint,
-        report_dir=args.report_dir,
-        latest_out=args.latest_out,
-        galileo_model_size=gal_size,
-    )
+
+    if args.all_regions:
+        for key in sorted(COCOA_REGIONS.keys()):
+            logger.info("Benchmarking region: %s", key)
+            run_benchmark(
+                n_tiles=n,
+                seed=args.seed,
+                region=key,
+                galileo_checkpoint=args.galileo_checkpoint,
+                aef_checkpoint=args.aef_checkpoint,
+                report_dir=args.report_dir,
+                galileo_model_size=gal_size,
+                write_legacy_report=True,
+            )
+    else:
+        run_benchmark(
+            n_tiles=n,
+            seed=args.seed,
+            region=args.region,
+            galileo_checkpoint=args.galileo_checkpoint,
+            aef_checkpoint=args.aef_checkpoint,
+            report_dir=args.report_dir,
+            latest_out=args.latest_out,
+            galileo_model_size=gal_size,
+        )
     return 0
 
 

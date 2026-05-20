@@ -6,7 +6,8 @@ Dataset
 Forest Data Partnership (2025) *Cocoa Probability model 2025a*, successor to
 Kalischek et al. (2023) *Nature Food*. ImageCollection:
 ``projects/forestdatapartnership/assets/cocoa/model_2025a`` — 10 m, annual composites
-for 2020 and 2023; coverage Côte d'Ivoire, Ghana, Indonesia, Ecuador, Peru, Colombia.
+for 2020 and 2023; coverage Ghana, Côte d'Ivoire, Cameroon, Nigeria, Indonesia,
+Ecuador, Peru, Colombia (see :data:`REGIONS`).
 
 Exposure backends
 -----------------
@@ -28,8 +29,9 @@ lazy Xarray/Zarr materialization (Xee).
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import ee
 import numpy as np
@@ -59,6 +61,114 @@ DEFAULT_ENSEMBLE_WEIGHTS: tuple[float, float, float] = (0.5, 0.3, 0.2)
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_GALILEO_CHECKPOINT = _REPO_ROOT / "models" / "galileo_cocoa_seg.pt"
 DEFAULT_AEF_CHECKPOINT = _REPO_ROOT / "models" / "aef_cocoa_head.pt"
+
+# Renormalized AEF + Galileo weights when FDP tiles are unavailable (0.5 + 0.3 → 1.0)
+GLOBAL_AEF_GAL_WEIGHTS: tuple[float, float] = (0.625, 0.375)
+
+_REGION_ALIASES: dict[str, str] = {
+    "gha": "ghana",
+    "civ": "civ",
+    "cmr": "cameroon",
+    "nga": "nigeria",
+    "idn": "indonesia",
+    "ecu": "ecuador",
+    "per": "peru",
+    "col": "colombia",
+}
+
+
+@dataclass(frozen=True)
+class RegionPreset:
+    """Cocoa-producing region bounding box (WGS84) and FDP 2025a native coverage."""
+
+    display_name: str
+    west: float
+    south: float
+    east: float
+    north: float
+    fdp_native: bool = True
+
+
+REGIONS: dict[str, RegionPreset] = {
+    "ghana": RegionPreset("Ghana", -3.25, 4.7, 1.2, 11.2),
+    "civ": RegionPreset("Côte d'Ivoire", -8.5, 4.0, -2.5, 11.0),
+    "cameroon": RegionPreset("Cameroon", 8.0, 1.5, 16.5, 13.5),
+    "nigeria": RegionPreset("Nigeria", 2.5, 4.0, 14.5, 14.0),
+    "indonesia": RegionPreset("Indonesia", 95.0, -11.0, 141.0, 7.0),
+    "ecuador": RegionPreset("Ecuador", -81.5, -5.5, -75.0, 2.0),
+    "peru": RegionPreset("Peru", -81.0, -15.0, -68.0, 0.5),
+    "colombia": RegionPreset("Colombia", -79.0, -4.5, -66.0, 12.0),
+}
+
+
+def normalize_region_key(name: str) -> str:
+    """Map CLI aliases (``gha``, ``GHA``) to :data:`REGIONS` keys."""
+    key = name.strip().lower().replace("-", "_").replace(" ", "_")
+    if key in REGIONS:
+        return key
+    if key in _REGION_ALIASES:
+        return _REGION_ALIASES[key]
+    if key in ("cote_divoire", "cote_d_ivoire", "ivory_coast"):
+        return "civ"
+    raise KeyError(f"Unknown region {name!r}; choose from {sorted(REGIONS)}")
+
+
+def region_bounds_dict(region: str) -> dict[str, float]:
+    """Return ``{west, south, east, north}`` for a region key."""
+    preset = REGIONS[normalize_region_key(region)]
+    return {
+        "west": preset.west,
+        "south": preset.south,
+        "east": preset.east,
+        "north": preset.north,
+    }
+
+
+def region_latlon_bounds(region: str) -> tuple[float, float, float, float]:
+    """Return ``(lat_min, lat_max, lon_min, lon_max)`` for sampling grids."""
+    preset = REGIONS[normalize_region_key(region)]
+    return (preset.south, preset.north, preset.west, preset.east)
+
+
+def region_geometry(region: str) -> ee.Geometry:
+    """Earth Engine rectangle for a named region."""
+    b = region_bounds_dict(region)
+    return ee.Geometry.Rectangle([b["west"], b["south"], b["east"], b["north"]])
+
+
+def point_in_region(lat: float, lon: float, region: str) -> bool:
+    preset = REGIONS[normalize_region_key(region)]
+    return preset.south <= lat <= preset.north and preset.west <= lon <= preset.east
+
+
+def is_fdp_covered(lat: float, lon: float) -> bool:
+    """True when ``(lat, lon)`` lies in a region with native FDP 2025a tiles."""
+    return any(
+        preset.fdp_native and point_in_region(lat, lon, key) for key, preset in REGIONS.items()
+    )
+
+
+def processed_era5_zarr_path(
+    region: str,
+    *,
+    repo_root: Path | None = None,
+    start_year: int | None = None,
+    end_year: int | None = None,
+) -> Path:
+    """Default ERA5 Zarr path: ``data/processed/era5_<region>[_<start>_<end>].zarr``."""
+    key = normalize_region_key(region)
+    root = repo_root or _REPO_ROOT
+    suffix = ""
+    if start_year is not None and end_year is not None:
+        suffix = f"_{start_year}_{end_year}"
+    return root / "data" / "processed" / f"era5_{key}{suffix}.zarr"
+
+
+def processed_sentinel_tif_path(region: str, *, repo_root: Path | None = None) -> Path:
+    """Default Sentinel composite GeoTIFF: ``data/processed/s2_s1_<region>.tif``."""
+    key = normalize_region_key(region)
+    root = repo_root or _REPO_ROOT
+    return root / "data" / "processed" / f"s2_s1_{key}.tif"
 
 
 def _normalize_year(year: int) -> int:
@@ -374,6 +484,79 @@ class CocoaExposureIngest:
         return m2 / 10_000.0
 
 
+def _global_aef_galileo_probability(
+    lat: float,
+    lon: float,
+    *,
+    year: int,
+    project: str | None,
+    galileo_checkpoint: Path | str | None,
+    aef_checkpoint: Path | str | None,
+) -> float:
+    """Blend AEF + Galileo when FDP 2025a does not cover the point."""
+    ing = CocoaExposureIngest(
+        aoi=object(),  # type: ignore[arg-type]
+        year=year,
+        project=project,
+        backend="aef",
+        galileo_checkpoint=galileo_checkpoint,
+        aef_checkpoint=aef_checkpoint,
+    )
+    w_aef, w_gal = GLOBAL_AEF_GAL_WEIGHTS
+    aef_p = ing._aef_probability_at_point(lat, lon)
+    gal_p = ing._galileo_probability_at_point(lat, lon)
+    blended = w_aef * aef_p + w_gal * gal_p
+    return float(np.clip(blended, 0.0, 1.0))
+
+
+def sample_cocoa_probability_at_point(
+    lat: float,
+    lon: float,
+    *,
+    year: int = 2023,
+    threshold: float = DEFAULT_THRESHOLD,
+    backend: ExposureBackend | None = None,
+    galileo_checkpoint: Path | str | None = None,
+    aef_checkpoint: Path | str | None = None,
+    project: str | None = None,
+) -> float:
+    """
+    Region-aware P(cocoa) for API / feature resolver use.
+
+    Inside FDP-native coverage: sample FDP (or configured backend). Outside coverage:
+    AlphaEarth embeddings + Galileo (globally available).
+    """
+    if is_fdp_covered(lat, lon):
+        use_backend = backend or "fdp"
+        try:
+            initialize_earth_engine(project=project)
+            aoi = ee.Geometry.Point([lon, lat]).buffer(500)
+            ing = CocoaExposureIngest(
+                aoi,
+                year=year,
+                threshold=threshold,
+                project=project,
+                backend=use_backend,
+                galileo_checkpoint=galileo_checkpoint,
+                aef_checkpoint=aef_checkpoint,
+            )
+            p = ing.sample_point(lat, lon)
+            if p is not None:
+                return p
+        except Exception as exc:
+            logger.debug("FDP-region sample failed (%s); trying global fallback", exc)
+        return _cocoa_belt_probability(lat, lon)
+
+    return _global_aef_galileo_probability(
+        lat,
+        lon,
+        year=year,
+        project=project,
+        galileo_checkpoint=galileo_checkpoint,
+        aef_checkpoint=aef_checkpoint,
+    )
+
+
 def resolve_exposure_probability(
     lat: float,
     lon: float,
@@ -387,31 +570,18 @@ def resolve_exposure_probability(
     """
     Point P(cocoa) without constructing a persistent AOI ingest.
 
-    ``fdp`` / ``ensemble`` use GEE when credentials exist; otherwise a belt heuristic.
+    Routes through :func:`sample_cocoa_probability_at_point` for region-aware FDP vs
+    global AEF+Galileo fallback.
     """
-    if backend == "fdp":
-        try:
-            import ee as _ee
-
-            _ee.Initialize(project=project) if project else _ee.Initialize()
-            aoi = _ee.Geometry.Point([lon, lat]).buffer(500)
-            ing = CocoaExposureIngest(aoi, year=year, project=project, backend="fdp")
-            p = ing.sample_point(lat, lon)
-            if p is not None:
-                return p
-        except Exception as exc:
-            logger.debug("FDP point sample failed (%s); using belt heuristic", exc)
-        return _cocoa_belt_probability(lat, lon)
-
-    ing = CocoaExposureIngest(
-        aoi=object(),  # type: ignore[arg-type]
+    return sample_cocoa_probability_at_point(
+        lat,
+        lon,
         year=year,
         backend=backend,
         galileo_checkpoint=galileo_checkpoint,
         aef_checkpoint=aef_checkpoint,
         project=project,
     )
-    return ing.sample_point(lat, lon) or _cocoa_belt_probability(lat, lon)
 
 
 __all__ = [
@@ -423,8 +593,20 @@ __all__ = [
     "DEFAULT_ENSEMBLE_WEIGHTS",
     "DEFAULT_GALILEO_CHECKPOINT",
     "DEFAULT_THRESHOLD",
+    "GLOBAL_AEF_GAL_WEIGHTS",
     "MIN_THRESHOLD",
+    "REGIONS",
+    "RegionPreset",
     "SUPPORTED_YEARS",
+    "is_fdp_covered",
+    "normalize_region_key",
+    "point_in_region",
+    "processed_era5_zarr_path",
+    "processed_sentinel_tif_path",
+    "region_bounds_dict",
+    "region_geometry",
+    "region_latlon_bounds",
     "resolve_exposure_probability",
+    "sample_cocoa_probability_at_point",
     "validate_threshold",
 ]
