@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+import pandas as pd
 import torch
+import xarray as xr
 from torch import Tensor
 
 from api.financial import calculate_financial_impact_usd
@@ -26,6 +28,8 @@ from api.schemas import (
     YieldUncertaintyBand,
 )
 from counterfactual.cmip6_scenarios import ScenarioBuilder
+from hazards import apply_biotic_losses
+from hazards.black_pod import ShadeSpecies
 from models.yield_surrogate import CLIMATE_IDX, YieldSurrogateModel
 
 if TYPE_CHECKING:
@@ -46,11 +50,13 @@ INTERVENTION_CLIMATE_DELTAS: dict[InterventionType, dict[str, float]] = {
         "tmax": -1.5,
         "vpd_mult": 0.85,
         "sm_root": 0.03,
+        "shade_species": ShadeSpecies.KHAYA_IVORENSIS.value,
     },
     InterventionType.agroforestry: {
         "tmax": -1.0,
         "vpd_mult": 0.90,
         "sm_root": 0.05,
+        "shade_species": ShadeSpecies.KHAYA_IVORENSIS.value,
     },
     InterventionType.drought_resistant_variety: {
         "sm_root": 0.08,
@@ -109,6 +115,53 @@ def _apply_intervention_climate(
         ).clamp(0.05, 0.55)
 
     return out
+
+
+def _climate_tensor_to_dataset(climate: Tensor, year: int) -> xr.Dataset:
+    """Convert resolved daily climate tensor ``[1, T, 11]`` to an ``xr.Dataset`` for hazards."""
+    arr = climate.squeeze(0).detach().cpu().numpy()
+    n_days = arr.shape[0]
+    time = pd.date_range(f"{year}-01-01", periods=n_days, freq="D")
+    data_vars = {
+        name: ("time", arr[:, idx].astype(np.float32))
+        for name, idx in CLIMATE_IDX.items()
+    }
+    return xr.Dataset(data_vars, coords={"time": time})
+
+
+def _biotic_static_features(
+    intervention_type: InterventionType | None,
+    *,
+    cssvd_prevalence_pct: float = 15.0,
+    cssvd_tolerance: float = 1.0,
+) -> dict[str, Any]:
+    """Farm static covariates for biotic loss (CRIG prevalence mock until raster wired)."""
+    shade = ShadeSpecies.UNSHADED
+    if intervention_type is not None:
+        deltas = INTERVENTION_CLIMATE_DELTAS.get(intervention_type, {})
+        raw_shade = deltas.get("shade_species")
+        if raw_shade is not None:
+            shade = ShadeSpecies(str(raw_shade))
+    return {
+        "cssvd_prevalence_pct": cssvd_prevalence_pct,
+        "cssvd_tolerance": cssvd_tolerance,
+        "shade_species": shade,
+    }
+
+
+def _biotic_response_block(result: dict[str, Any]) -> dict[str, Any]:
+    from api.schemas import BioticLossAttribution, ScenarioBioticLosses
+
+    attr = result["loss_attribution"]
+    return ScenarioBioticLosses(
+        surviving_fraction=result["surviving_fraction"],
+        total_loss_fraction=result["total_loss_fraction"],
+        loss_attribution=BioticLossAttribution(
+            black_pod=attr["black_pod"],
+            cssvd=attr["cssvd"],
+            mirids=attr["mirids"],
+        ),
+    )
 
 
 @torch.no_grad()
@@ -222,6 +275,21 @@ def simulate_intervention(
     samples_cf = predict_yield_samples(model, climate_cf, static_cf, num_samples)
     samples_factual = predict_yield_samples(model, climate_factual, static_factual, num_samples)
 
+    ds_cf = _climate_tensor_to_dataset(climate_cf, year)
+    ds_factual = _climate_tensor_to_dataset(climate_factual, year)
+    biotic_cf = apply_biotic_losses(
+        1.0,
+        ds_cf,
+        _biotic_static_features(None),
+    )
+    biotic_factual = apply_biotic_losses(
+        1.0,
+        ds_factual,
+        _biotic_static_features(request.intervention_type),
+    )
+    samples_cf = samples_cf * biotic_cf["surviving_fraction"]
+    samples_factual = samples_factual * biotic_factual["surviving_fraction"]
+
     mc_baseline = float(samples_cf.mean().item())
     mc_projected_raw = float(samples_factual.mean().item())
 
@@ -282,6 +350,10 @@ def simulate_intervention(
             ),
         ),
         conformal_interval=conformal_block,
+        biotic_loss_attribution={
+            "baseline": _biotic_response_block(biotic_cf),
+            "projected": _biotic_response_block(biotic_factual),
+        },
     )
 
 
