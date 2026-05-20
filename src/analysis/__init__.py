@@ -20,6 +20,7 @@ from analysis.psm_matching import (
     standardized_mean_differences,
     trim_common_support,
 )
+from analysis.sensitivity import EValueResult, e_value, rosenbaum_bounds
 
 __all__ = [
     "AvoidedRevenueResult",
@@ -38,4 +39,7 @@ __all__ = [
     "propensity_score_match",
     "standardized_mean_differences",
     "trim_common_support",
+    "EValueResult",
+    "e_value",
+    "rosenbaum_bounds",
 ]
