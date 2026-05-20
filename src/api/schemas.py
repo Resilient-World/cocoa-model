@@ -193,6 +193,22 @@ class SimulateScenarioResponse(BaseModel):
     )
 
 
+class BioticLossAttribution(BaseModel):
+    """Per-pathogen yield-loss fractions before multiplicative survival."""
+
+    black_pod: float = Field(..., ge=0.0, le=1.0)
+    cssvd: float = Field(..., ge=0.0, le=1.0)
+    mirids: float = Field(..., ge=0.0, le=1.0)
+
+
+class ScenarioBioticLosses(BaseModel):
+    """Biotic survival and attribution for one climate/static path."""
+
+    surviving_fraction: float = Field(..., ge=0.0, le=1.0)
+    total_loss_fraction: float = Field(..., ge=0.0, le=1.0)
+    loss_attribution: BioticLossAttribution
+
+
 class SimulateInterventionResponse(BaseModel):
     """Response from POST /simulate-intervention."""
 
@@ -218,6 +234,13 @@ class SimulateInterventionResponse(BaseModel):
     conformal_interval: ConformalConfidenceInterval | None = Field(
         default=None,
         description="Present when models/conformal.json is loaded at API startup",
+    )
+    biotic_loss_attribution: dict[str, ScenarioBioticLosses] | None = Field(
+        default=None,
+        description=(
+            "Counterfactual (baseline) and projected biotic loss fractions; "
+            "keys ``baseline`` and ``projected``"
+        ),
     )
 
     @field_validator("avoided_loss_tonnes", "financial_impact_usd", mode="before")
