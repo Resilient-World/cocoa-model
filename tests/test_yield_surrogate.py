@@ -79,10 +79,22 @@ def test_legacy_4channel_still_works_with_warning() -> None:
 
 
 def test_mc_dropout_uncertainty_nontrivial() -> None:
+    """MC dropout is a fallback UQ path; API defaults to CQR when calibrator is present."""
     m = YieldSurrogateModel()
     c, s = _dummy_batch(B=8)
     pred = predict_with_uncertainty(m, c, s, num_samples=20)
     assert pred.std.mean().item() > 0.0
+
+
+def test_predict_with_uncertainty_remains_available_as_fallback() -> None:
+    from models.cqr import ConformalCalibrator, QuantileYieldSurrogate
+
+    assert QuantileYieldSurrogate is not None
+    assert ConformalCalibrator is not None
+    model = YieldSurrogateModel()
+    c, s = _dummy_batch(B=2)
+    out = predict_with_uncertainty(model, c, s, num_samples=10)
+    assert out.mean.shape == (2,)
 
 
 def test_predict_with_uncertainty_shapes() -> None:

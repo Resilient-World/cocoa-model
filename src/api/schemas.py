@@ -125,6 +125,9 @@ class RankInterventionsResponse(BaseModel):
     ranked: list[RankedFarmRecommendation]
 
 
+UQMethod = Literal["mcd", "cqr"]
+
+
 class AvoidedLossInterval(BaseModel):
     """Confidence interval for avoided loss (tonnes)."""
 
@@ -137,6 +140,14 @@ class ConfidenceInterval(BaseModel):
     """Uncertainty bounds for simulation outputs."""
 
     avoided_loss_tonnes: AvoidedLossInterval
+    method: UQMethod = Field(
+        default="mcd",
+        description="Uncertainty method: conformalized quantile regression or MC dropout",
+    )
+    empirical_coverage: float | None = Field(
+        default=None,
+        description="Empirical coverage on calibration split when method=cqr (if known)",
+    )
 
 
 class ConformalIntervalResponse(BaseModel):
