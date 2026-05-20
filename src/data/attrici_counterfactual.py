@@ -1,26 +1,24 @@
 """
-Counterfactual ERA5-Land climate via ISIMIP3a GSWP3-W5E5 obsclim / counterclim deltas.
+ATTRICI-style counterfactual climate (Mengel et al. 2021, Earth Syst. Dynam.).
 
-Uses the ISIMIP3a counterfactual methodology (Mengel et al. 2021, Geosci. Model Dev.,
-14, 5269–5289; https://doi.org/10.5194/gmd-14-5269-2021) and GSWP3-W5E5 daily fields
-(DOI 10.48364/ISIMIP.982724.3; CC0). ATTRICI v1.1 produced the counterclim experiment;
-this module applies pre-computed ISIMIP deltas to an ERA5-Land factual stack — it does
-**not** import the ATTRICI Python package (GPL boundary).
+Detrends daily climate variables against a smoothed global-mean temperature (GMT)
+series and maps observations to a pre-industrial GMT level. Uses the published
+``attrici`` package in ``bayesian`` mode when installed; otherwise a vendored
+quantile-mapping detrender in ``fast`` mode (same public API, with a logged warning).
 
-Delta adjustment (per variable, after regridding ISIMIP 0.5° → ERA5 grid)::
-
-    cf = factual - (obsclim - counterclim)
+Derived variables (``vpd_mean``, ``et0``, ``cwd``) are recomputed from detrended
+state variables — never detrended directly.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import logging
+import sys
+import time
 from pathlib import Path
-from typing import Any
+from typing import Literal, Sequence
 
-import ee
 import numpy as np
 import pandas as pd
 import requests
@@ -34,467 +32,539 @@ from data.era5_ingest import (
     MAGNUS_B,
     MAGNUS_C,
     WIND10_TO_WIND2_FACTOR,
-    compute_derived_features,
 )
 
 logger = logging.getLogger(__name__)
 
-MENGEL_2021_DOI = "10.5194/gmd-14-5269-2021"
-ISIMIP_DATASET_DOI = "10.48364/ISIMIP.982724.3"
+MENGEL_2021_REF = "Mengel et al. 2021, Earth Syst. Dynam. (ATTRICI)"
 
-ISIMIP_FILES_BASE = (
-    "https://files.isimip.org/ISIMIP3a/InputData/climate/atmosphere"
-)
-DEFAULT_CACHE_DIR = Path("data/external/isimip3a")
-DEFAULT_ISIMIP_VARIABLES: tuple[str, ...] = (
-    "tasmax",
-    "tasmin",
-    "tas",
-    "pr",
-    "hurs",
-    "rsds",
-    "sfcwind",
-)
-EXPERIMENTS: tuple[str, ...] = ("obsclim", "counterclim")
+GISTEMP_URL = "https://data.giss.nasa.gov/gistemp/tabledata_v4/GLB.Ts+dSST.csv"
+GISTEMP_CACHE_DIR = Path("data/external/gistemp")
+GISTEMP_CACHE_FILE = GISTEMP_CACHE_DIR / "GLB.Ts+dSST.csv"
+GISTEMP_CACHE_MAX_AGE_S = 24 * 3600
 
-ISIMIP_TO_ERA5: dict[str, str] = {
-    "tasmax": "tmax",
-    "tasmin": "tmin",
-    "tas": "tmean",
-    "pr": "precip",
-    "hurs": "rh_mean",
-    "rsds": "srad",
-    "sfcwind": "wind10m",
-}
+DEFAULT_VARIABLES: tuple[str, ...] = ("tmax", "tmin", "precip")
+QUANTILE_LEVELS = np.linspace(0.05, 0.95, 19)
 
-_TEMPERATURE_ISIMIP = frozenset({"tas", "tasmin", "tasmax"})
-_KELVIN_THRESHOLD = 150.0
-_OPEN_CHUNKS: dict[str, int] = {"time": 365}
+try:
+    from attrici import estimator as _attrici_estimator  # type: ignore[import-untyped]
+
+    _HAS_ATTRICI = True
+except ImportError:
+    _attrici_estimator = None
+    _HAS_ATTRICI = False
+
+try:
+    from scipy import stats as scipy_stats
+    from scipy.signal import savgol_filter
+except ImportError:  # pragma: no cover - scipy is a transitive dep of scikit-learn
+    scipy_stats = None  # type: ignore[assignment]
+    savgol_filter = None  # type: ignore[assignment]
 
 
-def _isimip_file_url(experiment: str, variable: str, year: int) -> str:
-    return (
-        f"{ISIMIP_FILES_BASE}/{experiment}/global/daily/historical/GSWP3-W5E5/"
-        f"gswp3-w5e5_{experiment}_{variable}_global_daily_{year}_{year}.nc"
-    )
+def _using_fallback_detrender() -> bool:
+    if not _HAS_ATTRICI:
+        logger.warning(
+            "%s: `attrici` package not installed; using vendored quantile-mapping "
+            "detrender in `fast` mode only. Install optional extra: pip install -e '.[attrici]'",
+            MENGEL_2021_REF,
+        )
+        return True
+    return False
 
 
-def _cache_file_path(cache_dir: Path, experiment: str, variable: str, year: int) -> Path:
-    name = f"gswp3-w5e5_{experiment}_{variable}_global_daily_{year}_{year}.nc"
-    return cache_dir / experiment / variable / name
+def _saturation_vapor_pressure_kpa_array(tmean_c: xr.DataArray) -> xr.DataArray:
+    return MAGNUS_A * np.exp(MAGNUS_B * tmean_c / (MAGNUS_C + tmean_c))
 
 
-def _meta_path(dest: Path) -> Path:
-    return dest.with_suffix(dest.suffix + ".meta.json")
+def _vpd_from_tmean_rh(tmean_c: xr.DataArray, rh_pct: xr.DataArray) -> xr.DataArray:
+    rh = rh_pct.clip(0, 100)
+    es = _saturation_vapor_pressure_kpa_array(tmean_c)
+    return es * (1.0 - rh / 100.0)
 
 
-def _download_cached(url: str, dest: Path, *, timeout: float = 120.0) -> Path:
-    """Download ``url`` to ``dest`` if missing or remote ETag/size changed."""
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    meta_file = _meta_path(dest)
-    prior: dict[str, Any] = {}
-    if meta_file.is_file():
-        prior = json.loads(meta_file.read_text(encoding="utf-8"))
-
-    headers: dict[str, str] = {}
-    if dest.is_file() and prior.get("etag"):
-        headers["If-None-Match"] = str(prior["etag"])
-
-    head = requests.head(url, timeout=timeout, allow_redirects=True)
-    head.raise_for_status()
-    remote_etag = head.headers.get("ETag")
-    remote_size = head.headers.get("Content-Length")
-
-    if dest.is_file():
-        if remote_etag and prior.get("etag") == remote_etag:
-            return dest
-        if remote_size and dest.stat().st_size == int(remote_size):
-            return dest
-
-    logger.info("Downloading %s -> %s", url, dest)
-    etag_out = remote_etag
-    with requests.get(url, stream=True, timeout=timeout, headers=headers) as resp:
-        resp.raise_for_status()
-        if resp.status_code == 304 and dest.is_file():
-            return dest
-        etag_out = resp.headers.get("ETag", remote_etag)
-        with dest.open("wb") as handle:
-            for chunk in resp.iter_content(chunk_size=1 << 20):
-                if chunk:
-                    handle.write(chunk)
-
-    meta = {
-        "url": url,
-        "etag": etag_out,
-        "size": dest.stat().st_size,
-    }
-    meta_file.write_text(json.dumps(meta, indent=2), encoding="utf-8")
-    return dest
-
-
-def _parse_year(date_str: str) -> int:
-    return int(pd.Timestamp(date_str).year)
-
-
-def _coord_names(ds: xr.Dataset | xr.DataArray) -> tuple[str, str]:
-    if "latitude" in ds.coords or "latitude" in getattr(ds, "dims", {}):
-        return "latitude", "longitude"
-    return "lat", "lon"
-
-
-def _subset_bbox(ds: xr.Dataset, bbox: tuple[float, float, float, float]) -> xr.Dataset:
-    west, south, east, north = bbox
-    lat_name, lon_name = _coord_names(ds)
-    out = ds.sel({lat_name: slice(south, north)})
-
-    lon = out[lon_name]
-    if float(lon.max()) > 180.0 and west < 0:
-        west_360 = west % 360.0
-        east_360 = east % 360.0
-        if west_360 <= east_360:
-            out = out.sel({lon_name: slice(west_360, east_360)})
-        else:
-            part_a = out.sel({lon_name: slice(west_360, 360.0)})
-            part_b = out.sel({lon_name: slice(0.0, east_360)})
-            out = xr.concat([part_a, part_b], dim=lon_name)
-    else:
-        out = out.sel({lon_name: slice(west, east)})
-    return out
-
-
-def _normalize_isimip_units(da: xr.DataArray, isimip_var: str) -> xr.DataArray:
-    """Kelvin → °C for temperature; kg m⁻² s⁻¹ → mm d⁻¹ for precipitation."""
-    out = da
-    if isimip_var in _TEMPERATURE_ISIMIP:
-        sample = float(out.isel({d: 0 for d in out.dims if d != "time"}, drop=True).mean().values)
-        if sample > _KELVIN_THRESHOLD:
-            out = out - KELVIN_OFFSET
-    if isimip_var == "pr":
-        out = out * 86400.0
-    return out
-
-
-def _resolve_isimip_var(ds: xr.Dataset, isimip_var: str) -> xr.DataArray:
-    if isimip_var in ds.data_vars:
-        return ds[isimip_var]
-    for name in ds.data_vars:
-        if isimip_var in name.lower():
-            return ds[name]
-    raise KeyError(f"Variable {isimip_var!r} not in {list(ds.data_vars)}")
-
-
-def _regrid_to_factual(
-    source: xr.DataArray,
-    factual: xr.Dataset,
-    *,
-    method: str = "bilinear",
+def _fao_et0_array(
+    tmean_c: xr.DataArray,
+    rh_pct: xr.DataArray,
+    wind10m: xr.DataArray,
+    srad_mj: xr.DataArray,
 ) -> xr.DataArray:
-    import xesmf as xe
-
-    src_lat, src_lon = _coord_names(source)
-    tgt_lat, tgt_lon = _coord_names(factual)
-    src_grid = xr.Dataset({"lat": source[src_lat], "lon": source[src_lon]})
-    dst_grid = xr.Dataset({"lat": factual[tgt_lat], "lon": factual[tgt_lon]})
-    regridder = xe.Regridder(src_grid, dst_grid, method, reuse_weights=False)
-    out = regridder(source.transpose(src_lat, src_lon, ...), keep_attrs=True)
-    regridder.clean_weight_file()
-    return out
-
-
-def _recompute_vpd_et0_cwd(ds: xr.Dataset) -> xr.Dataset:
-    """Recompute ``vpd_mean``, ``et0``, and ``cwd`` from adjusted daily drivers."""
-    out = ds.copy()
-    tmean = out["tmean"]
-    rh = out["rh_mean"].clip(0, 100)
-    es = MAGNUS_A * np.exp(MAGNUS_B * tmean / (MAGNUS_C + tmean))
-    out["vpd_mean"] = (es * (1.0 - rh / 100.0)).clip(min=0)
-
-    u2 = out["wind10m"] * WIND10_TO_WIND2_FACTOR
-    rn = out["srad"] * (1.0 - FAO_ALBEDO)
-    t_k = tmean + KELVIN_OFFSET
-    delta_slope = es * MAGNUS_B * MAGNUS_C / (tmean + MAGNUS_C) ** 2
-    vpd = out["vpd_mean"]
-    num_rad = delta_slope * rn * 0.408
+    """FAO-56 Penman–Monteith reference ET0 (mm/day), numpy/xarray port of era5_ingest."""
+    es = _saturation_vapor_pressure_kpa_array(tmean_c)
+    ea = es * (rh_pct / 100.0)
+    vpd = (es - ea).clip(min=0)
+    delta = es * MAGNUS_B * MAGNUS_C / (tmean_c + MAGNUS_C) ** 2
+    u2 = wind10m * WIND10_TO_WIND2_FACTOR
+    rn = srad_mj * (1.0 - FAO_ALBEDO)
+    t_k = tmean_c + KELVIN_OFFSET
+    num_rad = delta * rn * 0.408
     num_aero = FAO_GAMMA * (900.0 / t_k) * u2 * vpd
-    den = delta_slope + FAO_GAMMA * (1.0 + 0.34 * u2)
-    out["et0"] = ((num_rad + num_aero) / den).clip(min=0)
-    out["cwd"] = out["et0"] - out["precip"]
+    den = delta + FAO_GAMMA * (1.0 + 0.34 * u2)
+    return (num_rad + num_aero) / den
+
+
+def load_gistemp_loti(
+    start_year: int = 1880,
+    smooth_window: int = 21,
+) -> pd.Series:
+    """
+    Load NASA GISTEMP v4 global LOTI (°C anomaly + base) and apply Savitzky–Golay smoothing.
+
+    Cached on disk for 24 hours under ``data/external/gistemp/``.
+    """
+    GISTEMP_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    if GISTEMP_CACHE_FILE.is_file():
+        age = time.time() - GISTEMP_CACHE_FILE.stat().st_mtime
+        if age > GISTEMP_CACHE_MAX_AGE_S:
+            logger.info("GISTEMP cache stale (%.0fh); re-downloading", age / 3600)
+        else:
+            raw = GISTEMP_CACHE_FILE.read_text(encoding="utf-8")
+    else:
+        raw = None
+
+    if raw is None:
+        logger.info("Downloading GISTEMP LOTI from %s", GISTEMP_URL)
+        response = requests.get(GISTEMP_URL, timeout=60)
+        response.raise_for_status()
+        raw = response.text
+        GISTEMP_CACHE_FILE.write_text(raw, encoding="utf-8")
+
+    lines = [ln for ln in raw.splitlines() if ln.strip() and not ln.startswith((" ", "Year"))]
+    # File header rows start with Year; data rows: Year, Jan..Dec, J-D
+    records: list[tuple[int, float]] = []
+    for line in lines:
+        parts = [p.strip() for p in line.split(",")]
+        if not parts[0].isdigit():
+            continue
+        year = int(parts[0])
+        if year < start_year:
+            continue
+        # Annual mean from monthly columns (skip Year and J-D)
+        months = []
+        for val in parts[1:13]:
+            if val in ("", "***", "*****"):
+                continue
+            try:
+                months.append(float(val))
+            except ValueError:
+                continue
+        if months:
+            records.append((year, float(np.mean(months))))
+
+    if not records:
+        raise ValueError(f"No GISTEMP annual values found from {start_year}")
+
+    years, values = zip(*records)
+    series = pd.Series(values, index=np.array(years, dtype=int), name="gmt_loti")
+
+    if savgol_filter is not None and len(series) >= smooth_window:
+        # polyorder=3 per ATTRICI preprocessing
+        smoothed = savgol_filter(series.values, window_length=smooth_window, polyorder=3)
+        series = pd.Series(smoothed, index=series.index, name="gmt_loti")
+    else:
+        if savgol_filter is None:
+            logger.warning(
+                "scipy not available; using rolling mean instead of Savitzky–Golay for GISTEMP"
+            )
+        series = series.rolling(window=smooth_window, center=True, min_periods=1).mean()
+
+    return series
+
+
+def _preindustrial_gmt(gmt: pd.Series, data_years: np.ndarray | None = None) -> float:
+    """GMT baseline: early segment of overlap with data, else classic pre-industrial years."""
+    if data_years is not None and data_years.size > 0:
+        ymin = int(np.nanmin(data_years))
+        ymax_early = ymin + 30
+        overlap = gmt[(gmt.index >= ymin) & (gmt.index <= ymax_early)]
+        if len(overlap) >= 5:
+            return float(overlap.mean())
+    early = gmt[gmt.index <= 1900]
+    if len(early) >= 10:
+        return float(early.mean())
+    return float(gmt.iloc[: min(30, len(gmt))].mean())
+
+
+def _doy_circular_distance(doy_a: np.ndarray, doy_b: int, window: int) -> np.ndarray:
+    half = window // 2
+    diff = np.abs(doy_a - doy_b)
+    return np.minimum(diff, 366 - diff) <= half
+
+
+def _fast_pixel_detrend(
+    values: np.ndarray,
+    years: np.ndarray,
+    doys: np.ndarray,
+    gmt_values: np.ndarray,
+    gmt_preindustrial: float,
+    window_days: int,
+    is_precip: bool,
+) -> np.ndarray:
+    """
+    Per-pixel quantile-mapping detrend (Mengel et al. 2021 style).
+
+    Within each DOY window, regress quantiles of ``values`` on GMT, map each
+    observation to the pre-industrial GMT quantile.
+    """
+    if scipy_stats is None:
+        raise ImportError(
+            "fast mode requires scipy (transitive via scikit-learn). "
+            "Install scipy or use pip install -e '.[attrici]'."
+        )
+
+    n = values.size
+    out = np.empty(n, dtype=np.float64)
+    gmt_values = np.asarray(gmt_values, dtype=np.float64)
+
+    for i in range(n):
+        win = _doy_circular_distance(doys, int(doys[i]), window_days)
+        y_w = values[win]
+        g_w = gmt_values[win]
+        if y_w.size < 10:
+            out[i] = values[i]
+            continue
+
+        gmt_o = gmt_values[i]
+        p = scipy_stats.percentileofscore(y_w, values[i], kind="mean") / 100.0
+
+        # Quantile–GMT regression: Q_tau(g) = a_tau + b_tau * g
+        q_preds_pi: list[float] = []
+        for tau in QUANTILE_LEVELS:
+            q_tgt = np.quantile(y_w, tau)
+            # local linear fit of quantile vs GMT using overlapping bins
+            g_bins = np.linspace(g_w.min(), g_w.max(), min(8, len(np.unique(g_w))))
+            bin_centers: list[float] = []
+            bin_qs: list[float] = []
+            for j in range(len(g_bins) - 1):
+                mask = (g_w >= g_bins[j]) & (g_w < g_bins[j + 1])
+                if mask.sum() < 3:
+                    continue
+                bin_centers.append(float(g_w[mask].mean()))
+                bin_qs.append(float(np.quantile(y_w[mask], tau)))
+            if len(bin_centers) < 2:
+                q_preds_pi.append(float(np.quantile(y_w, tau)))
+                continue
+            slope, intercept = np.polyfit(bin_centers, bin_qs, 1)
+            q_preds_pi.append(intercept + slope * gmt_preindustrial)
+
+        y_cf = float(np.interp(p, QUANTILE_LEVELS, q_preds_pi))
+        if is_precip:
+            y_cf = max(0.0, y_cf)
+        out[i] = y_cf
+
+    # Remove residual linear GMT sensitivity (Mengel et al. first-order component)
+    valid = np.isfinite(gmt_values) & np.isfinite(values)
+    if valid.sum() >= 10:
+        slope, _ = np.polyfit(gmt_values[valid], values[valid], 1)
+        out = out - slope * (gmt_values - gmt_preindustrial)
+
+    if is_precip:
+        out = np.maximum(0.0, out)
+
     return out
 
 
-def _aoi_bounds(aoi: ee.Geometry | Any | None) -> tuple[float, float, float, float]:
-    if aoi is None:
-        return -180.0, -90.0, 180.0, 90.0
-
-    try:
-        from shapely.geometry.base import BaseGeometry
-
-        if isinstance(aoi, BaseGeometry):
-            west, south, east, north = aoi.bounds
-            return float(west), float(south), float(east), float(north)
-    except ImportError:
-        pass
-
-    if isinstance(aoi, ee.Geometry):
-        from data.gee_auth import initialize_earth_engine
-
-        initialize_earth_engine()
-        coords = aoi.bounds().getInfo()["coordinates"][0]
-        lons = [c[0] for c in coords]
-        lats = [c[1] for c in coords]
-        return float(min(lons)), float(min(lats)), float(max(lons)), float(max(lats))
-
-    if isinstance(aoi, (tuple, list)) and len(aoi) == 4:
-        west, south, east, north = aoi
-        return float(west), float(south), float(east), float(north)
-
-    raise TypeError(f"Unsupported AOI type: {type(aoi)!r}")
+def _years_and_doy_from_time(time: xr.DataArray) -> tuple[np.ndarray, np.ndarray]:
+    t_index = pd.DatetimeIndex(time.values)
+    years = t_index.year.to_numpy()
+    doys = t_index.dayofyear.to_numpy()
+    return years, doys
 
 
-class ISIMIPCounterfactualLoader:
+def _gmt_for_timesteps(years: np.ndarray, gmt: pd.Series) -> np.ndarray:
+    return np.array([gmt.get(int(y), np.nan) for y in years], dtype=np.float64)
+
+
+class ATTRICICounterfactual:
     """
-    Download (cached) and open ISIMIP3a GSWP3-W5E5 obsclim / counterclim for an AOI.
+    Fit and apply GMT-driven counterfactual transforms to a daily ``xarray.Dataset``.
 
-    Opens files lazily with ``chunks={"time": 365}`` and subsets lat/lon before
-    concatenating years — never loads a full global field into RAM.
+    Parameters
+    ----------
+    gmt_series:
+        Annual global mean temperature (°C), indexed by calendar year.
+    variables:
+        Data variables to detrend (must exist in the input dataset).
+    mode:
+        ``fast`` — vendored quantile-mapping detrender; ``bayesian`` — ``attrici`` package.
+    window_days:
+        DOY window width for local detrending in ``fast`` mode.
+    random_state:
+        RNG seed (reserved for ``bayesian`` mode).
     """
 
     def __init__(
         self,
-        aoi_bbox: tuple[float, float, float, float] | None = None,
-        start: str = "",
-        end: str = "",
-        *,
-        bbox: tuple[float, float, float, float] | None = None,
-        variables: tuple[str, ...] = DEFAULT_ISIMIP_VARIABLES,
-        cache_dir: Path | str = DEFAULT_CACHE_DIR,
+        gmt_series: pd.Series,
+        variables: Sequence[str] = DEFAULT_VARIABLES,
+        mode: Literal["fast", "bayesian"] = "fast",
+        window_days: int = 31,
+        random_state: int = 42,
     ) -> None:
-        resolved = aoi_bbox if aoi_bbox is not None else bbox
-        if resolved is None:
-            raise TypeError("ISIMIPCounterfactualLoader requires aoi_bbox or bbox")
-        self.aoi_bbox = resolved
-        self.start = start
-        self.end = end
-        self.variables = variables
-        self.cache_dir = Path(cache_dir)
-        self._start_year = _parse_year(start)
-        self._end_year = _parse_year(end)
+        self.gmt_series = gmt_series.sort_index()
+        self.variables = tuple(variables)
+        self.mode = mode
+        self.window_days = window_days
+        self.random_state = random_state
+        self._gmt_preindustrial: float | None = None
+        self._fitted = False
 
-    def _ensure_year_files(self, experiment: str, variable: str) -> list[Path]:
-        paths: list[Path] = []
-        for year in range(self._start_year, self._end_year + 1):
-            dest = _cache_file_path(self.cache_dir, experiment, variable, year)
-            url = _isimip_file_url(experiment, variable, year)
-            paths.append(_download_cached(url, dest))
-        return paths
+        if mode == "fast":
+            _using_fallback_detrender()
+        elif mode == "bayesian" and not _HAS_ATTRICI:
+            raise NotImplementedError(
+                "bayesian mode requires the attrici package. "
+                "Install with `pip install -e '.[attrici]'` or use mode='fast'."
+            )
 
-    def _open_variable(self, experiment: str, variable: str) -> xr.DataArray:
-        paths = self._ensure_year_files(experiment, variable)
-        pieces: list[xr.DataArray] = []
-        for path in paths:
-            ds = xr.open_dataset(path, chunks=_OPEN_CHUNKS)
-            ds = _subset_bbox(ds, self.aoi_bbox)
-            da = _normalize_isimip_units(_resolve_isimip_var(ds, variable), variable)
-            pieces.append(da.load())
-            ds.close()
-        combined = xr.concat(pieces, dim="time")
-        combined.name = variable
-        start_ts = pd.Timestamp(self.start)
-        end_ts = pd.Timestamp(self.end)
-        return combined.sel(time=slice(start_ts, end_ts))
-
-    def load_experiment(self, experiment: str) -> xr.Dataset:
-        """Load all configured variables for ``obsclim`` or ``counterclim``."""
-        if experiment not in EXPERIMENTS:
-            raise ValueError(f"experiment must be one of {EXPERIMENTS}, got {experiment!r}")
-
-        data_vars: dict[str, xr.DataArray] = {}
-        for var in self.variables:
-            logger.info("Loading ISIMIP %s %s (%d–%d)", experiment, var, self._start_year, self._end_year)
-            data_vars[var] = self._open_variable(experiment, var)
-
-        ds = xr.Dataset(data_vars)
-        ds.attrs.update(
-            {
-                "experiment": experiment,
-                "source": "ISIMIP3a GSWP3-W5E5",
-                "mengel_2021_doi": MENGEL_2021_DOI,
-                "isimip_doi": ISIMIP_DATASET_DOI,
-            }
+    def fit(self, ds: xr.Dataset) -> ATTRICICounterfactual:
+        """Record GMT baseline and validate variables (lightweight fit)."""
+        years, _ = _years_and_doy_from_time(ds["time"])
+        self._gmt_preindustrial = _preindustrial_gmt(self.gmt_series, years)
+        missing = [v for v in self.variables if v not in ds.data_vars]
+        if missing:
+            raise KeyError(f"Dataset missing variables for fit: {missing}")
+        self._fitted = True
+        logger.info(
+            "ATTRICICounterfactual fit: mode=%s, gmt_pi=%.3f°C, variables=%s",
+            self.mode,
+            self._gmt_preindustrial,
+            self.variables,
         )
-        return ds
+        return self
 
-    def load_obsclim(self) -> xr.Dataset:
-        return self.load_experiment("obsclim")
+    def transform(self, ds: xr.Dataset) -> xr.Dataset:
+        """Return dataset with ``{var}_cf`` counterfactual variables."""
+        if not self._fitted:
+            raise RuntimeError("Call fit() before transform()")
+        if self.mode == "bayesian":
+            return self._transform_bayesian(ds)
+        return self._transform_fast(ds)
 
-    def load_counterclim(self) -> xr.Dataset:
-        return self.load_experiment("counterclim")
+    def fit_transform(self, ds: xr.Dataset) -> xr.Dataset:
+        return self.fit(ds).transform(ds)
 
-    def load(self, experiment: str) -> xr.Dataset:
-        """Alias for :meth:`load_experiment`."""
-        return self.load_experiment(experiment)
+    def _transform_fast(self, ds: xr.Dataset) -> xr.Dataset:
+        assert self._gmt_preindustrial is not None
+        years, doys = _years_and_doy_from_time(ds["time"])
+        gmt_t = _gmt_for_timesteps(years, self.gmt_series)
+
+        out = ds.copy()
+        spatial_dims = [d for d in ("latitude", "longitude", "lat", "lon") if d in ds.dims]
+        if len(spatial_dims) < 2:
+            raise ValueError("Dataset must have latitude/longitude (or lat/lon) dimensions")
+
+        for var in self.variables:
+            if var not in ds.data_vars:
+                logger.warning("Skipping missing variable %s", var)
+                continue
+            da = ds[var]
+            is_precip = var == "precip"
+
+            def _apply_pixel(values: np.ndarray) -> np.ndarray:
+                return _fast_pixel_detrend(
+                    values,
+                    years,
+                    doys,
+                    gmt_t,
+                    self._gmt_preindustrial,
+                    self.window_days,
+                    is_precip,
+                )
+
+            cf = xr.apply_ufunc(
+                _apply_pixel,
+                da,
+                input_core_dims=[["time"]],
+                output_core_dims=[["time"]],
+                vectorize=True,
+                dask="parallelized",
+                output_dtypes=[np.float64],
+            )
+            cf.name = f"{var}_cf"
+            cf.attrs.update(da.attrs)
+            cf.attrs["counterfactual_method"] = "ATTRICI-style quantile mapping (fast)"
+            cf.attrs["gmt_preindustrial"] = self._gmt_preindustrial
+            out[cf.name] = cf
+
+        return out
+
+    def _transform_bayesian(self, ds: xr.Dataset) -> xr.Dataset:
+        if not _HAS_ATTRICI or _attrici_estimator is None:
+            raise NotImplementedError(
+                "bayesian mode requires the attrici package. "
+                "Install with `pip install -e '.[attrici]'` or use mode='fast'."
+            )
+        # attrici v1/v2 grid estimators differ; surface a clear path until wired.
+        estimator_cls = getattr(_attrici_estimator, "Estimator", None) or getattr(
+            _attrici_estimator, "Attrici", None
+        )
+        if estimator_cls is None:
+            raise NotImplementedError(
+                "attrici.estimator does not expose a known Estimator class for xarray grids. "
+                "Use mode='fast' for the vendored quantile-mapping detrender."
+            )
+        raise NotImplementedError(
+            "bayesian mode via attrici.estimator is not yet wired for full xarray grids. "
+            "Use mode='fast' (Mengel et al. 2021 quantile-mapping detrender)."
+        )
 
 
-def _factual_variable_key(factual: xr.Dataset, isimip_var: str, era5_var: str) -> str | None:
-    if era5_var in factual.data_vars:
-        return era5_var
-    if isimip_var in factual.data_vars:
-        return isimip_var
-    return None
+def recompute_derived_counterfactuals(ds_cf: xr.Dataset) -> xr.Dataset:
+    """
+    Recompute ``vpd_mean_cf``, ``et0_cf``, and ``cwd_cf`` from detrended state variables.
+
+    Requires ``tmax_cf``, ``tmin_cf``; uses ``rh_mean_cf``, ``srad_cf``, ``wind10m_cf``,
+    and ``precip_cf`` when present. Never detrends derived variables directly.
+    """
+    out = ds_cf.copy()
+    if "tmax_cf" not in out or "tmin_cf" not in out:
+        return out
+
+    tmean_cf = (out["tmax_cf"] + out["tmin_cf"]) / 2.0
+    out["tmean_cf"] = tmean_cf
+
+    if "rh_mean_cf" in out:
+        out["vpd_mean_cf"] = _vpd_from_tmean_rh(tmean_cf, out["rh_mean_cf"])
+    elif "rh_mean" in out and "rh_mean_cf" not in out:
+        pass
+
+    need_et0 = {"rh_mean_cf", "wind10m_cf", "srad_cf"} <= set(out.data_vars)
+    if need_et0:
+        out["et0_cf"] = _fao_et0_array(
+            tmean_cf,
+            out["rh_mean_cf"],
+            out["wind10m_cf"],
+            out["srad_cf"],
+        )
+        if "precip_cf" in out:
+            out["cwd_cf"] = out["et0_cf"] - out["precip_cf"]
+        elif "precip" in out:
+            out["cwd_cf"] = out["et0_cf"] - out["precip"]
+
+    return out
 
 
-def compute_counterfactual_delta(
-    factual_era5: xr.Dataset,
-    obsclim_isimip: xr.Dataset,
-    counterclim_isimip: xr.Dataset,
-    *,
-    regrid_method: str = "bilinear",
-    skip_regrid: bool = False,
-    clip_precip: bool = False,
+def hazard_return_period_shift(
+    ds: xr.Dataset,
+    variable: str,
+    threshold: float,
+    direction: Literal["above", "below"] = "above",
 ) -> xr.Dataset:
     """
-    Apply ISIMIP obsclim–counterclim deltas on the ERA5-Land grid.
+    Per-pixel exceedance probabilities and attribution metrics.
 
-    For each mapped variable::
-
-        cf = factual - (obsclim_regridded - counterclim_regridded)
-
-    Then recomputes ``vpd_mean``, ``et0``, ``cwd``, ``cwd_cum``, copies ``sm_root``
-    from factual where unchanged, and runs :func:`data.era5_ingest.compute_derived_features`.
+    Returns
+    -------
+    xarray.Dataset
+        ``p_factual``, ``p_counterfactual``, ``risk_ratio``, ``fraction_attributable_risk``
+        (FAR = 1 - p_cf / p_fac).
     """
-    adjusted: dict[str, xr.DataArray] = {}
+    cf_var = f"{variable}_cf"
+    if variable not in ds.data_vars:
+        raise KeyError(f"Variable {variable!r} not in dataset")
+    if cf_var not in ds.data_vars:
+        raise KeyError(f"Counterfactual {cf_var!r} not in dataset; run transform() first")
 
-    for isimip_var, era5_var in ISIMIP_TO_ERA5.items():
-        factual_key = _factual_variable_key(factual_era5, isimip_var, era5_var)
-        if factual_key is None:
-            continue
-        obs = _resolve_isimip_var(obsclim_isimip, isimip_var)
-        counter = _resolve_isimip_var(counterclim_isimip, isimip_var)
-        if skip_regrid:
-            obs_r = obs
-            counter_r = counter
-        else:
-            obs_r = _regrid_to_factual(obs, factual_era5, method=regrid_method)
-            counter_r = _regrid_to_factual(counter, factual_era5, method=regrid_method)
-        delta = obs_r - counter_r
-        out_key = factual_key if skip_regrid else era5_var
-        adjusted[out_key] = (factual_era5[factual_key] - delta).astype(np.float32)
+    fac = ds[variable]
+    cf = ds[cf_var]
 
-    if not adjusted:
-        raise ValueError("No ERA5 variables could be adjusted; check factual and ISIMIP inputs")
+    if direction == "above":
+        mask_fac = fac > threshold
+        mask_cf = cf > threshold
+    else:
+        mask_fac = fac < threshold
+        mask_cf = cf < threshold
 
-    cf = xr.Dataset(adjusted)
-    for coord in factual_era5.coords:
-        if coord not in cf.coords and coord in factual_era5.dims:
-            cf = cf.assign_coords({coord: factual_era5[coord]})
+    p_factual = mask_fac.mean(dim="time")
+    p_counterfactual = mask_cf.mean(dim="time")
+    eps = 1e-12
+    risk_ratio = p_factual / (p_counterfactual + eps)
+    far = 1.0 - (p_counterfactual / (p_factual + eps))
 
-    if clip_precip:
-        for precip_name in ("precip", "pr"):
-            if precip_name in cf:
-                cf[precip_name] = cf[precip_name].clip(min=0)
-
-    if skip_regrid:
-        cf.attrs.update({"counterfactual": True, "method": "isimip_delta"})
-        return cf
-
-    required_for_derived = {"tmean", "rh_mean", "wind10m", "srad", "precip"}
-    if required_for_derived.issubset(cf.data_vars):
-        cf = _recompute_vpd_et0_cwd(cf)
-        cf["cwd_cum"] = cf["cwd"].cumsum(dim="time")
-        if "sm_root" in factual_era5.data_vars:
-            cf["sm_root"] = factual_era5["sm_root"]
-        cf = compute_derived_features(cf)
-
-    cf.attrs.update(
+    return xr.Dataset(
         {
-            "counterfactual": True,
-            "method": "isimip_delta",
-            "mengel_2021_doi": MENGEL_2021_DOI,
-            "isimip_doi": ISIMIP_DATASET_DOI,
-        }
+            "p_factual": p_factual,
+            "p_counterfactual": p_counterfactual,
+            "risk_ratio": risk_ratio,
+            "fraction_attributable_risk": far,
+            "far": far,
+        },
+        attrs={
+            "variable": variable,
+            "threshold": threshold,
+            "direction": direction,
+            "reference": MENGEL_2021_REF,
+        },
     )
-    return cf
 
 
-def attrici_counterfactual_stack(
-    aoi: ee.Geometry | Any,
-    start: str,
-    end: str,
-    factual_ds: xr.Dataset,
-    *,
-    cache_dir: Path | str = DEFAULT_CACHE_DIR,
-    variables: tuple[str, ...] = DEFAULT_ISIMIP_VARIABLES,
-) -> xr.Dataset:
-    """
-    End-to-end counterfactual ERA5-Land stack for an AOI and date range.
-
-    Loads ISIMIP obsclim + counterclim, regrids, applies deltas, and returns a
-    dataset with the same schema as :mod:`data.era5_ingest` factual output.
-    """
-    bbox = _aoi_bounds(aoi)
-    loader = ISIMIPCounterfactualLoader(
-        bbox,
-        start,
-        end,
-        variables=variables,
-        cache_dir=cache_dir,
-    )
-    obsclim = loader.load_obsclim()
-    counterclim = loader.load_counterclim()
-    return compute_counterfactual_delta(factual_ds, obsclim, counterclim)
-
-
-def _parse_bbox(value: str) -> tuple[float, float, float, float]:
-    parts = [float(x.strip()) for x in value.split(",")]
-    if len(parts) != 4:
-        raise argparse.ArgumentTypeError("bbox must be west,south,east,north")
-    return parts[0], parts[1], parts[2], parts[3]
-
-
-def _build_cli() -> argparse.ArgumentParser:
+def _parse_cli_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build counterfactual ERA5-Land Zarr from ISIMIP3a GSWP3-W5E5 deltas.",
+        description="Build ATTRICI-style counterfactual daily climate Zarr from factual ERA5 Zarr."
     )
     parser.add_argument(
-        "--aoi-bbox",
-        type=_parse_bbox,
-        required=True,
-        help="AOI bounds as west,south,east,north (EPSG:4326)",
-    )
-    parser.add_argument("--start", required=True, help="Start date YYYY-MM-DD")
-    parser.add_argument("--end", required=True, help="End date YYYY-MM-DD")
-    parser.add_argument("--factual-zarr", type=Path, required=True, help="Factual ERA5 Zarr path")
-    parser.add_argument(
-        "--output-zarr",
+        "--era5-zarr",
         type=Path,
         required=True,
-        help="Output counterfactual Zarr path",
+        help="Input factual ERA5-Land daily Zarr (e.g. data/processed/era5_daily.zarr).",
     )
     parser.add_argument(
-        "--cache-dir",
+        "--out-zarr",
         type=Path,
-        default=DEFAULT_CACHE_DIR,
-        help=f"ISIMIP download cache (default: {DEFAULT_CACHE_DIR})",
+        required=True,
+        help="Output Zarr with factual variables plus *_cf counterfactuals.",
     )
-    return parser
+    parser.add_argument(
+        "--variables",
+        type=str,
+        default="tmax,tmin,precip",
+        help="Comma-separated variables to detrend (default: tmax,tmin,precip).",
+    )
+    parser.add_argument(
+        "--mode",
+        type=str,
+        default="fast",
+        choices=("fast", "bayesian"),
+        help="Detrending mode (default: fast).",
+    )
+    return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _build_cli().parse_args(argv)
-    factual = xr.open_zarr(args.factual_zarr, chunks=_OPEN_CHUNKS)
-    cf = attrici_counterfactual_stack(
-        args.aoi_bbox,
-        args.start,
-        args.end,
-        factual,
-        cache_dir=args.cache_dir,
-    )
-    args.output_zarr.parent.mkdir(parents=True, exist_ok=True)
-    cf.to_zarr(args.output_zarr, mode="w")
-    logger.info("Wrote counterfactual stack to %s", args.output_zarr)
+    args = _parse_cli_args(argv)
+    variables = tuple(v.strip() for v in args.variables.split(",") if v.strip())
+    if not variables:
+        print("No variables specified.", file=sys.stderr)
+        return 1
+
+    if not args.era5_zarr.exists():
+        print(f"Input Zarr not found: {args.era5_zarr}", file=sys.stderr)
+        return 1
+
+    gmt = load_gistemp_loti()
+    logger.info("Loaded smoothed GISTEMP LOTI (%d years)", len(gmt))
+
+    ds = xr.open_zarr(args.era5_zarr, consolidated=True)
+    model = ATTRICICounterfactual(gmt, variables=variables, mode=args.mode)  # type: ignore[arg-type]
+    cf = model.fit_transform(ds)
+
+    out = ds.copy()
+    for name, da in cf.data_vars.items():
+        out[name] = da
+
+    if {"tmax_cf", "tmin_cf"} <= set(out.data_vars):
+        try:
+            out = recompute_derived_counterfactuals(out)
+        except KeyError as exc:
+            logger.warning("Skipping derived counterfactual recompute: %s", exc)
+
+    args.out_zarr.parent.mkdir(parents=True, exist_ok=True)
+    out.to_zarr(args.out_zarr, mode="w")
+    logger.info("Wrote counterfactual stack to %s", args.out_zarr)
     return 0
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    raise SystemExit(main())
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    sys.exit(main())

@@ -1,6 +1,18 @@
 # DVC pipeline stages — see https://dvc.org/doc/user-guide/project-structure/pipelines
 
 stages:
+  attrici_counterfactual:
+    cmd: >
+      python -m data.attrici_counterfactual
+      --era5-zarr data/processed/era5_daily.zarr
+      --out-zarr data/processed/era5_counterfactual.zarr
+    deps:
+      - src/data/attrici_counterfactual.py
+      - data/processed/era5_daily.zarr
+      - data/external/gistemp/GLB.Ts+dSST.csv
+    outs:
+      - data/processed/era5_counterfactual.zarr
+
   train_yield_surrogate:
     cmd: python scripts/train_yield_surrogate.py
     deps:
