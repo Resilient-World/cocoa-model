@@ -39,6 +39,8 @@ dependencies = [
     "requests>=2.31",
     "xesmf>=0.8",
     "rpy2>=3.5; platform_system != 'Windows'",
+    "segmentation-models-pytorch>=0.3",
+    "galileo @ git+https://github.com/nasaharvest/galileo@main; python_version < '3.12'",
 ]
 
 [project.optional-dependencies]
@@ -70,6 +72,10 @@ ftw = [
     "rasterstats>=0.20",
     "geopandas>=0.14",
 ]
+# Upstream Galileo (Python >=3.10,<3.12 only); on 3.12+ use vendored models.vendor.*
+galileo = [
+    "galileo @ git+https://github.com/nasaharvest/galileo@main",
+]
 
 # Optional (Callaway-Sant'Anna upgrade — not pinned yet):
 # differences>=0.2.0
@@ -91,4 +97,5 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 markers = [
     "integration: tests that call Google Earth Engine (require credentials)",
+    "slow: downloads Galileo weights or runs encoder forward pass",
 ]
