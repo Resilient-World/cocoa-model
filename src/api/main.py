@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
 from fastapi import FastAPI, HTTPException
+import pandas as pd
 
 from api.config import APISettings
 from api.feature_resolver import build_resolver_from_settings
@@ -13,12 +14,16 @@ from api.model_loader import load_yield_model
 from api.schemas import (
     ComplianceDdsRequest,
     ComplianceDdsResponse,
+    RankInterventionsRequest,
+    RankInterventionsResponse,
     SimulateInterventionRequest,
     SimulateInterventionResponse,
     SimulateScenarioRequest,
     SimulateScenarioResponse,
 )
 from api.simulation import simulate_intervention, simulate_scenario
+from analysis.heterogeneity import estimate_cate
+from analysis.policy_targeting import rank_farms_by_uplift
 from compliance.eudr import (
     DeforestationResult,
     assess_country_risk,
@@ -111,6 +116,54 @@ def simulate_scenario_endpoint(request: SimulateScenarioRequest) -> SimulateScen
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post(
+    "/rank-interventions",
+    response_model=RankInterventionsResponse,
+    summary="Rank farms by estimated uplift (CATE) for cooperative rollouts",
+)
+def rank_interventions_endpoint(request: RankInterventionsRequest) -> RankInterventionsResponse:
+    """
+    Estimate heterogeneous uplift using R-learner / tree ensemble methods on tabular data,
+    then rank farms by net uplift in USD (cocoa price × avoided tonnes − cost).
+    """
+    df = pd.DataFrame(request.rows)
+    if request.farm_area_col not in df.columns:
+        raise HTTPException(status_code=400, detail=f"Missing farm area column '{request.farm_area_col}'")
+    try:
+        cate = estimate_cate(
+            df,
+            outcome=request.outcome,
+            treatment=request.treatment,
+            covariates=request.covariates,
+            method=request.method,
+            n_folds=request.n_folds,
+        )
+        ranked_df = rank_farms_by_uplift(
+            cate,
+            intervention_cost_usd_per_farm=request.intervention_cost_usd_per_farm,
+            cocoa_price_usd=request.cocoa_price_usd,
+            farm_areas_ha=df[request.farm_area_col],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    farm_id = ranked_df["farm_id"] if "farm_id" in ranked_df.columns else pd.Series([None] * len(ranked_df), index=ranked_df.index)
+    ranked = []
+    for idx in ranked_df.index:
+        ranked.append(
+            {
+                "farm_id": farm_id.loc[idx],
+                "net_uplift_usd": float(ranked_df.loc[idx, "net_uplift_usd"]),
+                "gross_uplift_usd": float(ranked_df.loc[idx, "gross_uplift_usd"]),
+                "avoided_loss_tonnes": float(ranked_df.loc[idx, "avoided_loss_tonnes"]),
+                "tau_hat_tonnes_per_ha": float(ranked_df.loc[idx, "tau_hat_tonnes_per_ha"]),
+                "se": float(ranked_df.loc[idx, "se"]),
+            }
+        )
+
+    return RankInterventionsResponse(method=request.method, n=int(len(df)), ranked=ranked)
 
 
 @app.post(
