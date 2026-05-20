@@ -81,3 +81,47 @@ class SimulateInterventionResponse(BaseModel):
     @classmethod
     def _non_negative(cls, value: float) -> float:
         return max(0.0, float(value))
+
+
+# ---------------------------------------------------------------------------
+# EUDR compliance (EU) 2023/1115
+# ---------------------------------------------------------------------------
+
+from compliance.eudr import (  # noqa: E402
+    DueDiligenceStatement,
+    OperatorInfo,
+    PlotGeometry,
+    ProductInfo,
+    RiskScore,
+)
+
+
+class ComplianceDdsRequest(BaseModel):
+    """Request body for POST /compliance/dds."""
+
+    plot: PlotGeometry
+    operator: OperatorInfo
+    product: ProductInfo
+    buyer_name: str | None = None
+    supplier_name: str | None = None
+    supply_chain_complexity: float = Field(
+        default=0.3,
+        ge=0.0,
+        le=1.0,
+        description="Normalised supply-chain complexity (Art. 10)",
+    )
+    use_gee_deforestation_check: bool = Field(
+        default=False,
+        description="When false, skips live GEE screening (geolocation + risk only)",
+    )
+
+
+class ComplianceDdsResponse(BaseModel):
+    """Due diligence statement and risk score for a cocoa plot."""
+
+    dds: DueDiligenceStatement
+    dds_json: str = Field(..., description="Serialised DDS (JSON)")
+    dds_csv: str = Field(..., description="EU Information System CSV row(s)")
+    risk_score: RiskScore
+    geolocation_valid: bool
+    validation_errors: list[str] = Field(default_factory=list)

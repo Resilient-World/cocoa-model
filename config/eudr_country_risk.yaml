@@ -1,0 +1,21 @@
+# EU Deforestation Regulation (EU) 2023/1115 — country risk classification
+# Commission implementing act list (Art. 29). Unlisted countries default to "standard"
+# per Art. 29(2) until the Commission publishes the official classification.
+#
+# Reference: EUR-Lex 32023R1115 — applies from 30 December 2025.
+
+default_risk: standard
+
+countries:
+  # Examples for integration tests / operator dashboards (not official Commission list)
+  BRA:
+    risk: high
+    notes: placeholder — replace when implementing act is published
+  COD:
+    risk: high
+  GHA:
+    risk: standard
+  CIV:
+    risk: standard
+  PER:
+    risk: low
