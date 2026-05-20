@@ -38,6 +38,7 @@ dependencies = [
     "shapely>=2.0",
     "pycountry>=24.0",
     "pyyaml>=6.0",
+    "hydra-core>=1.3",
     "diskcache>=5.6",
     "h3>=4.0",
     "statsmodels>=0.14",  # event-study OLS with cluster-robust SEs

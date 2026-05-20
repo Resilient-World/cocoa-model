@@ -1,0 +1,18 @@
+# Hydra config for YieldSurrogateModel calibration (ICCO + CRIG panel)
+max_epochs: 200
+lr: 3.0e-4
+weight_decay: 1.0e-4
+batch_size: 32
+num_workers: 0
+seed: 42
+checkpoint_path: models/yield_surrogate_v1.pt
+mlflow_experiment: yield-surrogate
+mlflow_run_name: yield_surrogate_v1
+icco_glob: data/external/icco_*.csv
+crig_path: data/raw/crig_station_yields.csv
+bootstrap_per_country_year: 8
+augment_sigma_t_ha: 0.4
+sequence_length: 365
+val_fraction: 0.15
+device: cpu
+log_every_n_epochs: 10

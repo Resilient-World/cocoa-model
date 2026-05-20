@@ -79,4 +79,17 @@ def apply_biotic_losses(
     }
 
 
-__all__ = ["apply_biotic_losses", "MIN_SURVIVING_FRACTION"]
+def estimate_surviving_biotic_fraction(
+    ds: xr.Dataset,
+    static_features: dict[str, Any] | None = None,
+) -> float:
+    """Multiplicative biotic survival used to back out pre-biotic yield targets."""
+    features = static_features or {}
+    return float(apply_biotic_losses(1.0, ds, features)["surviving_fraction"])
+
+
+__all__ = [
+    "apply_biotic_losses",
+    "estimate_surviving_biotic_fraction",
+    "MIN_SURVIVING_FRACTION",
+]

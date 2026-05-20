@@ -55,25 +55,25 @@ stages:
 
   train_yield:
     cmd: >
-      python -m training.train_yield
-      --climate data/processed/era5.zarr
-      --panel data/raw/yield_panel.parquet
-      --out models/yield.pt
+      python -m training.train_yield --config-name yield
     deps:
-      - data/processed/era5.zarr
+      - config/training/yield.yaml
+      - data/external/icco_*.csv
       - src/training/train_yield.py
+      - src/data/yield_panel.py
       - src/models/yield_surrogate.py
+      - src/hazards/
     outs:
-      - models/yield.pt
+      - models/yield_surrogate_v1.pt
 
   calibrate_conformal:
     cmd: >
       python -m models.conformal calibrate
-      --checkpoint models/yield.pt
+      --checkpoint models/yield_surrogate_v1.pt
       --calib data/processed/calib.parquet
       --out models/conformal.json
     deps:
-      - models/yield.pt
+      - models/yield_surrogate_v1.pt
       - src/models/conformal.py
     outs:
       - models/conformal.json
@@ -94,7 +94,7 @@ stages:
     cmd: python -m validation.run_validate --reports-dir reports/validation
     deps:
       - models/segmentation.ckpt
-      - models/yield.pt
+      - models/yield_surrogate_v1.pt
       - reports/causal_eval.json
       - data/external/icco_cocoa_production.csv
       - data/external/cocoa_barometer_2024_anomalies.json
