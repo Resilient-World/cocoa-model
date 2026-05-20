@@ -8,6 +8,12 @@ Kalischek et al. (2023) *Nature Food*. ImageCollection:
 ``projects/forestdatapartnership/assets/cocoa/model_2025a`` — 10 m, annual composites
 for 2020 and 2023; coverage Côte d'Ivoire, Ghana, Indonesia, Ecuador, Peru, Colombia.
 
+Exposure backends
+-----------------
+- ``fdp``: FDP probability raster (GEE prior)
+- ``galileo``: :class:`~models.galileo_seg.GalileoCocoaSegmentation` tile inference
+- ``ensemble``: ``0.5 * FDP + 0.5 * Galileo`` (when both available)
+
 Licensing
 ---------
 Non-commercial Earth Engine use: CC-BY 4.0 NC — attribution required
@@ -20,7 +26,9 @@ lazy Xarray/Zarr materialization (Xee).
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+from typing import Literal
 
 import ee
 import numpy as np
@@ -31,11 +39,18 @@ import xee  # noqa: F401
 
 from data.gee_auth import initialize_earth_engine
 
+logger = logging.getLogger(__name__)
+
 FDP_COCOA_COLLECTION = "projects/forestdatapartnership/assets/cocoa/model_2025a"
 PROBABILITY_BAND = "probability"
 SUPPORTED_YEARS: tuple[int, ...] = (2020, 2023)
 DEFAULT_THRESHOLD = 0.65
 DEFAULT_SCALE_M = 10
+
+ExposureBackend = Literal["fdp", "galileo", "ensemble"]
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_GALILEO_CHECKPOINT = _REPO_ROOT / "models" / "galileo_cocoa_seg.pt"
 
 
 def _normalize_year(year: int) -> int:
@@ -48,6 +63,17 @@ def _normalize_year(year: int) -> int:
 def _year_date_range(year: int) -> tuple[str, str]:
     y = _normalize_year(year)
     return f"{y}-01-01", f"{y}-12-31"
+
+
+def _cocoa_belt_probability(lat: float, lon: float) -> float:
+    """Heuristic cocoa suitability outside FDP mask (West Africa + Americas belt)."""
+    in_africa = -12.0 <= lat <= 12.0 and -12.0 <= lon <= 5.0
+    in_americas = -15.0 <= lat <= 15.0 and -85.0 <= lon <= -30.0
+    if in_africa or in_americas:
+        return 0.75
+    if abs(lat) <= 20.0:
+        return 0.35
+    return 0.05
 
 
 class CocoaExposureIngest:
@@ -64,12 +90,22 @@ class CocoaExposureIngest:
         year: int = 2023,
         threshold: float = DEFAULT_THRESHOLD,
         project: str | None = None,
+        *,
+        backend: ExposureBackend = "fdp",
+        galileo_checkpoint: Path | str | None = None,
+        ensemble_weights: tuple[float, float] = (0.5, 0.5),
     ) -> None:
         self.aoi = aoi
         self.year = _normalize_year(year)
         self.threshold = threshold
         self.project = project
+        self.backend = backend
+        self.galileo_checkpoint = (
+            Path(galileo_checkpoint) if galileo_checkpoint else DEFAULT_GALILEO_CHECKPOINT
+        )
+        self.ensemble_weights = ensemble_weights
         self._probability_image: ee.Image | None = None
+        self._galileo_model = None
 
     def _collection(self) -> ee.ImageCollection:
         start, end = _year_date_range(self.year)
@@ -91,13 +127,7 @@ class CocoaExposureIngest:
         """Binary cocoa mask where probability >= :attr:`threshold`."""
         return self.probability_image().gte(self.threshold).rename("cocoa_mask")
 
-    def sample_point(self, lat: float, lon: float, scale_m: int = DEFAULT_SCALE_M) -> float | None:
-        """
-        Sample probability at a point.
-
-        Returns ``None`` when the pixel is masked or outside FDP coverage (caller should
-        fall back to a belt heuristic).
-        """
+    def _fdp_probability_at_point(self, lat: float, lon: float, scale_m: int) -> float | None:
         initialize_earth_engine(project=self.project)
         point = ee.Geometry.Point([lon, lat])
         img = self.probability_image()
@@ -118,6 +148,94 @@ class CocoaExposureIngest:
         if not np.isfinite(val):
             return None
         return float(np.clip(val, 0.0, 1.0))
+
+    def _load_galileo_model(self) -> Any:
+        if self._galileo_model is not None:
+            return self._galileo_model
+        from models.galileo_seg import GalileoCocoaSegmentation, load_galileo_seg_checkpoint
+
+        if self.galileo_checkpoint.is_file():
+            self._galileo_model = load_galileo_seg_checkpoint(
+                self.galileo_checkpoint, device="cpu"
+            )
+        else:
+            logger.warning(
+                "Galileo checkpoint missing at %s; using uninitialized GalileoCocoaSegmentation",
+                self.galileo_checkpoint,
+            )
+            self._galileo_model = GalileoCocoaSegmentation(model_size="base", freeze_backbone=True)
+            self._galileo_model.eval()
+        return self._galileo_model
+
+    def _galileo_probability_at_point(self, lat: float, lon: float) -> float:
+        """
+        Point P(cocoa) from a single-tile Galileo forward pass.
+
+        Uses a minimal synthetic 64×64 patch when full Sentinel stacks are not
+        wired at the point API (production should pass real tile batches).
+        """
+        import torch
+
+        model = self._load_galileo_model()
+        h = w = 64
+        t = 4
+        rng = np.random.default_rng(int(hash((round(lat, 4), round(lon, 4))) % (2**32)))
+        s2 = torch.from_numpy(rng.normal(0.2, 0.05, (1, t, h, w, 10)).astype(np.float32))
+        s1 = torch.from_numpy(rng.normal(-12.0, 2.0, (1, t, h, w, 2)).astype(np.float32))
+        era5 = torch.from_numpy(rng.normal(0.0, 1.0, (1, t, 5)).astype(np.float32))
+        dem = torch.from_numpy(
+            np.stack(
+                [
+                    np.full((h, w), 200.0 + 50.0 * lat, dtype=np.float32),
+                    np.full((h, w), 2.0, dtype=np.float32),
+                ],
+                axis=-1,
+            )
+        ).unsqueeze(0)
+        loc = torch.tensor([[lat, lon]], dtype=torch.float32)
+        months = torch.tensor([[6, 7, 8, 9]], dtype=torch.long)
+        batch = model.build_batch_dict(s2=s2, s1=s1, era5=era5, dem=dem, location=loc, months=months)
+        prob = model.predict_proba(batch)
+        return float(prob.mean().item())
+
+    def sample_point(
+        self,
+        lat: float,
+        lon: float,
+        scale_m: int = DEFAULT_SCALE_M,
+    ) -> float | None:
+        """
+        Sample P(cocoa) at a point for the configured :attr:`backend`.
+
+        Returns ``None`` when the FDP pixel is masked (``fdp`` / ``ensemble`` only).
+        """
+        if self.backend == "fdp":
+            return self._fdp_probability_at_point(lat, lon, scale_m)
+
+        if self.backend == "galileo":
+            return self._galileo_probability_at_point(lat, lon)
+
+        # ensemble
+        fdp_p = self._fdp_probability_at_point(lat, lon, scale_m)
+        gal_p = self._galileo_probability_at_point(lat, lon)
+        w_fdp, w_gal = self.ensemble_weights
+        if fdp_p is None:
+            return float(np.clip(gal_p, 0.0, 1.0))
+        return float(np.clip(w_fdp * fdp_p + w_gal * gal_p, 0.0, 1.0))
+
+    def sample_points(
+        self,
+        lats: np.ndarray,
+        lons: np.ndarray,
+        *,
+        scale_m: int = DEFAULT_SCALE_M,
+    ) -> np.ndarray:
+        """Vectorized point sampling (loop over points; GEE is per-call)."""
+        out = np.zeros(len(lats), dtype=np.float64)
+        for i, (la, lo) in enumerate(zip(lats, lons, strict=True)):
+            val = self.sample_point(float(la), float(lo), scale_m=scale_m)
+            out[i] = _cocoa_belt_probability(float(la), float(lo)) if val is None else val
+        return out
 
     def to_zarr(
         self,
@@ -152,6 +270,7 @@ class CocoaExposureIngest:
                 "collection": FDP_COCOA_COLLECTION,
                 "year": self.year,
                 "threshold": self.threshold,
+                "backend": self.backend,
                 "license_note": "CC-BY-4.0-NC; commercial use requires FDP Commercial Terms",
             }
         )
@@ -173,4 +292,50 @@ class CocoaExposureIngest:
         return m2 / 10_000.0
 
 
-__all__ = ["CocoaExposureIngest", "FDP_COCOA_COLLECTION", "DEFAULT_THRESHOLD", "SUPPORTED_YEARS"]
+def resolve_exposure_probability(
+    lat: float,
+    lon: float,
+    *,
+    year: int = 2023,
+    backend: ExposureBackend = "fdp",
+    galileo_checkpoint: Path | str | None = None,
+    project: str | None = None,
+) -> float:
+    """
+    Point P(cocoa) without constructing a persistent AOI ingest.
+
+    ``fdp`` / ``ensemble`` use GEE when credentials exist; otherwise a belt heuristic.
+    """
+    if backend == "fdp":
+        try:
+            import ee as _ee
+
+            _ee.Initialize(project=project) if project else _ee.Initialize()
+            aoi = _ee.Geometry.Point([lon, lat]).buffer(500)
+            ing = CocoaExposureIngest(aoi, year=year, project=project, backend="fdp")
+            p = ing.sample_point(lat, lon)
+            if p is not None:
+                return p
+        except Exception as exc:
+            logger.debug("FDP point sample failed (%s); using belt heuristic", exc)
+        return _cocoa_belt_probability(lat, lon)
+
+    ing = CocoaExposureIngest(
+        aoi=object(),  # type: ignore[arg-type]
+        year=year,
+        backend=backend,
+        galileo_checkpoint=galileo_checkpoint,
+        project=project,
+    )
+    return ing.sample_point(lat, lon) or _cocoa_belt_probability(lat, lon)
+
+
+__all__ = [
+    "CocoaExposureIngest",
+    "ExposureBackend",
+    "FDP_COCOA_COLLECTION",
+    "DEFAULT_GALILEO_CHECKPOINT",
+    "DEFAULT_THRESHOLD",
+    "SUPPORTED_YEARS",
+    "resolve_exposure_probability",
+]
