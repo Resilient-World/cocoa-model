@@ -15,8 +15,10 @@ from api.schemas import (
     ComplianceDdsResponse,
     SimulateInterventionRequest,
     SimulateInterventionResponse,
+    SimulateScenarioRequest,
+    SimulateScenarioResponse,
 )
-from api.simulation import simulate_intervention
+from api.simulation import simulate_intervention, simulate_scenario
 from compliance.eudr import (
     DeforestationResult,
     assess_country_risk,
@@ -78,6 +80,34 @@ def simulate_intervention_endpoint(
             yield_blend_weight=settings.yield_blend_weight,
             climate_year=settings.climate_reference_year,
             conformal=getattr(app.state, "conformal", None),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post(
+    "/simulate-scenario",
+    response_model=SimulateScenarioResponse,
+    summary="Simulate intervention under CMIP6 SSP future climate (delta-change ERA5)",
+)
+def simulate_scenario_endpoint(request: SimulateScenarioRequest) -> SimulateScenarioResponse:
+    """
+    Applies NASA/GDDP-CMIP6 monthly deltas via ``ScenarioBuilder`` to the historical ERA5 Zarr,
+    then runs paired Monte Carlo yields for baseline vs intervention with mean / p10 / p90 bands.
+    """
+    model: YieldSurrogateModel = app.state.yield_model
+    settings: APISettings = app.state.settings
+
+    try:
+        return simulate_scenario(
+            request,
+            model,
+            app.state.feature_resolver,
+            historical_zarr_path=settings.era5_zarr_path,
+            cmip6_zarr_path=settings.cmip6_zarr_path,
+            num_samples=settings.mc_num_samples,
+            yield_blend_weight=settings.yield_blend_weight,
+            climate_year=settings.climate_reference_year,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

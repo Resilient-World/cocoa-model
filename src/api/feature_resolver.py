@@ -142,6 +142,18 @@ def _climate_tensor_from_dataset(ds: xr.Dataset, year: int) -> np.ndarray:
     return np.stack(channels, axis=-1).astype(np.float32)
 
 
+def climate_tensor_from_dataset_point(ds: xr.Dataset, lat: float, lon: float, year: int) -> Tensor:
+    """
+    Build daily climate tensor ``[1, 365, 11]`` at the nearest grid cell from an ``xr.Dataset``.
+
+    Used for CMIP6-adjusted ERA5 stacks produced by :class:`~counterfactual.cmip6_scenarios.ScenarioBuilder`.
+    """
+    lat_name, lon_name = _lat_lon_coord_names(ds)
+    point = ds.sel({lat_name: lat, lon_name: lon}, method="nearest")
+    arr = _climate_tensor_from_dataset(point, year)
+    return torch.from_numpy(arr).unsqueeze(0)
+
+
 class FarmFeatureResolver:
     """Climate, static site, and optional Galileo features for a farm location."""
 

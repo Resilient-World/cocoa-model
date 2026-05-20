@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from enum import Enum
 
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -80,6 +82,77 @@ class ConformalConfidenceInterval(BaseModel):
     baseline_yield_tonnes_per_ha: ConformalIntervalResponse | None = None
     projected_yield_tonnes_per_ha: ConformalIntervalResponse | None = None
     avoided_loss_tonnes: ConformalIntervalResponse | None = None
+
+
+ScenarioSSP = Literal["ssp245", "ssp585"]
+ScenarioHorizonYear = Literal[2030, 2050, 2080]
+
+
+class SimulateScenarioRequest(BaseModel):
+    """Request body for POST /simulate-scenario (SSP × horizon climate + intervention)."""
+
+    farm_location: FarmLocation
+    farm_size_ha: float = Field(..., gt=0.0, description="Farm area in hectares")
+    current_yield: float = Field(
+        ...,
+        ge=0.0,
+        description="Observed current yield in tonnes per hectare",
+    )
+    intervention_type: InterventionType
+    cocoa_price_usd: float = Field(
+        ...,
+        ge=0.0,
+        description="Market cocoa price in USD per tonne",
+    )
+    scenario: ScenarioSSP = Field(
+        ...,
+        description="CMIP6 SSP label passed through ScenarioBuilder",
+    )
+    horizon_year: ScenarioHorizonYear = Field(
+        ...,
+        description="Calendar year defining the CMIP6 climatology window for delta-change",
+    )
+
+
+class YieldUncertaintyBand(BaseModel):
+    """Monte Carlo summaries from paired forwards through YieldSurrogateModel."""
+
+    mean: float = Field(..., description="Mean yield (blended with observed yield when configured)")
+    p10: float = Field(..., description="10th percentile of MC yields (tonnes/ha)")
+    p90: float = Field(..., description="90th percentile of MC yields (tonnes/ha)")
+
+
+class AvoidedLossUncertaintyBand(BaseModel):
+    """Distribution of avoided loss (tonnes) from MC yield pairs."""
+
+    mean: float = Field(..., ge=0.0)
+    p10: float = Field(..., ge=0.0)
+    p90: float = Field(..., ge=0.0)
+
+
+class SimulateScenarioResponse(BaseModel):
+    """Response from POST /simulate-scenario."""
+
+    scenario: ScenarioSSP
+    horizon_year: ScenarioHorizonYear
+    climate_reference_year: int = Field(
+        ...,
+        description="Calendar year slice from the adjusted ERA5 daily stack",
+    )
+    baseline_yield_tonnes_per_ha: YieldUncertaintyBand = Field(
+        ...,
+        description="Yield under SSP-conditioned climate without intervention encoding",
+    )
+    projected_yield_tonnes_per_ha: YieldUncertaintyBand = Field(
+        ...,
+        description="Yield under SSP-conditioned climate with intervention",
+    )
+    avoided_loss_tonnes: AvoidedLossUncertaintyBand
+    financial_impact_usd_mean: float = Field(
+        ...,
+        ge=0.0,
+        description="USD value using mean avoided tonnes × cocoa_price_usd",
+    )
 
 
 class SimulateInterventionResponse(BaseModel):

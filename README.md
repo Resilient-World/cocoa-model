@@ -220,6 +220,8 @@ Copy `.env.example` to `.env` (never commit `.env`).
 | `MODEL_CHECKPOINT_PATH` | API | Path to `YieldSurrogateModel` weights (`.pt`) |
 | `MC_NUM_SAMPLES` | API | Monte Carlo forward passes (default `50`) |
 | `YIELD_BLEND_WEIGHT` | API | Blend weight for observed `current_yield` (default `0.3`) |
+| `ERA5_ZARR_PATH` | API | Historical ERA5-Land stack (`ScenarioBuilder` + `/simulate-intervention` resolver) |
+| `CMIP6_ZARR_PATH` | API | NASA/GDDP-CMIP6 (or compatible) ensemble Zarr for `/simulate-scenario` deltas |
 | `DVC_REMOTE_URL` | DVC | Example remote store URL |
 
 API settings are loaded via `pydantic-settings` in `api.config.APISettings`.
@@ -380,6 +382,7 @@ Interactive docs: `http://localhost:8000/docs`
 |--------|------|-------------|
 | `GET` | `/health` | Liveness (`{"status": "ok"}`) |
 | `POST` | `/simulate-intervention` | Avoided loss simulation |
+| `POST` | `/simulate-scenario` | Avoided loss under SSP × horizon CMIP6-adjusted ERA5 |
 
 #### `POST /simulate-intervention`
 
@@ -416,12 +419,22 @@ Interactive docs: `http://localhost:8000/docs`
 
 **Simulation steps (v1):**
 
-1. Mock climate `[1, 365, 4]` and static `[1, 10]` from lat/lon (seeded hash).
+1. Resolve ERA5 daily climate `[1, 365, 11]` and site static `[1, 10]` from Zarr or live GEE (cached).
 2. Build counterfactual vs factual tensors (intervention encoded in static features; shade trees adjust max-temp channel).
 3. Run paired Monte Carlo forwards through `YieldSurrogateModel`.
 4. Blend MC means with `current_yield` (`YIELD_BLEND_WEIGHT`).
-5. Apply intervention uplift registry (e.g. `shade_trees` → +0.35 t/ha) for sensible demo magnitudes without a trained checkpoint.
+5. Mechanistic intervention registry adjusts temperature/VPD/soil moisture channels where configured.
 6. Compute avoided loss, USD impact, and 5th/95th percentile CI on per-sample avoided tonnes.
+
+#### `POST /simulate-scenario`
+
+Runs the same intervention machinery as `/simulate-intervention`, but replaces resolved ERA5 with a **delta-change** daily stack built by [`ScenarioBuilder`](src/counterfactual/cmip6_scenarios.py): monthly CMIP6 anomalies vs historical ERA5 (temperature/humidity additive; precipitation/radiation/wind multiplicative), then recomputed VPD / ET0 / CWD / agronomic indices.
+
+**Extra request fields:** `scenario` (`ssp245` \| `ssp585`) and `horizon_year` (`2030` \| `2050` \| `2080`). The horizon selects the CMIP6 climatology window used for those monthly deltas; `CLIMATE_REFERENCE_YEAR` still picks which calendar year is sliced from the adjusted ERA5 timeline for the surrogate.
+
+**Response:** `baseline_yield_tonnes_per_ha` and `projected_yield_tonnes_per_ha` each expose `mean`, `p10`, and `p90` from paired Monte Carlo forwards; `avoided_loss_tonnes` uses per-sample `max(projected − baseline, 0) × farm_size_ha`; `financial_impact_usd_mean` multiplies the **mean** avoided tonnes by `cocoa_price_usd`.
+
+Requires existing directories at `ERA5_ZARR_PATH` and `CMIP6_ZARR_PATH` (see `.env.example`).
 
 ---
 
@@ -453,6 +466,21 @@ uvicorn api.main:app --reload
 POST /simulate-intervention  →  JSON for UI charts and copy
 ```
 
+### Workflow D — Future-scenario simulation (CMIP6-adjusted ERA5)
+
+Export or build:
+
+1. Historical ERA5-Land Zarr at `ERA5_ZARR_PATH` (same schema as the API resolver).
+2. CMIP6 ensemble Zarr at `CMIP6_ZARR_PATH` with dims including `scenario`, `model`, `time`, and lat/lon — produced by [`cmip6_ingest`](src/data/cmip6_ingest.py) / NASA `NASA/GDDP-CMIP6` workflow.
+
+Then:
+
+```text
+POST /simulate-scenario
+```
+
+Body matches `/simulate-intervention` plus `scenario` (`ssp245` \| `ssp585`) and `horizon_year` (`2030` \| `2050` \| `2080`). The API applies [`ScenarioBuilder`](src/counterfactual/cmip6_scenarios.py) and returns mean / p10 / p90 yield bands plus avoided tonnes vs the SSP-conditioned baseline.
+
 ---
 
 ## Testing
@@ -460,7 +488,7 @@ POST /simulate-intervention  →  JSON for UI charts and copy
 ```bash
 source .venv/bin/activate
 pytest                    # full suite
-pytest tests/test_api_simulate.py -v
+pytest tests/test_api_simulate.py tests/test_api_scenario.py -v
 pytest --cov=src          # with coverage (dev extra)
 ```
 
@@ -476,6 +504,7 @@ pytest --cov=src          # with coverage (dev extra)
 | `test_did_impact.py` | DiD ATT + revenue |
 | `test_api.py` | `/health` |
 | `test_api_simulate.py` | `/simulate-intervention` validation + happy path |
+| `test_api_scenario.py` | `/simulate-scenario` with mocked `ScenarioBuilder` + path validation |
 
 **Note:** API tests use `with TestClient(app) as client:` so FastAPI **lifespan** runs and `app.state.yield_model` is initialized.
 
