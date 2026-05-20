@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from data.cocoa_exposure import DEFAULT_THRESHOLD
+from models.cqr import DEFAULT_CQR_CALIBRATOR, DEFAULT_CQR_CHECKPOINT
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+
+UQMethod = Literal["mcd", "cqr"]
 
 
 class APISettings(BaseSettings):
@@ -48,3 +52,18 @@ class APISettings(BaseSettings):
     galileo_embedding_dim: int = 128
 
     conformal_json_path: Path = _REPO_ROOT / "models" / "conformal.json"
+
+    uq_method: UQMethod = Field(
+        default="cqr",
+        description="Primary UQ: cqr (conformalized quantile regression) or mcd (MC dropout)",
+    )
+    cqr_checkpoint_path: Path = DEFAULT_CQR_CHECKPOINT
+    cqr_calibrator_path: Path = DEFAULT_CQR_CALIBRATOR
+
+    def resolved_uq_method(self) -> UQMethod:
+        """Use CQR when calibrator exists; otherwise fall back to MCD."""
+        if self.uq_method == "cqr" and self.cqr_calibrator_path.is_file():
+            return "cqr"
+        if self.uq_method == "cqr" and not self.cqr_calibrator_path.is_file():
+            return "mcd"
+        return self.uq_method

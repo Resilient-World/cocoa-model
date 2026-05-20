@@ -29,6 +29,7 @@ dependencies = [
     "mlflow>=2.10",
     "dvc>=3.0",
     "scikit-learn>=1.3",  # HistGradientBoosting + early stopping (PSM/DML)
+    "joblib>=1.3",
     "pandas>=2.1",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",

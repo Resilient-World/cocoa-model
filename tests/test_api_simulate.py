@@ -96,6 +96,7 @@ def test_simulate_intervention_happy_path(client: TestClient) -> None:
     assert data["financial_impact"]["xof"]["currency"] == "XOF"
     assert ci["level"] == 0.9
     assert ci["lower"] <= avoided <= ci["upper"]
+    assert data["confidence_interval"]["method"] in ("mcd", "cqr")
 
 
 def test_shade_trees_intervention_response_schema(client: TestClient) -> None:

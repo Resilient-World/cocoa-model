@@ -30,11 +30,15 @@ from api.schemas import (
 from counterfactual.cmip6_scenarios import ScenarioBuilder
 from hazards import apply_biotic_losses
 from hazards.black_pod import ShadeSpecies
+from models.cqr import ConformalCalibrator, QuantileYieldSurrogate
 from models.yield_surrogate import CLIMATE_IDX, YieldSurrogateModel
 
 if TYPE_CHECKING:
     from api.feature_resolver import FarmFeatureResolver
+    from api.schemas import UQMethod
     from models.conformal import ConformalPredictor
+else:
+    from api.schemas import UQMethod
 
 logger = logging.getLogger(__name__)
 
@@ -233,6 +237,66 @@ def _mean_p10_p90(samples: np.ndarray) -> tuple[float, float, float]:
     )
 
 
+def _mcd_avoided_loss_interval(
+    samples_cf: Tensor,
+    samples_factual: Tensor,
+    farm_size_ha: float,
+) -> tuple[float, float]:
+    """90% interval from paired MC yield samples (5th–95th percentile on avoided tonnes)."""
+    delta_per_ha = (samples_factual - samples_cf).cpu().numpy()
+    avoided_per_ha = np.maximum(delta_per_ha, 0.0)
+    avoided_loss_samples = avoided_per_ha * farm_size_ha
+    return (
+        float(np.percentile(avoided_loss_samples, 5.0)),
+        float(np.percentile(avoided_loss_samples, 95.0)),
+    )
+
+
+@torch.no_grad()
+def _simulate_cqr(
+    cqr_model: QuantileYieldSurrogate,
+    calibrator: ConformalCalibrator,
+    climate_cf: Tensor,
+    static_cf: Tensor,
+    climate_factual: Tensor,
+    static_factual: Tensor,
+    *,
+    biotic_cf: float,
+    biotic_factual: float,
+    farm_size_ha: float,
+    current_yield: float,
+    yield_blend_weight: float,
+) -> tuple[float, float, float, float, float | None]:
+    """
+    CQR yield intervals for baseline vs projected and conservative avoided-loss bounds.
+
+    Returns
+    -------
+    baseline_yield, projected_yield, ci_lower, ci_upper, empirical_coverage
+    """
+    base_iv = calibrator.predict_interval(cqr_model, (climate_cf, static_cf))
+    fact_iv = calibrator.predict_interval(cqr_model, (climate_factual, static_factual))
+
+    baseline_yield = _blend_yield(base_iv.median * biotic_cf, current_yield, yield_blend_weight)
+    projected_yield = _blend_yield(fact_iv.median * biotic_factual, current_yield, yield_blend_weight)
+
+    ci_lower = max(
+        0.0,
+        (fact_iv.lower * biotic_factual - base_iv.upper * biotic_cf) * farm_size_ha,
+    )
+    ci_upper = max(
+        0.0,
+        (fact_iv.upper * biotic_factual - base_iv.lower * biotic_cf) * farm_size_ha,
+    )
+    return (
+        baseline_yield,
+        projected_yield,
+        ci_lower,
+        ci_upper,
+        calibrator.empirical_coverage,
+    )
+
+
 def simulate_intervention(
     request: SimulateInterventionRequest,
     model: YieldSurrogateModel,
@@ -242,6 +306,9 @@ def simulate_intervention(
     yield_blend_weight: float = 0.0,
     climate_year: int | None = None,
     conformal: ConformalPredictor | None = None,
+    uq_method: UQMethod = "mcd",
+    cqr_model: QuantileYieldSurrogate | None = None,
+    cqr_calibrator: ConformalCalibrator | None = None,
 ) -> SimulateInterventionResponse:
     """
     Predict counterfactual vs factual yield and compute avoided loss + financial impact.
@@ -272,8 +339,17 @@ def simulate_intervention(
     climate_cf = climate_base
     climate_factual = _apply_intervention_climate(climate_base, request.intervention_type)
 
-    samples_cf = predict_yield_samples(model, climate_cf, static_cf, num_samples)
-    samples_factual = predict_yield_samples(model, climate_factual, static_factual, num_samples)
+    use_cqr = (
+        uq_method == "cqr"
+        and cqr_model is not None
+        and cqr_calibrator is not None
+    )
+
+    samples_cf: Tensor | None = None
+    samples_factual: Tensor | None = None
+    if not use_cqr:
+        samples_cf = predict_yield_samples(model, climate_cf, static_cf, num_samples)
+        samples_factual = predict_yield_samples(model, climate_factual, static_factual, num_samples)
 
     ds_cf = _climate_tensor_to_dataset(climate_cf, year)
     ds_factual = _climate_tensor_to_dataset(climate_factual, year)
@@ -287,23 +363,42 @@ def simulate_intervention(
         ds_factual,
         _biotic_static_features(request.intervention_type),
     )
-    samples_cf = samples_cf * biotic_cf["surviving_fraction"]
-    samples_factual = samples_factual * biotic_factual["surviving_fraction"]
+    biotic_cf_frac = float(biotic_cf["surviving_fraction"])
+    biotic_fact_frac = float(biotic_factual["surviving_fraction"])
 
-    mc_baseline = float(samples_cf.mean().item())
-    mc_projected_raw = float(samples_factual.mean().item())
+    empirical_coverage: float | None = None
+    if use_cqr:
+        baseline_yield, projected_yield, ci_lower, ci_upper, empirical_coverage = _simulate_cqr(
+            cqr_model,
+            cqr_calibrator,
+            climate_cf,
+            static_cf,
+            climate_factual,
+            static_factual,
+            biotic_cf=biotic_cf_frac,
+            biotic_factual=biotic_fact_frac,
+            farm_size_ha=request.farm_size_ha,
+            current_yield=request.current_yield,
+            yield_blend_weight=yield_blend_weight,
+        )
+    else:
+        assert samples_cf is not None and samples_factual is not None
+        samples_cf = samples_cf * biotic_cf_frac
+        samples_factual = samples_factual * biotic_fact_frac
 
-    baseline_yield = _blend_yield(mc_baseline, request.current_yield, yield_blend_weight)
-    projected_yield = _blend_yield(mc_projected_raw, request.current_yield, yield_blend_weight)
+        mc_baseline = float(samples_cf.mean().item())
+        mc_projected_raw = float(samples_factual.mean().item())
 
-    delta_per_ha_samples = (samples_factual - samples_cf).cpu().numpy()
-    avoided_per_ha_samples = np.maximum(delta_per_ha_samples, 0.0)
-    avoided_loss_samples = avoided_per_ha_samples * request.farm_size_ha
+        baseline_yield = _blend_yield(mc_baseline, request.current_yield, yield_blend_weight)
+        projected_yield = _blend_yield(mc_projected_raw, request.current_yield, yield_blend_weight)
+
+        ci_lower, ci_upper = _mcd_avoided_loss_interval(
+            samples_cf,
+            samples_factual,
+            request.farm_size_ha,
+        )
 
     avoided_loss_tonnes = max(0.0, (projected_yield - baseline_yield) * request.farm_size_ha)
-
-    ci_lower = float(np.percentile(avoided_loss_samples, 5.0))
-    ci_upper = float(np.percentile(avoided_loss_samples, 95.0))
 
     fin = calculate_financial_impact(
         avoided_loss_tonnes,
@@ -359,6 +454,8 @@ def simulate_intervention(
                 upper=ci_upper,
                 level=0.9,
             ),
+            method="cqr" if use_cqr else "mcd",
+            empirical_coverage=empirical_coverage,
         ),
         conformal_interval=conformal_block,
         biotic_loss_attribution={

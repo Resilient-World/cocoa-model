@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException
 import pandas as pd
 
 from api.config import APISettings
+from api.cqr_loader import load_cqr_bundle
 from api.feature_resolver import build_resolver_from_settings
 from api.model_loader import load_yield_model
 from api.schemas import (
@@ -45,6 +46,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings=settings,
     )
     app.state.conformal = load_conformal_if_exists(settings.conformal_json_path)
+    cqr_model, cqr_calibrator = load_cqr_bundle(settings)
+    app.state.cqr_model = cqr_model
+    app.state.cqr_calibrator = cqr_calibrator
     yield
 
 
@@ -85,6 +89,9 @@ def simulate_intervention_endpoint(
             yield_blend_weight=settings.yield_blend_weight,
             climate_year=settings.climate_reference_year,
             conformal=getattr(app.state, "conformal", None),
+            uq_method=settings.resolved_uq_method(),
+            cqr_model=getattr(app.state, "cqr_model", None),
+            cqr_calibrator=getattr(app.state, "cqr_calibrator", None),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
