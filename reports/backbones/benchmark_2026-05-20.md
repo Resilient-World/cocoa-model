@@ -6,9 +6,10 @@ Held-out metric leader (untrained run): **FDP-only (2025a prior)** (mIoU=0.864).
 
 | Backbone | mIoU | F1 | Boundary IoU | Latency (ms/tile) | Params (M) |
 |----------|------|-----|--------------|-------------------|------------|
-| FDP-only (2025a prior) | 0.864 | 0.927 | 0.127 | 0.1 | 0.0 |
-| Galileo-Base + seg head | 0.000 | 0.000 | 0.000 | 3701.6 | 0.0 |
-| Prithvi-EO-2.0 (6-band proxy) | 0.000 | 0.000 | 0.000 | 1.0 | 0.0 |
+| AlphaEarth Foundations (AEF) | 0.864 | 0.927 | 0.127 | 0.2 | 0.0 |
+| Galileo-Base + seg head | 0.000 | 0.000 | 0.000 | 1187.5 | 1.1 |
+| FDP-only (2025a prior) | 0.864 | 0.927 | 0.127 | 0.0 | 0.0 |
+| Prithvi-EO-2.0 (6-band proxy) | 0.864 | 0.927 | 0.127 | 0.5 | 0.0 |
 
 > Without ``models/galileo_cocoa_seg.pt``, Galileo mIoU reflects random head weights. Re-run after ``python -m training.train_galileo_cocoa`` for held-out parity.
 

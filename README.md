@@ -266,18 +266,20 @@ Configure defaults via `.env` (`COCOA_EXPOSURE_YEAR`, `COCOA_EXPOSURE_THRESHOLD`
 Segmentation backbones are compared on a **5000-tile held-out** set over Côte d'Ivoire and Ghana with Kalischek et al. (2023) in-situ labels. Run:
 
 ```bash
-python scripts/benchmark_backbones.py --n-tiles 5000
+python scripts/benchmark_backbones.py --n-tiles 5000   # full held-out (overnight)
+python scripts/benchmark_backbones.py --quick          # 200 tiles, Galileo-nano (~5 min)
 ```
 
-Latest report: [`reports/backbones/benchmark_2026-05-20.md`](reports/backbones/benchmark_2026-05-20.md).
+Latest reports: [`reports/backbones/benchmark_aef_<date>.md`](reports/backbones/) (mean error + mIoU/F1) and legacy [`benchmark_<date>.md`](reports/backbones/).
 
 | Role | Backbone | Notes |
 |------|----------|--------|
+| **Production (candidate)** | **AlphaEarth Foundations (AEF)** + MLP head | GEE `GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL` 64-D annual embeddings (arXiv:2507.22291); near-zero inference via [`alphaearth_embeddings.py`](src/data/alphaearth_embeddings.py) + [`aef_cocoa_head.py`](src/models/aef_cocoa_head.py) |
 | **Production (active)** | **Galileo-Base** + binary seg head | Multimodal S2×10, S1 VV/VH, ERA5 monthly (5 vars → Galileo time bands), DEM; 10 m `P(cocoa)` via [`galileo_seg.py`](src/models/galileo_seg.py) |
 | **Prior (weak supervision)** | FDP 2025a | GEE `model_2025a`; threshold 0.96 |
 | **Baseline** | Prithvi-EO-2.0 | TerraTorch `prithvi_eo_v2_100_tl` (6-band stem in benchmark when full checkpoint absent) |
 
-**Exposure API:** `CocoaExposureIngest(..., backend="fdp" | "galileo" | "ensemble")`. Ensemble blends `0.5 × FDP_prob + 0.5 × Galileo_prob` at each point. Default ingest remains `fdp`; set `backend="galileo"` or `"ensemble"` for refined exposure. Fine-tune weights: `models/galileo_cocoa_seg.pt` (`python -m training.train_galileo_cocoa`).
+**Exposure API:** `CocoaExposureIngest(..., backend="fdp" | "galileo" | "aef" | "ensemble")`. Ensemble default: `0.5 × AEF + 0.3 × Galileo + 0.2 × FDP`. Default ingest remains `fdp`; set `backend="aef"`, `"galileo"`, or `"ensemble"` for refined exposure. Checkpoints: `models/aef_cocoa_head.pt` (`python scripts/train_aef_head.py`), `models/galileo_cocoa_seg.pt` (`python -m training.train_galileo_cocoa`).
 
 **ERA5 outputs (per pixel, per year):**
 
