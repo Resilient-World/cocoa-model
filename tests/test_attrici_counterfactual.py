@@ -1,74 +1,91 @@
-"""Tests for ISIMIP3a delta counterfactual adjustment."""
+"""Tests for ATTRICI-style counterfactual climate (Mengel et al. 2021)."""
 
 from __future__ import annotations
-
-import os
 
 import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
 
-from data.attrici_counterfactual import compute_counterfactual_delta
+from data.attrici_counterfactual import (
+    ATTRICICounterfactual,
+    hazard_return_period_shift,
+    recompute_derived_counterfactuals,
+)
 
 
-def _toy_grid(name: str, value: float, n_days: int = 30) -> xr.Dataset:
-    time = pd.date_range("2010-01-01", periods=n_days, freq="D")
-    lat = np.array([6.0, 6.5, 7.0])
-    lon = np.array([-5.0, -4.5, -4.0])
-    shape = (n_days, len(lat), len(lon))
-    return xr.Dataset(
-        {name: (("time", "lat", "lon"), np.full(shape, value))},
-        coords={"time": time, "lat": lat, "lon": lon},
+def _synthetic_warming_dataset(n_years: int = 40, seed: int = 0) -> tuple[xr.Dataset, pd.Series]:
+    rng = np.random.default_rng(seed)
+    days = pd.date_range("1980-01-01", periods=n_years * 365, freq="D")
+    years = days.year.to_numpy()
+    gmt_annual = pd.Series(
+        np.linspace(0.0, 1.5, n_years),
+        index=range(1980, 1980 + n_years),
+        name="gmt",
     )
-
-
-def test_delta_zero_when_obsclim_equals_counterclim() -> None:
-    factual = _toy_grid("tas", 27.0)
-    obsclim = _toy_grid("tas", 27.0)
-    counterclim = _toy_grid("tas", 27.0)
-    cf = compute_counterfactual_delta(factual, obsclim, counterclim, skip_regrid=True)
-    np.testing.assert_allclose(cf["tas"].values, factual["tas"].values)
-
-
-def test_delta_subtracts_warming_signal() -> None:
-    # Factual ERA5 is 28C; ISIMIP obsclim 27C, counterclim 26C.
-    # Warming signal = 1C -> counterfactual should be 27C.
-    factual = _toy_grid("tas", 28.0)
-    obsclim = _toy_grid("tas", 27.0)
-    counterclim = _toy_grid("tas", 26.0)
-    cf = compute_counterfactual_delta(factual, obsclim, counterclim, skip_regrid=True)
-    np.testing.assert_allclose(cf["tas"].values, 27.0)
-
-
-def test_precip_delta_preserves_nonnegative() -> None:
-    factual = _toy_grid("pr", 5.0)
-    obsclim = _toy_grid("pr", 3.0)
-    counterclim = _toy_grid("pr", 4.0)
-    cf = compute_counterfactual_delta(
-        factual,
-        obsclim,
-        counterclim,
-        skip_regrid=True,
-        clip_precip=True,
+    gmt_daily = gmt_annual.reindex(years).to_numpy()
+    doy = days.dayofyear.to_numpy()
+    seasonal = 26 + 4 * np.sin(2 * np.pi * (doy - 80) / 365)
+    tmax = seasonal + 1.2 * gmt_daily + rng.normal(0, 1.0, len(days))
+    precip = np.maximum(0, rng.gamma(0.5, 4, len(days)) - 0.2 * gmt_daily)
+    ds = xr.Dataset(
+        {
+            "tmax": (("time", "lat", "lon"), tmax[:, None, None]),
+            "precip": (("time", "lat", "lon"), precip[:, None, None]),
+        },
+        coords={"time": days, "lat": [6.5], "lon": [-1.2]},
     )
-    assert (cf["pr"].values >= 0).all()
+    return ds, gmt_annual
+
+
+def test_counterfactual_removes_trend_in_tmax() -> None:
+    ds, gmt = _synthetic_warming_dataset()
+    cf = ATTRICICounterfactual(gmt, variables=("tmax", "precip"), mode="fast").fit_transform(ds)
+    fac_trend = np.polyfit(np.arange(len(ds.time)), ds["tmax"].values.ravel(), 1)[0]
+    cf_trend = np.polyfit(np.arange(len(cf.time)), cf["tmax_cf"].values.ravel(), 1)[0]
+    assert abs(cf_trend) < 0.3 * abs(fac_trend)
+
+
+def test_precip_counterfactual_nonnegative() -> None:
+    ds, gmt = _synthetic_warming_dataset()
+    cf = ATTRICICounterfactual(gmt, variables=("tmax", "precip"), mode="fast").fit_transform(ds)
+    assert float(cf["precip_cf"].min()) >= 0.0
+
+
+def test_return_period_shift_detects_warming() -> None:
+    ds, gmt = _synthetic_warming_dataset()
+    cf = ATTRICICounterfactual(gmt, variables=("tmax",), mode="fast").fit_transform(ds)
+    combined = xr.merge([ds, cf])
+    out = hazard_return_period_shift(combined, variable="tmax", threshold=32.0, direction="above")
+    # Factual climate should have higher exceedance probability than counterfactual
+    assert float(out["p_factual"].mean()) > float(out["p_counterfactual"].mean())
+    assert float(out["far"].mean()) > 0.0
+
+
+def test_recompute_derived_skips_when_inputs_missing() -> None:
+    ds, gmt = _synthetic_warming_dataset()
+    cf = ATTRICICounterfactual(gmt, variables=("tmax",), mode="fast").fit_transform(ds)
+    out = recompute_derived_counterfactuals(cf)
+    # No tmin/rh/srad/wind -> derived vars should not be added
+    assert "et0_cf" not in out.data_vars
+    assert "vpd_mean_cf" not in out.data_vars
+
+
+def test_bayesian_mode_requires_attrici_or_raises() -> None:
+    ds, gmt = _synthetic_warming_dataset(n_years=5)
+    try:
+        import attrici  # noqa: F401
+
+        pytest.skip("attrici installed; bayesian path executes")
+    except ImportError:
+        with pytest.raises(NotImplementedError):
+            ATTRICICounterfactual(gmt, mode="bayesian").fit_transform(ds)
 
 
 @pytest.mark.integration
-def test_isimip_download_small_region() -> None:
-    if not os.getenv("ISIMIP_INTEGRATION"):
-        pytest.skip("set ISIMIP_INTEGRATION=1 to run network test")
+def test_load_gistemp_loti_returns_smoothed_series() -> None:
+    from data.attrici_counterfactual import load_gistemp_loti
 
-    from data.attrici_counterfactual import ISIMIPCounterfactualLoader
-
-    loader = ISIMIPCounterfactualLoader(
-        bbox=(-5.6, 6.7, -5.4, 6.9),
-        start="2015-01-01",
-        end="2015-01-31",
-        variables=["tas"],
-    )
-    obs = loader.load("obsclim")
-    cf = loader.load("counterclim")
-    assert "tas" in obs.data_vars and "tas" in cf.data_vars
-    assert obs.sizes["time"] >= 28
+    s = load_gistemp_loti(start_year=1950, smooth_window=21)
+    assert s.index.min() >= 1950
+    assert s.is_monotonic_increasing or s.diff().abs().mean() < 0.1

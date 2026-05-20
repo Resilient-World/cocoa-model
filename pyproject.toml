@@ -62,9 +62,6 @@ dev = [
 # ATTRICI is GPLv3 — subprocess-only in src/; install for integration tests only
 attrici = [
     "attrici>=1.1",
-    "netCDF4>=1.6",
-    "xarray>=2024.1",
-    "zarr>=2.17",
 ]
 # Fields of The World parcel delineation (subprocess CLI boundary)
 ftw = [
