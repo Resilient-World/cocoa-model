@@ -1,0 +1,21 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "name": "West Africa cocoa belt (placeholder AOI)" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-8.5, 4.0],
+            [-2.5, 4.0],
+            [-2.5, 8.5],
+            [-8.5, 8.5],
+            [-8.5, 4.0]
+          ]
+        ]
+      }
+    }
+  ]
+}

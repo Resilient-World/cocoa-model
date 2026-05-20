@@ -247,6 +247,7 @@ class SplitConformalYield:
     epsilon: float = DEFAULT_EPSILON
     num_mc_samples: int = DEFAULT_NUM_MC_SAMPLES
     coverage_target: float = field(init=False)
+    validation: dict[str, float] | None = None
 
     def __post_init__(self) -> None:
         self.coverage_target = 1.0 - self.alpha
@@ -274,14 +275,24 @@ class SplitConformalYield:
             epsilon=eps,
             device=device,
         )
-        self.quantile = conformal_quantile(scores, alpha)
+        n = scores.size
+        split = max(1, int(0.8 * n))
+        train_scores = scores[:split]
+        holdout_scores = scores[split:] if split < n else scores
+        self.quantile = conformal_quantile(train_scores, alpha)
+        empirical = float(np.mean(holdout_scores <= self.quantile)) if holdout_scores.size else 1.0
+        self.validation = {
+            "empirical_coverage": empirical,
+            "nominal_coverage": self.coverage_target,
+            "n_holdout": float(holdout_scores.size),
+        }
         self.num_mc_samples = mc
         self.epsilon = eps
         logger.info(
-            "Split conformal calibrated: n=%d, q_hat=%.4f, target coverage=%.0f%%",
+            "Split conformal calibrated: n=%d, q_hat=%.4f, holdout coverage=%.3f",
             scores.size,
             self.quantile,
-            self.coverage_target * 100,
+            empirical,
         )
         return self
 
@@ -318,7 +329,7 @@ class SplitConformalYield:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "kind": "split",
             "quantile": self.quantile,
             "alpha": self.alpha,
@@ -326,6 +337,9 @@ class SplitConformalYield:
             "num_mc_samples": self.num_mc_samples,
             "coverage_target": self.coverage_target,
         }
+        if self.validation is not None:
+            payload["validation"] = self.validation
+        return payload
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SplitConformalYield:
@@ -336,6 +350,7 @@ class SplitConformalYield:
             num_mc_samples=int(data.get("num_mc_samples", DEFAULT_NUM_MC_SAMPLES)),
         )
         obj.coverage_target = float(data.get("coverage_target", 1.0 - obj.alpha))
+        obj.validation = data.get("validation")
         return obj
 
 
@@ -351,6 +366,7 @@ class MondrianConformalYield:
     epsilon: float = DEFAULT_EPSILON
     num_mc_samples: int = DEFAULT_NUM_MC_SAMPLES
     coverage_target: float = field(init=False)
+    validation: dict[str, float] | None = None
 
     def __post_init__(self) -> None:
         self.coverage_target = 1.0 - self.alpha
@@ -403,6 +419,15 @@ class MondrianConformalYield:
                     len(zone_scores),
                 )
 
+        split = max(1, int(0.8 * scores.size))
+        holdout_scores = scores[split:] if split < scores.size else scores
+        q_global = self.fallback_quantile
+        empirical = float(np.mean(holdout_scores <= q_global)) if holdout_scores.size else 1.0
+        self.validation = {
+            "empirical_coverage": empirical,
+            "nominal_coverage": self.coverage_target,
+            "n_holdout": float(holdout_scores.size),
+        }
         self.num_mc_samples = mc
         self.epsilon = eps
         return self
@@ -454,7 +479,7 @@ class MondrianConformalYield:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "kind": "mondrian",
             "zone_quantiles": self.zone_quantiles,
             "fallback_quantile": self.fallback_quantile,
@@ -463,6 +488,9 @@ class MondrianConformalYield:
             "num_mc_samples": self.num_mc_samples,
             "coverage_target": self.coverage_target,
         }
+        if self.validation is not None:
+            payload["validation"] = self.validation
+        return payload
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> MondrianConformalYield:
@@ -474,6 +502,7 @@ class MondrianConformalYield:
             num_mc_samples=int(data.get("num_mc_samples", DEFAULT_NUM_MC_SAMPLES)),
         )
         obj.coverage_target = float(data.get("coverage_target", 1.0 - obj.alpha))
+        obj.validation = data.get("validation")
         return obj
 
 

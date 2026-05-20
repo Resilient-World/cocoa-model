@@ -317,8 +317,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--output",
+        "--out",
         type=Path,
         default=None,
+        dest="output",
         help="Local GeoTIFF path when --export local",
     )
     parser.add_argument(
@@ -342,6 +344,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
+    if args.output is not None and args.export != "local":
+        args.export = "local"
     try:
         result = run_sentinel_export(
             export=args.export,

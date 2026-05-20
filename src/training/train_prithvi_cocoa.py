@@ -88,8 +88,20 @@ def build_prithvi_model_args(
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Fine-tune Prithvi for cocoa segmentation")
-    parser.add_argument("--image-paths", type=Path, default=Path("data/processed/images"))
-    parser.add_argument("--mask-paths", type=Path, default=Path("data/processed/masks"))
+    parser.add_argument(
+        "--image-paths",
+        "--image-dir",
+        type=Path,
+        default=Path("data/processed/images"),
+        dest="image_paths",
+    )
+    parser.add_argument(
+        "--mask-paths",
+        "--mask-dir",
+        type=Path,
+        default=Path("data/processed/masks"),
+        dest="mask_paths",
+    )
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--patch-size", type=int, default=224)
     parser.add_argument("--epochs", type=int, default=50)
@@ -119,7 +131,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--mlflow-tracking-uri", type=str, default=None)
     parser.add_argument("--mlflow-experiment", type=str, default="resilient-cocoa-model")
     parser.add_argument("--mlflow-run-name", type=str, default="prithvi-cocoa-seg")
-    parser.add_argument("--checkpoint-dir", type=Path, default=Path("models/checkpoints"))
+    parser.add_argument(
+        "--checkpoint-dir",
+        type=Path,
+        default=Path("models/checkpoints"),
+        help="Directory for Lightning checkpoints",
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="Copy best checkpoint to this path (e.g. models/segmentation.ckpt)",
+    )
     parser.add_argument("--no-pretrained", action="store_true")
     return parser.parse_args(argv)
 
@@ -230,7 +253,14 @@ def main(argv: list[str] | None = None) -> int:
     trainer.fit(task, datamodule=datamodule)
     trainer.test(task, datamodule=datamodule)
 
-    print(f"Best checkpoint: {checkpoint_callback.best_model_path}")
+    best_path = checkpoint_callback.best_model_path
+    print(f"Best checkpoint: {best_path}")
+    if args.out is not None and best_path:
+        import shutil
+
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(best_path, args.out)
+        print(f"Copied best checkpoint to {args.out}")
     return 0
 
 
