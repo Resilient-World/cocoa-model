@@ -44,6 +44,8 @@ logger = logging.getLogger(__name__)
 DEFAULT_REPORT_DIR = _REPO_ROOT / "reports" / "backbones"
 DEFAULT_GALILEO_CKPT = _REPO_ROOT / "models" / "galileo_cocoa_seg.pt"
 DEFAULT_AEF_CKPT = _REPO_ROOT / "models" / "aef_cocoa_head.pt"
+DEFAULT_AGRIFM_CKPT = _REPO_ROOT / "models" / "agrifm" / "agrifm_s2_pretrained.pt"
+BACKBONE_CHOICES = ("prithvi", "galileo", "aef", "fdp", "agrifm", "all")
 TILE_SIZE = 64
 TIME_STEPS = 4
 PREDICTION_THRESHOLD = 0.5
@@ -222,6 +224,42 @@ class AEFHeadPredictor:
         emb /= np.linalg.norm(emb) + 1e-8
         prob = float(self.head.predict_proba(torch.from_numpy(emb).unsqueeze(0)).item())
         return np.full((TILE_SIZE, TILE_SIZE), prob, dtype=np.float32)
+
+
+class AgriFMPredictor:
+    """AgriFM Video Swin + versatile decoder (S2 10-band temporal stack)."""
+
+    name = "AgriFM (Video Swin)"
+
+    def __init__(self, checkpoint: Path, *, out_size: int = TILE_SIZE) -> None:
+        from models.agrifm_seg import AgriFMCocoaSegmentation
+
+        self._has_checkpoint = checkpoint.is_file()
+        if self._has_checkpoint:
+            logger.info("Loading AgriFM backbone weights from %s", checkpoint)
+        else:
+            logger.warning("AgriFM checkpoint missing; benchmarking uninitialized weights")
+        self.model = AgriFMCocoaSegmentation(
+            checkpoint_path=checkpoint,
+            out_size=(out_size, out_size),
+            freeze_backbone=True,
+        )
+        self.model.eval()
+        _ = self.predict_tile(build_tile_batch(6.0, -4.0, seed=0))
+        self._params_m = count_params_millions(self.model)
+
+    @property
+    def params_millions(self) -> float:
+        return self._params_m
+
+    @torch.no_grad()
+    def predict_tile(self, batch_dict: dict[str, torch.Tensor]) -> np.ndarray:
+        s2 = batch_dict["s2"]
+        if s2.shape[2] < 3:
+            pad_t = 3 - s2.shape[2]
+            last = s2[:, -1:].expand(-1, pad_t, -1, -1, -1)
+            s2 = torch.cat([s2, last], dim=1)
+        return self.model.predict_proba_numpy(s2)
 
 
 class PrithviProxyPredictor:
@@ -503,6 +541,95 @@ def write_aef_benchmark_report(
     return path
 
 
+def write_agrifm_benchmark_report(
+    results: list[BackboneResult],
+    path: Path,
+    *,
+    region: str | None = None,
+    agrifm_checkpoint_present: bool = False,
+) -> Path:
+    """AgriFM benchmark report with mean error, mIoU, F1, and boundary IoU."""
+    by_me = min(results, key=lambda r: r.mean_error)
+    by_miou = max(results, key=lambda r: (r.miou, r.f1, -r.latency_ms_median))
+    region_label = (
+        COCOA_REGIONS[region].display_name
+        if region and region in COCOA_REGIONS
+        else "all FDP regions"
+    )
+    lines = [
+        f"# Cocoa backbone benchmark — AgriFM, {region_label} ({date.today().isoformat()})",
+        "",
+        f"Held-out spatial tiles over **{region_label}** vs Kalischek et al. "
+        "(2023) in-situ reference. AgriFM (Li et al., RSE 2026; arXiv:2505.21357) "
+        "uses a Video Swin Transformer with synchronized spatiotemporal downsampling "
+        "on Sentinel-2 10-band stacks.",
+        "",
+        f"**Lowest mean error:** {by_me.name} (MAE={by_me.mean_error:.3f}). "
+        f"**Best mIoU (this run):** {by_miou.name} (mIoU={by_miou.miou:.3f}).",
+        "",
+        "| Backbone | Mean error | mIoU | F1 | Boundary IoU | Latency (ms/tile) | Params (M) |",
+        "|----------|------------|------|-----|--------------|-------------------|------------|",
+    ]
+    for r in results:
+        lines.append(
+            f"| {r.name} | {r.mean_error:.3f} | {r.miou:.3f} | {r.f1:.3f} | {r.boundary_iou:.3f} | "
+            f"{r.latency_ms_median:.1f} | {r.params_millions:.1f} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Notes",
+            "",
+            "- **AgriFM** encoder: MIT reimplementation in :mod:`models.agrifm_video_swin`; "
+            "weights Apache-2.0 from `models/agrifm/agrifm_s2_pretrained.pt`.",
+            "- Download weights: `python scripts/download_agrifm_weights.py`.",
+            "- Temporal length auto-detected in ``[3, 32]`` frames; benchmark tiles use "
+            f"{TIME_STEPS} timesteps at {TILE_SIZE}×{TILE_SIZE} px.",
+            "",
+        ]
+    )
+    if not agrifm_checkpoint_present:
+        lines.append(
+            "> Without pretrained AgriFM weights, metrics reflect a random decoder head "
+            "(backbone may still load partial weights).\n"
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines), encoding="utf-8")
+    logger.info("AgriFM benchmark written to %s", path)
+    return path
+
+
+def _build_predictors(
+    backbones: frozenset[str],
+    *,
+    galileo_checkpoint: Path,
+    aef_checkpoint: Path,
+    agrifm_checkpoint: Path,
+    galileo_model_size: str,
+) -> list[TilePredictor]:
+    if backbones == frozenset({"all"}):
+        ref = HeuristicKalischekReference()
+        return [
+            AEFHeadPredictor(aef_checkpoint),
+            GalileoSegPredictor(galileo_checkpoint, model_size=galileo_model_size),
+            FDPOnlyPredictor(ref),
+            PrithviProxyPredictor(),
+        ]
+    ref = HeuristicKalischekReference()
+    predictors: list[TilePredictor] = []
+    if "aef" in backbones:
+        predictors.append(AEFHeadPredictor(aef_checkpoint))
+    if "galileo" in backbones:
+        predictors.append(GalileoSegPredictor(galileo_checkpoint, model_size=galileo_model_size))
+    if "fdp" in backbones:
+        predictors.append(FDPOnlyPredictor(ref))
+    if "prithvi" in backbones:
+        predictors.append(PrithviProxyPredictor())
+    if "agrifm" in backbones:
+        predictors.append(AgriFMPredictor(agrifm_checkpoint))
+    return predictors
+
+
 def run_benchmark(
     *,
     n_tiles: int = 5000,
@@ -510,52 +637,78 @@ def run_benchmark(
     region: str | None = None,
     galileo_checkpoint: Path = DEFAULT_GALILEO_CKPT,
     aef_checkpoint: Path = DEFAULT_AEF_CKPT,
+    agrifm_checkpoint: Path = DEFAULT_AGRIFM_CKPT,
     report_dir: Path = DEFAULT_REPORT_DIR,
     latest_out: Path | None = None,
     max_latency_tiles: int = 50,
     galileo_model_size: str = "base",
     write_legacy_report: bool = True,
+    backbones: frozenset[str] = frozenset({"all"}),
 ) -> Path:
     from data.cocoa_exposure import normalize_region_key
 
     region_key = normalize_region_key(region) if region else None
     lats, lons, labels = sample_holdout_tiles(n_tiles, seed=seed, region=region_key)
-    ref = HeuristicKalischekReference()
-    aef_predictor = AEFHeadPredictor(aef_checkpoint)
-    gal_predictor = GalileoSegPredictor(galileo_checkpoint, model_size=galileo_model_size)
-    predictors: list[TilePredictor] = [
-        aef_predictor,
-        gal_predictor,
-        FDPOnlyPredictor(ref),
-        PrithviProxyPredictor(),
-    ]
+    predictors = _build_predictors(
+        backbones,
+        galileo_checkpoint=galileo_checkpoint,
+        aef_checkpoint=aef_checkpoint,
+        agrifm_checkpoint=agrifm_checkpoint,
+        galileo_model_size=galileo_model_size,
+    )
     results = [
         evaluate_predictor(p, lats, lons, labels, max_latency_tiles=max_latency_tiles)
         for p in predictors
     ]
     today = date.today().isoformat()
     tag = region_key or "all"
-    aef_out = report_dir / f"benchmark_aef_{tag}_{today}.md"
-    write_aef_benchmark_report(
-        results,
-        aef_out,
-        region=region_key,
-        aef_checkpoint_present=aef_predictor._has_checkpoint,
-    )
-    if write_legacy_report:
-        legacy = report_dir / f"benchmark_{tag}_{today}.md"
-        write_benchmark_report(
+    primary_out = report_dir / f"benchmark_{tag}_{today}.md"
+
+    if backbones == frozenset({"agrifm"}):
+        agrifm_pred = predictors[0]
+        assert isinstance(agrifm_pred, AgriFMPredictor)
+        agrifm_out = report_dir / f"benchmark_agrifm_{tag}_{today}.md"
+        write_agrifm_benchmark_report(
             results,
-            legacy,
+            agrifm_out,
             region=region_key,
-            galileo_checkpoint_present=gal_predictor._has_checkpoint,
+            agrifm_checkpoint_present=agrifm_pred._has_checkpoint,
         )
+        primary_out = agrifm_out
+    elif "agrifm" in backbones and backbones != frozenset({"all"}):
+        agrifm_pred = next(p for p in predictors if isinstance(p, AgriFMPredictor))
+        write_agrifm_benchmark_report(
+            results,
+            report_dir / f"benchmark_agrifm_{tag}_{today}.md",
+            region=region_key,
+            agrifm_checkpoint_present=agrifm_pred._has_checkpoint,
+        )
+
+    if backbones == frozenset({"all"}):
+        aef_pred = next(p for p in predictors if isinstance(p, AEFHeadPredictor))
+        gal_pred = next(p for p in predictors if isinstance(p, GalileoSegPredictor))
+        aef_out = report_dir / f"benchmark_aef_{tag}_{today}.md"
+        write_aef_benchmark_report(
+            results,
+            aef_out,
+            region=region_key,
+            aef_checkpoint_present=aef_pred._has_checkpoint,
+        )
+        if write_legacy_report:
+            write_benchmark_report(
+                results,
+                primary_out,
+                region=region_key,
+                galileo_checkpoint_present=gal_pred._has_checkpoint,
+            )
+        primary_out = aef_out
+
     if latest_out is not None:
         latest_out = Path(latest_out)
         latest_out.parent.mkdir(parents=True, exist_ok=True)
-        latest_out.write_text(aef_out.read_text(encoding="utf-8"), encoding="utf-8")
+        latest_out.write_text(primary_out.read_text(encoding="utf-8"), encoding="utf-8")
         logger.info("Copied benchmark report → %s", latest_out)
-    return aef_out
+    return primary_out
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -564,6 +717,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--galileo-checkpoint", type=Path, default=DEFAULT_GALILEO_CKPT)
     parser.add_argument("--aef-checkpoint", type=Path, default=DEFAULT_AEF_CKPT)
+    parser.add_argument("--agrifm-checkpoint", type=Path, default=DEFAULT_AGRIFM_CKPT)
+    parser.add_argument(
+        "--backbone",
+        choices=BACKBONE_CHOICES,
+        default="all",
+        help="Backbone(s) to benchmark (default: all legacy predictors)",
+    )
     parser.add_argument("--report-dir", type=Path, default=DEFAULT_REPORT_DIR)
     parser.add_argument("--quick", action="store_true", help="Evaluate 200 tiles with Galileo nano")
     parser.add_argument("--galileo-size", choices=("nano", "tiny", "base"), default="base")
@@ -589,6 +749,8 @@ def main(argv: list[str] | None = None) -> int:
     n = 200 if args.quick else args.n_tiles
     gal_size = "nano" if args.quick else args.galileo_size
 
+    backbone_set = frozenset({args.backbone}) if args.backbone != "all" else frozenset({"all"})
+
     if args.all_regions:
         for key in sorted(COCOA_REGIONS.keys()):
             logger.info("Benchmarking region: %s", key)
@@ -598,9 +760,11 @@ def main(argv: list[str] | None = None) -> int:
                 region=key,
                 galileo_checkpoint=args.galileo_checkpoint,
                 aef_checkpoint=args.aef_checkpoint,
+                agrifm_checkpoint=args.agrifm_checkpoint,
                 report_dir=args.report_dir,
                 galileo_model_size=gal_size,
                 write_legacy_report=True,
+                backbones=backbone_set,
             )
     else:
         run_benchmark(
@@ -609,9 +773,11 @@ def main(argv: list[str] | None = None) -> int:
             region=args.region,
             galileo_checkpoint=args.galileo_checkpoint,
             aef_checkpoint=args.aef_checkpoint,
+            agrifm_checkpoint=args.agrifm_checkpoint,
             report_dir=args.report_dir,
             latest_out=args.latest_out,
             galileo_model_size=gal_size,
+            backbones=backbone_set,
         )
     return 0
 

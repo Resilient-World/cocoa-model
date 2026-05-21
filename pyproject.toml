@@ -24,6 +24,7 @@ dependencies = [
     "pytorch-lightning>=2.1",
     "huggingface_hub>=0.24",
     "einops>=0.7",
+    "timm>=1.0.11",
     "torchgeo>=0.5",
     "terratorch>=0.1",
     "mlflow>=2.10",
@@ -82,6 +83,8 @@ ftw = [
 galileo = [
     "galileo @ git+https://github.com/nasaharvest/galileo@main",
 ]
+# AgriFM Video Swin backbone (timm in core deps; weights via scripts/download_agrifm_weights.py)
+agrifm = []
 
 # Optional (Callaway-Sant'Anna upgrade — not pinned yet):
 # differences>=0.2.0
@@ -114,4 +117,5 @@ pythonpath = ["src"]
 markers = [
     "integration: tests that call Google Earth Engine (require credentials)",
     "slow: downloads Galileo weights or runs encoder forward pass",
+    "slow: AgriFM Video Swin forward (depth-18 stage)",
 ]
