@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- [`docs/TRAINING_RUNBOOK.md`](docs/TRAINING_RUNBOOK.md): full GPU/HPC checklist for exposure, yield, CQR, CASEJ, and avoided-loss API artifacts; notes on stopping incomplete laptop runs.
 - AgriFM (Video Swin) backbone (arXiv:2505.21357, RSE 2026): MIT reimplementation in `src/models/agrifm_*`, S2 weight download script, `--backbone agrifm` benchmark, and tests.
 - AgriFM cocoa fine-tuning (`training.train_agrifm_cocoa`, `models/agrifm_cocoa_seg.pt`) with BCE+Dice loss and hard-example mining.
 - Ensemble v2: per-region weights in `config/ensemble_weights.yaml`, `scripts/fit_ensemble_v2_weights.py`, and `benchmark_ensemble_v2_*` reports.

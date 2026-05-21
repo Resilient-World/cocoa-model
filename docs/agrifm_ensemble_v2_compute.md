@@ -1,6 +1,8 @@
 # AgriFM fine-tune and ensemble v2 — deferred GPU workflow
 
-The **code paths** for AgriFM cocoa fine-tuning, per-region ensemble v2 weights, and production `ensemble_v2` exposure are merged in this repository. The **artifacts** below are intentionally **not** checked in until you run training on a machine with sufficient compute (GPU strongly recommended; full grid search and 50-epoch fine-tune are impractical on CPU).
+> **Full avoided-loss stack (yield, CQR, CASEJ, ingest):** see [`TRAINING_RUNBOOK.md`](TRAINING_RUNBOOK.md).
+
+The **code paths** for AgriFM cocoa fine-tuning, per-region ensemble v2 weights, and production `ensemble_v2` exposure are in this repository. **Artifacts** below are not checked in until you run training on GPU/HPC (50-epoch fine-tune and full ensemble grid search are impractical on CPU). Incomplete local runs can be stopped safely; see the runbook section *Local runs that did not finish*.
 
 ## When you have GPU (or HPC) access
 
