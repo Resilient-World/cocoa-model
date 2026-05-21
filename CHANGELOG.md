@@ -22,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Ensemble v2: per-region weights in `config/ensemble_weights.yaml`, `scripts/fit_ensemble_v2_weights.py`, and `benchmark_ensemble_v2_*` reports.
 - TerraMind 1.0 (Apache-2.0) backbone: optional `[terramind]` extra, `src/models/terramind_*`, `cocoa_batch_to_terramind_input`, TiM path, `train_terramind_cocoa`, benchmark `terramind` / `terramind_tim`, DVC `stage_train_terramind_cocoa`.
 - Ensemble v3: five-way NNLS blend (AEF + Galileo + AgriFM + TerraMind + FDP) in `config/ensemble_weights_v3.yaml`, `scripts/fit_ensemble_v3_weights.py`, opt-in via `ENSEMBLE_BACKEND=v3` (production default remains `ensemble_v2`).
+- WCTM drift monitoring (WATCH, ICML 2025): `src/monitoring/wctm.py`, `conformal_cusum.py`, `drift_store.py`, `api/drift_monitoring.py`, `GET /drift-status`, `scripts/validate_drift_detection.py`, and `drift_alarm` / `drift_status` on `/simulate-scenario`.
 
 ### Changed
 

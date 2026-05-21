@@ -740,6 +740,7 @@ def simulate_scenario(
     cqr_model: QuantileYieldSurrogate | None = None,
     cqr_calibrator: ConformalCalibrator | None = None,
     scenario_conformal_store: Any = None,
+    drift_store: Any = None,
 ) -> SimulateScenarioResponse:
     """
     Future-climate avoided loss using CMIP6 delta-change on ERA5 (`ScenarioBuilder`) +
@@ -867,6 +868,8 @@ def simulate_scenario(
     biotic_fact_frac = float(biotic_factual["surviving_fraction"])
 
     confidence_interval: ConfidenceInterval | None = None
+    drift_alarm = None
+    drift_status = None
     fin_ci_low, fin_ci_high = a_p10, a_p90
     if cqr_model is not None and settings is not None:
         conformal_result = apply_scenario_conformal(
@@ -874,6 +877,7 @@ def simulate_scenario(
             cqr_model=cqr_model,
             cqr_calibrator=cqr_calibrator,
             store=scenario_conformal_store,
+            drift_store=drift_store,
             settings=settings,
             climate_baseline=climate_baseline,
             climate_projected=climate_projected,
@@ -883,7 +887,11 @@ def simulate_scenario(
             biotic_fact_frac=biotic_fact_frac,
         )
         if conformal_result is not None:
-            fin_ci_low, fin_ci_high, confidence_interval = conformal_result
+            fin_ci_low = conformal_result.ci_lower
+            fin_ci_high = conformal_result.ci_upper
+            confidence_interval = conformal_result.confidence_interval
+            drift_alarm = conformal_result.drift_alarm
+            drift_status = conformal_result.drift_status
 
     fin = calculate_financial_impact(
         a_mean,
@@ -910,5 +918,7 @@ def simulate_scenario(
         financial_impact_usd_mean=fin.usd.point,
         financial_impact=financial_impact_to_schema(fin),
         confidence_interval=confidence_interval,
+        drift_alarm=drift_alarm,
+        drift_status=drift_status,
         eudr_status=eudr_status,
     )

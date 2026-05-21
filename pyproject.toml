@@ -110,6 +110,7 @@ include = [
     "hazards*",
     "models*",
     "api*",
+    "monitoring*",
     "training*",
     "analysis*",
     "counterfactual*",

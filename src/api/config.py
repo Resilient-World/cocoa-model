@@ -165,6 +165,20 @@ class APISettings(BaseSettings):
     aci_eta: float = Field(default=0.005, validation_alias="ACI_ETA")
     pid_eta: float = Field(default=0.01, validation_alias="PID_ETA")
 
+    drift_enabled: bool = Field(default=True, validation_alias="DRIFT_ENABLED")
+    drift_state_path: Path = Field(
+        default=_REPO_ROOT / "data" / "processed" / "drift_monitoring_state.json",
+        validation_alias="DRIFT_STATE_PATH",
+    )
+    drift_alpha_fpr: float = Field(default=0.01, validation_alias="DRIFT_ALPHA_FPR")
+    drift_inflation_factor: float = Field(
+        default=1.5,
+        validation_alias="DRIFT_INFLATION_FACTOR",
+    )
+    drift_score_cap: float = Field(default=8.0, validation_alias="DRIFT_SCORE_CAP")
+    drift_cusum_h: float = Field(default=5.0, validation_alias="DRIFT_CUSUM_H")
+    drift_cusum_k: float = Field(default=0.0, validation_alias="DRIFT_CUSUM_K")
+
     @model_validator(mode="after")
     def _default_model_checkpoint(self) -> APISettings:
         if self.model_checkpoint_path is None:

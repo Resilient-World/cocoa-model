@@ -3,21 +3,39 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
 from torch import Tensor
 
+from api.drift_monitoring import apply_drift_monitoring
 from api.online_conformal_store import ConformalMethod, OnlineConformalStore, stratum_key
-from api.schemas import AvoidedLossInterval, ConfidenceInterval, SimulateScenarioRequest
+from api.schemas import (
+    AvoidedLossInterval,
+    ConfidenceInterval,
+    DriftAlarmPayload,
+    DriftStatus,
+    SimulateScenarioRequest,
+)
 from data.cocoa_exposure import REGIONS, region_for_point
 from models.cqr import ConformalCalibrator, QuantileYieldSurrogate
 
 if TYPE_CHECKING:
     from api.config import APISettings
+    from monitoring.drift_store import DriftStore
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ScenarioConformalResult:
+    ci_lower: float
+    ci_upper: float
+    confidence_interval: ConfidenceInterval
+    drift_alarm: DriftAlarmPayload | None = None
+    drift_status: DriftStatus | None = None
 
 
 def resolve_region(lat: float, lon: float) -> str:
@@ -75,6 +93,7 @@ def apply_scenario_conformal(
     cqr_model: QuantileYieldSurrogate,
     cqr_calibrator: ConformalCalibrator | None,
     store: OnlineConformalStore | None,
+    drift_store: DriftStore | None = None,
     settings: APISettings | Any,
     climate_baseline: Tensor,
     climate_projected: Tensor,
@@ -82,9 +101,9 @@ def apply_scenario_conformal(
     static_factual: Tensor,
     biotic_cf_frac: float,
     biotic_fact_frac: float,
-) -> tuple[float, float, ConfidenceInterval] | None:
+) -> ScenarioConformalResult | None:
     """
-    Compute avoided-loss conformal bounds and optional online update.
+    Compute avoided-loss conformal bounds, online update, and optional drift monitoring.
 
     Returns ``None`` when CQR artifacts are missing and method is not splittable.
     """
@@ -109,10 +128,10 @@ def apply_scenario_conformal(
             biotic_factual=biotic_fact_frac,
             farm_size_ha=request.farm_size_ha,
         )
-        return (
-            ci_lower,
-            ci_upper,
-            ConfidenceInterval(
+        return ScenarioConformalResult(
+            ci_lower=ci_lower,
+            ci_upper=ci_upper,
+            confidence_interval=ConfidenceInterval(
                 avoided_loss_tonnes=AvoidedLossInterval(
                     lower=ci_lower,
                     upper=ci_upper,
@@ -127,16 +146,17 @@ def apply_scenario_conformal(
     if store is None:
         return None
 
-    key = stratum_key(request.scenario, request.horizon_year, resolve_region(
-        request.farm_location.lat, request.farm_location.lon
-    ))
+    key = stratum_key(
+        request.scenario,
+        request.horizon_year,
+        resolve_region(request.farm_location.lat, request.farm_location.lon),
+    )
     updater = store.get_updater(key, method=method)
 
     b_lo, b_med, b_hi = _raw_cqr_quantiles(cqr_model, climate_baseline, static_cf)
     f_lo, f_med, f_hi = _raw_cqr_quantiles(cqr_model, climate_projected, static_factual)
 
     q_adj = float(updater.current_threshold)
-    base_adj_lo, _, base_adj_hi = b_lo - q_adj, b_med, b_hi + q_adj
     fact_adj_lo, _, fact_adj_hi = f_lo - q_adj, f_med, f_hi + q_adj
 
     observed_y = float(request.current_yield)
@@ -152,6 +172,23 @@ def apply_scenario_conformal(
     store.save_after_update(key, updater, covered=covered, method=method)
 
     q_adj = float(updater.current_threshold)
+
+    drift_alarm, drift_status, apply_inflation = apply_drift_monitoring(
+        request,
+        y_obs=observed_y,
+        y_pred=f_med,
+        interval_lo=fact_adj_lo,
+        interval_hi=fact_adj_hi,
+        drift_store=drift_store,
+        conformal_store=store,
+        settings=settings,
+        climate_projected=climate_projected,
+        static_factual=static_factual,
+    )
+    if apply_inflation:
+        factor = float(getattr(settings, "drift_inflation_factor", 1.5))
+        q_adj *= factor
+
     base_adj_lo, base_adj_hi = b_lo - q_adj, b_hi + q_adj
     fact_adj_lo, fact_adj_hi = f_lo - q_adj, f_hi + q_adj
 
@@ -166,10 +203,10 @@ def apply_scenario_conformal(
     )
 
     method_label: str = method if method != "split_cqr" else "cqr"
-    return (
-        ci_lower,
-        ci_upper,
-        ConfidenceInterval(
+    return ScenarioConformalResult(
+        ci_lower=ci_lower,
+        ci_upper=ci_upper,
+        confidence_interval=ConfidenceInterval(
             avoided_loss_tonnes=AvoidedLossInterval(
                 lower=ci_lower,
                 upper=ci_upper,
@@ -179,7 +216,9 @@ def apply_scenario_conformal(
             empirical_coverage=None,
             coverage_running_avg=store.coverage_running_avg(key),
         ),
+        drift_alarm=drift_alarm,
+        drift_status=drift_status,
     )
 
 
-__all__ = ["apply_scenario_conformal", "resolve_region"]
+__all__ = ["ScenarioConformalResult", "apply_scenario_conformal", "resolve_region"]
