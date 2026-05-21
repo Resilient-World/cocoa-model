@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- CausalForest in `heterogeneity.py` replaced with econml `CausalForestDML` (honest splits + valid asymptotic CIs); added R-Learner (`RLearnerCATE` / `ForestDRLearner`).
 - `/simulate-scenario` uses ECI-Integral online conformal calibration by default; static split-CQR remains available via `CONFORMAL_METHOD` env var.
 - Production exposure backbone now Galileo + AEF + AgriFM weighted ensemble per region (`ensemble_v2`, default via `COCOA_EXPOSURE_BACKEND=ensemble_v2`).
 

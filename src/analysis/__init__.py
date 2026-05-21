@@ -3,6 +3,21 @@
 from analysis.bjs_imputation import BJSResult, BorusyakJaravelSpiess
 from analysis.csdid import ATTGTResult, ATTResult, CSEventStudyResult, CallawaySantAnna
 from analysis.did_comparison_harness import compare_did_methods, write_did_comparison_report
+from analysis.heterogeneity import (
+    CATEResult,
+    CausalForest,
+    EffectResult,
+    RLearner,
+    RLearnerCATE,
+    estimate_cate,
+)
+from analysis.policy_targeting import (
+    doubly_robust_policy_value,
+    optimal_targeting_policy,
+    policy_value_curve,
+    rank_farms_by_uplift,
+    targeting_from_cate,
+)
 from analysis.did_impact import (
     AvoidedRevenueResult,
     DiDResult,
@@ -50,6 +65,17 @@ __all__ = [
     "DidMethod",
     "compare_did_methods",
     "write_did_comparison_report",
+    "CATEResult",
+    "EffectResult",
+    "CausalForest",
+    "RLearnerCATE",
+    "RLearner",
+    "estimate_cate",
+    "rank_farms_by_uplift",
+    "policy_value_curve",
+    "optimal_targeting_policy",
+    "doubly_robust_policy_value",
+    "targeting_from_cate",
     "SyntheticDiD",
     "SDIDResult",
     "event_study",
