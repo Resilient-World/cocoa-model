@@ -35,6 +35,7 @@ from hazards.black_pod import ShadeSpecies
 from analysis.climate_attribution import extract_daily_climate_11ch
 from models.casej_process import co2_ppm_for_ssp
 from models.casej_surrogate import CASEJSurrogate
+from api.scenario_conformal import apply_scenario_conformal
 from models.cqr import ConformalCalibrator, QuantileYieldSurrogate
 from models.yield_surrogate import CLIMATE_IDX, YieldSurrogateModel
 
@@ -610,6 +611,9 @@ def simulate_scenario(
     yield_blend_weight: float = 0.0,
     climate_year: int | None = None,
     settings: Any = None,
+    cqr_model: QuantileYieldSurrogate | None = None,
+    cqr_calibrator: ConformalCalibrator | None = None,
+    scenario_conformal_store: Any = None,
 ) -> SimulateScenarioResponse:
     """
     Future-climate avoided loss using CMIP6 delta-change on ERA5 (`ScenarioBuilder`) +
@@ -688,6 +692,40 @@ def simulate_scenario(
     a_mean, a_p10, a_p90 = _mean_p10_p90(avoided_arr)
     a_mean, a_p10, a_p90 = (max(0.0, a_mean), max(0.0, a_p10), max(0.0, a_p90))
 
+    ds_cf = _climate_tensor_to_dataset(climate_baseline, year)
+    ds_factual = _climate_tensor_to_dataset(climate_projected, year)
+    biotic_cf = apply_biotic_losses(
+        1.0,
+        ds_cf,
+        _biotic_static_features(None),
+    )
+    biotic_factual = apply_biotic_losses(
+        1.0,
+        ds_factual,
+        _biotic_static_features(request.intervention_type),
+    )
+    biotic_cf_frac = float(biotic_cf["surviving_fraction"])
+    biotic_fact_frac = float(biotic_factual["surviving_fraction"])
+
+    confidence_interval: ConfidenceInterval | None = None
+    fin_ci_low, fin_ci_high = a_p10, a_p90
+    if cqr_model is not None and settings is not None:
+        conformal_result = apply_scenario_conformal(
+            request,
+            cqr_model=cqr_model,
+            cqr_calibrator=cqr_calibrator,
+            store=scenario_conformal_store,
+            settings=settings,
+            climate_baseline=climate_baseline,
+            climate_projected=climate_projected,
+            static_cf=static_cf,
+            static_factual=static_factual,
+            biotic_cf_frac=biotic_cf_frac,
+            biotic_fact_frac=biotic_fact_frac,
+        )
+        if conformal_result is not None:
+            fin_ci_low, fin_ci_high, confidence_interval = conformal_result
+
     fin = calculate_financial_impact(
         a_mean,
         currency=request.currency,
@@ -697,8 +735,8 @@ def simulate_scenario(
         lat=lat,
         lon=lon,
         cocoa_price_usd=request.cocoa_price_usd,
-        ci_low_tonnes=a_p10,
-        ci_high_tonnes=a_p90,
+        ci_low_tonnes=fin_ci_low,
+        ci_high_tonnes=fin_ci_high,
     )
 
     eudr_status = _optional_eudr_status(request, settings) if settings is not None else None
@@ -712,5 +750,6 @@ def simulate_scenario(
         avoided_loss_tonnes=AvoidedLossUncertaintyBand(mean=a_mean, p10=a_p10, p90=a_p90),
         financial_impact_usd_mean=fin.usd.point,
         financial_impact=financial_impact_to_schema(fin),
+        confidence_interval=confidence_interval,
         eudr_status=eudr_status,
     )
