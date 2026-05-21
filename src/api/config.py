@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 # Re-export for settings validation
-ExposureBackend = Literal["fdp", "galileo", "aef", "ensemble"]
+ExposureBackend = Literal["fdp", "galileo", "aef", "agrifm", "ensemble", "ensemble_v2"]
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -59,7 +59,16 @@ class APISettings(BaseSettings):
     whisp_api_key: str | None = None
 
     cocoa_exposure_year: int = 2023
-    cocoa_exposure_backend: Literal["fdp", "galileo", "aef", "ensemble"] = "fdp"
+    cocoa_exposure_backend: Literal[
+        "fdp", "galileo", "aef", "agrifm", "ensemble", "ensemble_v2"
+    ] = Field(default="ensemble_v2", validation_alias="COCOA_EXPOSURE_BACKEND")
+    ensemble_backend: Literal["v1", "v2"] = Field(
+        default="v2",
+        validation_alias="ENSEMBLE_BACKEND",
+        description="Use ensemble_v2 weights when backend is ensemble/ensemble_v2",
+    )
+    ensemble_weights_path: Path = _REPO_ROOT / "config" / "ensemble_weights.yaml"
+    agrifm_checkpoint_path: Path = _REPO_ROOT / "models" / "agrifm_cocoa_seg.pt"
     cocoa_exposure_threshold: float = Field(
         default=DEFAULT_THRESHOLD,
         ge=0.5,

@@ -54,6 +54,27 @@ def test_galileo_point_inference_without_gee(monkeypatch: pytest.MonkeyPatch) ->
     assert p == pytest.approx(0.42, abs=0.01)
 
 
+def test_agrifm_point_inference_without_gee(monkeypatch: pytest.MonkeyPatch) -> None:
+    ing = CocoaExposureIngest(aoi=object(), backend="agrifm")  # type: ignore[arg-type]
+    monkeypatch.setattr(ing, "_agrifm_probability_at_point", lambda lat, lon: 0.33)
+    p = ing.sample_point(5.84, -5.36)
+    assert p == pytest.approx(0.33, abs=0.01)
+
+
+def test_ensemble_v2_blends_four_backends(monkeypatch: pytest.MonkeyPatch) -> None:
+    ing = CocoaExposureIngest(
+        aoi=object(),  # type: ignore[arg-type]
+        backend="ensemble_v2",
+        region="ghana",
+    )
+    monkeypatch.setattr(ing, "_aef_probability_at_point", lambda lat, lon: 0.2)
+    monkeypatch.setattr(ing, "_galileo_probability_at_point", lambda lat, lon: 0.4)
+    monkeypatch.setattr(ing, "_agrifm_probability_at_point", lambda lat, lon: 0.6)
+    monkeypatch.setattr(ing, "_fdp_probability_at_point", lambda lat, lon, scale_m: 0.8)
+    p = ing._ensemble_v2_blend(6.0, -4.0, scale_m=10)
+    assert 0.0 <= p <= 1.0
+
+
 def test_ensemble_blends_aef_galileo_and_fdp(monkeypatch: pytest.MonkeyPatch) -> None:
     ing = CocoaExposureIngest(aoi=object(), backend="ensemble")  # type: ignore[arg-type]
     monkeypatch.setattr(ing, "_aef_probability_at_point", lambda lat, lon: 0.9)
@@ -117,7 +138,7 @@ def test_is_fdp_covered_cameroon():
 def test_global_fallback_outside_all_regions(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("data.cocoa_exposure.is_fdp_covered", lambda lat, lon: False)
     monkeypatch.setattr(
-        "data.cocoa_exposure._global_aef_galileo_probability",
+        "data.cocoa_exposure._global_aef_galileo_agrifm_probability",
         lambda lat, lon, **kwargs: 0.61,
     )
     p = sample_cocoa_probability_at_point(45.0, 2.0)

@@ -35,11 +35,13 @@ import xee  # noqa: F401 — registers the ``ee`` Xarray backend
 from torch import Tensor
 
 from data.cocoa_exposure import (
+    DEFAULT_AGRIFM_CHECKPOINT,
     DEFAULT_THRESHOLD,
     ExposureBackend,
     FDP_COCOA_COLLECTION,
     sample_cocoa_probability_at_point,
 )
+from data.ensemble_weights import DEFAULT_ENSEMBLE_WEIGHTS_PATH
 from data.era5_ingest import ERA5Ingest
 from data.feature_store import FeatureStore
 from data.gee_auth import initialize_earth_engine
@@ -154,7 +156,9 @@ class FeatureResolverConfig:
     gee_project: str | None = None
     cocoa_exposure_year: int = 2023
     cocoa_exposure_threshold: float = DEFAULT_THRESHOLD
-    cocoa_exposure_backend: ExposureBackend = "fdp"
+    cocoa_exposure_backend: ExposureBackend = "ensemble_v2"
+    ensemble_weights_path: Path = DEFAULT_ENSEMBLE_WEIGHTS_PATH
+    agrifm_checkpoint_path: Path = _REPO_ROOT / "models" / "agrifm_cocoa_seg.pt"
     grid_step_deg: float = GRID_ROUND_STEP
 
 
@@ -592,13 +596,16 @@ class FarmFeatureResolver:
         dist_info = protected_dist_m.getInfo()
         protected_km = float(dist_info) / 1000.0 if dist_info is not None else 50.0
 
+        backend = self.config.cocoa_exposure_backend
         cocoa_prob = sample_cocoa_probability_at_point(
             lat,
             lon,
             year=fdp_year,
             threshold=self.config.cocoa_exposure_threshold,
-            backend=self.config.cocoa_exposure_backend,
+            backend=backend,
             project=self.config.gee_project,
+            agrifm_checkpoint=self.config.agrifm_checkpoint_path,
+            ensemble_weights_path=self.config.ensemble_weights_path,
         )
 
         return ResolvedStaticFeatures(
@@ -730,9 +737,24 @@ def build_resolver_from_settings(settings: Any) -> FarmFeatureResolver:
             cocoa_exposure_threshold=float(
                 getattr(settings, "cocoa_exposure_threshold", DEFAULT_THRESHOLD)
             ),
-            cocoa_exposure_backend=getattr(settings, "cocoa_exposure_backend", "fdp"),
+            cocoa_exposure_backend=_resolve_exposure_backend(settings),
+            ensemble_weights_path=Path(
+                getattr(settings, "ensemble_weights_path", DEFAULT_ENSEMBLE_WEIGHTS_PATH)
+            ),
+            agrifm_checkpoint_path=Path(
+                getattr(settings, "agrifm_checkpoint_path", DEFAULT_AGRIFM_CHECKPOINT)
+            ),
         )
     )
+
+
+def _resolve_exposure_backend(settings: Any) -> ExposureBackend:
+    """Map API settings to exposure backend (honours ENSEMBLE_BACKEND=v2)."""
+    raw = getattr(settings, "cocoa_exposure_backend", "ensemble_v2")
+    ensemble_mode = getattr(settings, "ensemble_backend", "v2")
+    if raw in ("ensemble", "ensemble_v2") and ensemble_mode == "v2":
+        return "ensemble_v2"
+    return raw  # type: ignore[return-value]
 
 
 __all__ = [

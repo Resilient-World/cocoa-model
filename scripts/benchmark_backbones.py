@@ -44,7 +44,8 @@ logger = logging.getLogger(__name__)
 DEFAULT_REPORT_DIR = _REPO_ROOT / "reports" / "backbones"
 DEFAULT_GALILEO_CKPT = _REPO_ROOT / "models" / "galileo_cocoa_seg.pt"
 DEFAULT_AEF_CKPT = _REPO_ROOT / "models" / "aef_cocoa_head.pt"
-DEFAULT_AGRIFM_CKPT = _REPO_ROOT / "models" / "agrifm" / "agrifm_s2_pretrained.pt"
+DEFAULT_AGRIFM_CKPT = _REPO_ROOT / "models" / "agrifm_cocoa_seg.pt"
+DEFAULT_AGRIFM_PRETRAINED = _REPO_ROOT / "models" / "agrifm" / "agrifm_s2_pretrained.pt"
 BACKBONE_CHOICES = ("prithvi", "galileo", "aef", "fdp", "agrifm", "all")
 TILE_SIZE = 64
 TIME_STEPS = 4
@@ -232,18 +233,22 @@ class AgriFMPredictor:
     name = "AgriFM (Video Swin)"
 
     def __init__(self, checkpoint: Path, *, out_size: int = TILE_SIZE) -> None:
-        from models.agrifm_seg import AgriFMCocoaSegmentation
+        from models.agrifm_seg import AgriFMCocoaSegmentation, load_agrifm_seg_checkpoint
 
         self._has_checkpoint = checkpoint.is_file()
         if self._has_checkpoint:
-            logger.info("Loading AgriFM backbone weights from %s", checkpoint)
+            logger.info("Loading AgriFM weights from %s", checkpoint)
+            self.model = load_agrifm_seg_checkpoint(
+                checkpoint,
+                out_size=(out_size, out_size),
+            )
         else:
             logger.warning("AgriFM checkpoint missing; benchmarking uninitialized weights")
-        self.model = AgriFMCocoaSegmentation(
-            checkpoint_path=checkpoint,
-            out_size=(out_size, out_size),
-            freeze_backbone=True,
-        )
+            self.model = AgriFMCocoaSegmentation(
+                checkpoint_path=DEFAULT_AGRIFM_PRETRAINED,
+                out_size=(out_size, out_size),
+                freeze_backbone=True,
+            )
         self.model.eval()
         _ = self.predict_tile(build_tile_batch(6.0, -4.0, seed=0))
         self._params_m = count_params_millions(self.model)
@@ -599,6 +604,172 @@ def write_agrifm_benchmark_report(
     return path
 
 
+class EnsembleV1Predictor:
+    """Legacy fixed-weight ensemble (0.5 AEF + 0.3 Galileo + 0.2 FDP)."""
+
+    name = "Ensemble v1 (fixed)"
+
+    def __init__(
+        self,
+        *,
+        galileo_checkpoint: Path,
+        aef_checkpoint: Path,
+    ) -> None:
+        from data.cocoa_exposure import DEFAULT_ENSEMBLE_WEIGHTS
+
+        self._aef = AEFHeadPredictor(aef_checkpoint)
+        self._gal = GalileoSegPredictor(galileo_checkpoint)
+        self._fdp = FDPOnlyPredictor(HeuristicKalischekReference())
+        self._weights = DEFAULT_ENSEMBLE_WEIGHTS
+
+    @property
+    def params_millions(self) -> float:
+        return self._aef.params_millions + self._gal.params_millions
+
+    @torch.no_grad()
+    def predict_tile(self, batch_dict: dict[str, torch.Tensor]) -> np.ndarray:
+        loc = batch_dict["location"]
+        lat, lon = float(loc[0, 0]), float(loc[0, 1])
+        w_aef, w_gal, w_fdp = self._weights
+        aef_p = float(self._aef.predict_tile(batch_dict).mean())
+        gal_p = float(self._gal.predict_tile(batch_dict).mean())
+        fdp_p = float(self._fdp.predict_tile(batch_dict).mean())
+        return np.full(
+            (TILE_SIZE, TILE_SIZE),
+            w_aef * aef_p + w_gal * gal_p + w_fdp * fdp_p,
+            dtype=np.float32,
+        )
+
+
+class EnsembleV2Predictor:
+    """Region-weighted ensemble from ``config/ensemble_weights.yaml``."""
+
+    name = "Ensemble v2 (region-weighted)"
+
+    def __init__(
+        self,
+        *,
+        region: str | None,
+        galileo_checkpoint: Path,
+        aef_checkpoint: Path,
+        agrifm_checkpoint: Path,
+        weights_path: Path | None = None,
+    ) -> None:
+        from data.ensemble_weights import DEFAULT_ENSEMBLE_WEIGHTS_PATH, load_ensemble_weights
+
+        self.region = region
+        self._weights_path = weights_path or DEFAULT_ENSEMBLE_WEIGHTS_PATH
+        self._weights = load_ensemble_weights(region, path=self._weights_path)
+        self._aef = AEFHeadPredictor(aef_checkpoint)
+        self._gal = GalileoSegPredictor(galileo_checkpoint)
+        self._agrifm = AgriFMPredictor(agrifm_checkpoint)
+        self._fdp = FDPOnlyPredictor(HeuristicKalischekReference())
+
+    @property
+    def params_millions(self) -> float:
+        return (
+            self._aef.params_millions
+            + self._gal.params_millions
+            + self._agrifm.params_millions
+        )
+
+    @torch.no_grad()
+    def predict_tile(self, batch_dict: dict[str, torch.Tensor]) -> np.ndarray:
+        aef_p = float(self._aef.predict_tile(batch_dict).mean())
+        gal_p = float(self._gal.predict_tile(batch_dict).mean())
+        agr_p = float(self._agrifm.predict_tile(batch_dict).mean())
+        fdp_p = float(self._fdp.predict_tile(batch_dict).mean())
+        parts = [
+            (self._weights.get("aef", 0.0), aef_p),
+            (self._weights.get("galileo", 0.0), gal_p),
+            (self._weights.get("agrifm", 0.0), agr_p),
+            (self._weights.get("fdp", 0.0), fdp_p),
+        ]
+        w_sum = sum(w for w, _ in parts)
+        prob = sum(w * p for w, p in parts) / max(w_sum, 1e-9)
+        return np.full((TILE_SIZE, TILE_SIZE), float(np.clip(prob, 0.0, 1.0)), dtype=np.float32)
+
+
+def write_ensemble_v2_benchmark_report(
+    per_region_f1: dict[str, dict[str, float]],
+    path: Path,
+) -> Path:
+    """Write per-region F1 table for individual backbones and ensembles."""
+    regions = sorted(per_region_f1.keys())
+    columns = ["aef", "galileo", "agrifm", "fdp", "ensemble_v1", "ensemble_v2"]
+    lines = [
+        f"# Cocoa backbone benchmark — Ensemble v2 ({date.today().isoformat()})",
+        "",
+        "Per-region F1 on held-out Kalischek tiles (5000 tiles/region by default). "
+        "Weights from ``config/ensemble_weights.yaml`` (fit via "
+        "``scripts/fit_ensemble_v2_weights.py``).",
+        "",
+        "| Region | " + " | ".join(columns) + " |",
+        "|--------|" + "|".join(["------"] * len(columns)) + "|",
+    ]
+    for region in regions:
+        scores = per_region_f1[region]
+        cells = [f"{scores.get(col, float('nan')):.3f}" for col in columns]
+        label = COCOA_REGIONS[region].display_name if region in COCOA_REGIONS else region
+        lines.append(f"| {label} | " + " | ".join(cells) + " |")
+    lines.extend(
+        [
+            "",
+            "## Notes",
+            "",
+            "- **ensemble_v2** uses per-region weights over AEF, Galileo, AgriFM, and FDP.",
+            "- **ensemble_v1** is the legacy `0.5×AEF + 0.3×Galileo + 0.2×FDP` blend.",
+            "- Fit weights: `python scripts/fit_ensemble_v2_weights.py`.",
+            "",
+        ]
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines), encoding="utf-8")
+    logger.info("Ensemble v2 benchmark report → %s", path)
+    return path
+
+
+def run_ensemble_v2_region_benchmark(
+    *,
+    n_tiles: int = 5000,
+    seed: int = 42,
+    galileo_checkpoint: Path = DEFAULT_GALILEO_CKPT,
+    aef_checkpoint: Path = DEFAULT_AEF_CKPT,
+    agrifm_checkpoint: Path = DEFAULT_AGRIFM_CKPT,
+    report_dir: Path = DEFAULT_REPORT_DIR,
+) -> Path:
+    """Evaluate F1 per backbone and ensemble for each FDP region."""
+    from data.cocoa_exposure import normalize_region_key
+
+    per_region: dict[str, dict[str, float]] = {}
+    for key in sorted(COCOA_REGIONS.keys()):
+        region_key = normalize_region_key(key)
+        lats, lons, labels = sample_holdout_tiles(n_tiles, seed=seed, region=region_key)
+        predictors: dict[str, TilePredictor] = {
+            "aef": AEFHeadPredictor(aef_checkpoint),
+            "galileo": GalileoSegPredictor(galileo_checkpoint),
+            "agrifm": AgriFMPredictor(agrifm_checkpoint),
+            "fdp": FDPOnlyPredictor(HeuristicKalischekReference()),
+            "ensemble_v1": EnsembleV1Predictor(
+                galileo_checkpoint=galileo_checkpoint,
+                aef_checkpoint=aef_checkpoint,
+            ),
+            "ensemble_v2": EnsembleV2Predictor(
+                region=region_key,
+                galileo_checkpoint=galileo_checkpoint,
+                aef_checkpoint=aef_checkpoint,
+                agrifm_checkpoint=agrifm_checkpoint,
+            ),
+        }
+        scores: dict[str, float] = {}
+        for col, predictor in predictors.items():
+            result = evaluate_predictor(predictor, lats, lons, labels, max_latency_tiles=20)
+            scores[col] = result.f1
+        per_region[region_key] = scores
+    out = report_dir / f"benchmark_ensemble_v2_{date.today().isoformat()}.md"
+    return write_ensemble_v2_benchmark_report(per_region, out)
+
+
 def _build_predictors(
     backbones: frozenset[str],
     *,
@@ -743,6 +914,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Run one benchmark per region in data.cocoa_exposure.REGIONS",
     )
+    parser.add_argument(
+        "--write-ensemble-v2-report",
+        action="store_true",
+        help="Write reports/backbones/benchmark_ensemble_v2_<date>.md",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -750,6 +926,17 @@ def main(argv: list[str] | None = None) -> int:
     gal_size = "nano" if args.quick else args.galileo_size
 
     backbone_set = frozenset({args.backbone}) if args.backbone != "all" else frozenset({"all"})
+
+    if args.write_ensemble_v2_report:
+        run_ensemble_v2_region_benchmark(
+            n_tiles=n,
+            seed=args.seed,
+            galileo_checkpoint=args.galileo_checkpoint,
+            aef_checkpoint=args.aef_checkpoint,
+            agrifm_checkpoint=args.agrifm_checkpoint,
+            report_dir=args.report_dir,
+        )
+        return 0
 
     if args.all_regions:
         for key in sorted(COCOA_REGIONS.keys()):

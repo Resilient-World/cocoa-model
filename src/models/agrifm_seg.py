@@ -17,7 +17,9 @@ from models.agrifm_cocoa_head import AgriFMCocoaSegHead
 logger = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_AGRIFM_CHECKPOINT = _REPO_ROOT / "models" / "agrifm" / "agrifm_s2_pretrained.pt"
+DEFAULT_AGRIFM_PRETRAINED = _REPO_ROOT / "models" / "agrifm" / "agrifm_s2_pretrained.pt"
+DEFAULT_AGRIFM_FINETUNED = _REPO_ROOT / "models" / "agrifm_cocoa_seg.pt"
+DEFAULT_AGRIFM_CHECKPOINT = DEFAULT_AGRIFM_FINETUNED
 S2_BAND_COUNT = 10
 
 
@@ -58,6 +60,11 @@ class AgriFMCocoaSegmentation(nn.Module):
         self.head = AgriFMCocoaSegHead(out_size=out_size, dropout_p=head_dropout)
         self.out_size = out_size
 
+    def set_backbone_freeze(self, freeze: bool) -> None:
+        """Toggle gradient flow through the Video Swin encoder."""
+        for param in self.backbone.encoder.parameters():
+            param.requires_grad = not freeze
+
     @staticmethod
     def s2_batch_to_tensor(s2: torch.Tensor) -> torch.Tensor:
         """
@@ -95,17 +102,23 @@ def load_agrifm_seg_checkpoint(
     device: str | torch.device = "cpu",
     modality: Modality = "S2",
     out_size: tuple[int, int] = (256, 256),
+    pretrained_path: Path | None = None,
 ) -> AgriFMCocoaSegmentation:
-    """Load segmentation module; applies full state dict when keys match."""
+    """Load fine-tuned segmentation; falls back to backbone-only pretrained weights."""
+    backbone_ckpt = pretrained_path or DEFAULT_AGRIFM_PRETRAINED
+    if checkpoint_path.is_file():
+        backbone_ckpt = checkpoint_path
     model = AgriFMCocoaSegmentation(
-        checkpoint_path=checkpoint_path,
+        checkpoint_path=backbone_ckpt,
         modality=modality,
         out_size=out_size,
     )
     if checkpoint_path.is_file():
         raw = torch.load(checkpoint_path, map_location=device, weights_only=False)
         state = raw.get("state_dict", raw) if isinstance(raw, dict) else raw
-        if isinstance(state, dict) and any(k.startswith("head.") or k.startswith("backbone.") for k in state):
+        if isinstance(state, dict) and any(
+            k.startswith("head.") or k.startswith("backbone.") for k in state
+        ):
             model.load_state_dict(state, strict=False)
     model.to(device)
     model.eval()

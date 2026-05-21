@@ -58,9 +58,10 @@ Temporal Remote Sensing Foundation Model for Agriculture Mapping* (arXiv:2505.21
 https://arxiv.org/abs/2505.21357). Reference implementation:
 [flyakon/AgriFM](https://github.com/flyakon/AgriFM).
 
-**License:** Pretrained weight files (`models/agrifm/agrifm_s2_pretrained.pt`) are distributed
-under **Apache License 2.0** by the AgriFM authors. This repository does not vendor the AgriFM
-source tree; only checkpoint tensors are loaded at runtime.
+**License:** Pretrained weight files (`models/agrifm/agrifm_s2_pretrained.pt`) and the
+fine-tuned cocoa head (`models/agrifm_cocoa_seg.pt`, MIT training code in this repo) use
+**Apache License 2.0** backbone weights from the AgriFM authors. This repository does not vendor
+the AgriFM source tree; only checkpoint tensors are loaded at runtime.
 
 **Citation:** Li, W., et al. (2026). AgriFM: A Multi-source Temporal Remote Sensing Foundation
 Model for Agriculture Mapping. *Remote Sensing of Environment* (RSE 2026); arXiv:2505.21357.

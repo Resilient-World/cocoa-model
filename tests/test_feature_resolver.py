@@ -136,6 +136,41 @@ def test_pack_model_static_from_resolved() -> None:
     assert vec[9] == pytest.approx(0.9)
 
 
+def test_resolve_static_cocoa_prob_with_ensemble_v2(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from api.feature_resolver import ResolvedStaticFeatures
+
+    def _fake_gee_static(lat: float, lon: float, *, year: int = 2023) -> ResolvedStaticFeatures:
+        _ = year
+        return ResolvedStaticFeatures(
+            clay_pct=25.0,
+            sand_pct=40.0,
+            soc_gkg=20.0,
+            cec_cmolkg=15.0,
+            ph=5.5,
+            elevation_m=200.0,
+            slope_deg=2.0,
+            chirps_annual_mm=1200.0,
+            protected_dist_km=10.0,
+            cocoa_prob=0.55,
+        )
+
+    resolver = FarmFeatureResolver(
+        FeatureResolverConfig(
+            cocoa_exposure_backend="ensemble_v2",
+            use_real_features=True,
+            static_zarr_path=tmp_path / "missing_static.zarr",
+            era5_zarr_path=tmp_path / "missing_era5.zarr",
+            cache_dir=tmp_path / "cache",
+        )
+    )
+    monkeypatch.setattr(resolver, "_resolve_static_from_gee", _fake_gee_static)
+    vec = resolver.resolve_static(6.0, -4.0).squeeze(0).numpy()
+    assert 0.0 <= vec[9] <= 1.0
+    assert vec[9] == pytest.approx(0.55, abs=0.01)
+
+
 def test_climate_tensor_channel_order() -> None:
     time = pd.date_range("2023-01-01", periods=365, freq="D")
     ds = xr.Dataset(
