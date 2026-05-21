@@ -15,6 +15,7 @@ from models.joint_exposure_yield import (
     JointOutputs,
     load_joint_head,
 )
+from models.pape import PhenologyAwarePositionalEncoding
 from models.yield_surrogate import (
     MCDropout,
     PhysicsInformedYieldLoss,
@@ -22,6 +23,7 @@ from models.yield_surrogate import (
     YieldSurrogateModel,
     predict_with_uncertainty,
 )
+from models.yield_surrogate_v2 import YieldSurrogateV2
 
 __all__ = [
     "CASEJPhysicsLoss",
@@ -40,6 +42,8 @@ __all__ = [
     "MCDropout",
     "PhysicsInformedYieldLoss",
     "YieldPrediction",
+    "PhenologyAwarePositionalEncoding",
     "YieldSurrogateModel",
+    "YieldSurrogateV2",
     "predict_with_uncertainty",
 ]

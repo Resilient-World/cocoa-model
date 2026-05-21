@@ -8,7 +8,7 @@ from typing import Literal
 # Re-export for settings validation
 ExposureBackend = Literal["fdp", "galileo", "aef", "agrifm", "ensemble", "ensemble_v2"]
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from data.cocoa_exposure import DEFAULT_THRESHOLD
@@ -38,7 +38,19 @@ class APISettings(BaseSettings):
 
     api_host: str = "0.0.0.0"
     api_port: int = 8000
-    model_checkpoint_path: str = "models/yield_surrogate_v1.pt"
+    yield_surrogate_version: Literal["v1", "v2"] = Field(
+        default="v2",
+        validation_alias="YIELD_SURROGATE_VERSION",
+    )
+    model_checkpoint_path: str | None = Field(
+        default=None,
+        validation_alias="MODEL_CHECKPOINT_PATH",
+    )
+    allow_v1_fallback: bool = Field(
+        default=True,
+        validation_alias="YIELD_SURROGATE_ALLOW_V1_FALLBACK",
+        description="When v2 checkpoint is missing, load v1 weights via from_v1_checkpoint",
+    )
     casej_checkpoint_path: str = "models/casej_surrogate.pt"
     mc_num_samples: int = 50
     yield_blend_weight: float = 0.0
@@ -116,6 +128,15 @@ class APISettings(BaseSettings):
     eci_window: int = Field(default=100, validation_alias="ECI_WINDOW")
     aci_eta: float = Field(default=0.005, validation_alias="ACI_ETA")
     pid_eta: float = Field(default=0.01, validation_alias="PID_ETA")
+
+    @model_validator(mode="after")
+    def _default_model_checkpoint(self) -> APISettings:
+        if self.model_checkpoint_path is None:
+            if self.yield_surrogate_version == "v2":
+                object.__setattr__(self, "model_checkpoint_path", "models/yield_surrogate_v2.pt")
+            else:
+                object.__setattr__(self, "model_checkpoint_path", "models/yield_surrogate_v1.pt")
+        return self
 
     def resolved_uq_method(self) -> UQMethod:
         """Use CQR when calibrator exists; otherwise fall back to MCD."""
