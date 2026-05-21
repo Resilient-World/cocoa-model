@@ -51,6 +51,22 @@ class APISettings(BaseSettings):
         validation_alias="YIELD_SURROGATE_ALLOW_V1_FALLBACK",
         description="When v2 checkpoint is missing, load v1 weights via from_v1_checkpoint",
     )
+    enable_teleconnection: bool = Field(
+        default=True,
+        validation_alias="ENABLE_TELECONNECTION",
+    )
+    teleconnection_parquet_path: Path = Field(
+        default=_REPO_ROOT / "data" / "external" / "teleconnection_indices.parquet",
+        validation_alias="TELECONNECTION_PARQUET_PATH",
+    )
+    teleconnection_checkpoint_path: Path = Field(
+        default=_REPO_ROOT / "models" / "yield_surrogate_v2_teleconnection.pt",
+        validation_alias="TELECONNECTION_CHECKPOINT_PATH",
+    )
+    scenario_yield_backend: Literal["v2_teleconnection", "casej"] = Field(
+        default="v2_teleconnection",
+        validation_alias="SCENARIO_YIELD_BACKEND",
+    )
     casej_checkpoint_path: str = "models/casej_surrogate.pt"
     mc_num_samples: int = 50
     yield_blend_weight: float = 0.0

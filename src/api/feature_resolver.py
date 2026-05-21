@@ -29,6 +29,7 @@ from typing import Any
 
 import ee
 import numpy as np
+import pandas as pd
 import torch
 import xarray as xr
 import xee  # noqa: F401 — registers the ``ee`` Xarray backend
@@ -43,6 +44,12 @@ from data.cocoa_exposure import (
 )
 from data.ensemble_weights import DEFAULT_ENSEMBLE_WEIGHTS_PATH
 from data.era5_ingest import ERA5Ingest
+from data.teleconnection_ingest import (
+    DEFAULT_PARQUET as DEFAULT_TELECONNECTION_PARQUET,
+    get_indices_for_year,
+    load_indices_table,
+    region_key_from_latlon,
+)
 from data.feature_store import FeatureStore
 from data.gee_auth import initialize_earth_engine
 from models.yield_surrogate import (
@@ -160,6 +167,7 @@ class FeatureResolverConfig:
     ensemble_weights_path: Path = DEFAULT_ENSEMBLE_WEIGHTS_PATH
     agrifm_checkpoint_path: Path = _REPO_ROOT / "models" / "agrifm_cocoa_seg.pt"
     grid_step_deg: float = GRID_ROUND_STEP
+    teleconnection_parquet_path: Path = DEFAULT_TELECONNECTION_PARQUET
 
 
 def _env_use_real_features() -> bool:
@@ -304,6 +312,8 @@ class FarmFeatureResolver:
         except Exception as exc:
             logger.warning("diskcache unavailable (%s); using in-memory LRU only", exc)
         self._memory_cache = _LRUArrayCache()
+        self._teleconnection_cache = _LRUArrayCache()
+        self._indices_df: pd.DataFrame | None = None
         self._galileo_extractor: Any | None = None
         self._feature_store: FeatureStore | None = None
         if self.config.feature_store_root is not None:
@@ -399,6 +409,31 @@ class FarmFeatureResolver:
         tensor = self._climate_from_gee(lat, lon, year)
         self._cache_set_climate(key, tensor)
         return tensor
+
+    def _indices_table(self) -> pd.DataFrame:
+        if self._indices_df is None:
+            self._indices_df = load_indices_table(self.config.teleconnection_parquet_path)
+        return self._indices_df
+
+    def resolve_teleconnection(self, lat: float, lon: float, year: int) -> dict[str, np.ndarray]:
+        """
+        Monthly Niño3.4, Atl3, and IOD for the regional growing year ending in ``year``.
+
+        Cached on rounded ``(lat, lon, year)`` grid.
+        """
+        glat, glon = round_to_grid(lat, lon, self.config.grid_step_deg)
+        key = (glat, glon, int(year), "teleconnection")
+        hit = self._teleconnection_cache.get(key)
+        if hit is not None:
+            return {
+                "nino34": hit["nino34"],
+                "atl3": hit["atl3"],
+                "iod": hit["iod"],
+            }
+        region = region_key_from_latlon(glat, glon)
+        indices = get_indices_for_year(int(year), region, table=self._indices_table())
+        self._teleconnection_cache.set(key, indices)
+        return indices
 
     def resolve_static(self, lat: float, lon: float, year: int | None = None) -> Tensor:
         """Site static ``[1, 13]`` for the yield surrogate."""
@@ -744,6 +779,9 @@ def build_resolver_from_settings(settings: Any) -> FarmFeatureResolver:
             agrifm_checkpoint_path=Path(
                 getattr(settings, "agrifm_checkpoint_path", DEFAULT_AGRIFM_CHECKPOINT)
             ),
+            teleconnection_parquet_path=Path(
+                getattr(settings, "teleconnection_parquet_path", DEFAULT_TELECONNECTION_PARQUET)
+            ),
         )
     )
 
@@ -770,6 +808,7 @@ __all__ = [
     "build_resolver_from_settings",
     "climate_tensor_from_dataset_point",
     "resolve_climate",
+    "resolve_teleconnection",
     "resolve_static",
     "round_to_grid",
 ]

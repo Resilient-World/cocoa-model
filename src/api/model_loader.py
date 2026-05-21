@@ -12,6 +12,7 @@ from models.checkpoint_migration import is_v1_static_checkpoint, migrate_v1_stat
 from models.casej_surrogate import CASEJSurrogate, load_casej_surrogate
 from models.yield_surrogate import YieldSurrogateModel
 from models.yield_surrogate_v2 import YieldSurrogateV2
+from models.yield_surrogate_v2_teleconnection import YieldSurrogateV2Teleconnection
 
 if TYPE_CHECKING:
     from api.config import APISettings
@@ -20,19 +21,25 @@ logger = logging.getLogger(__name__)
 
 _V1_DEFAULT = "models/yield_surrogate_v1.pt"
 _V2_DEFAULT = "models/yield_surrogate_v2.pt"
+_TELECONNECTION_DEFAULT = "models/yield_surrogate_v2_teleconnection.pt"
+
+YieldModel = YieldSurrogateModel | YieldSurrogateV2 | YieldSurrogateV2Teleconnection
 
 
 @runtime_checkable
 class YieldSurrogateProtocol(Protocol):
-    """Common inference surface for v1 and v2 yield surrogates."""
+    """Common inference surface for yield surrogates."""
 
     def forward(
         self,
         climate: torch.Tensor,
         static: torch.Tensor,
         region_id: torch.Tensor | None = None,
+        teleconnection: object | None = None,
         *,
         doy: torch.Tensor | None = None,
+        lat: float | torch.Tensor = 6.0,
+        lon: float | torch.Tensor = -2.0,
     ) -> torch.Tensor: ...
 
     def eval(self) -> YieldSurrogateProtocol: ...
@@ -55,17 +62,40 @@ def _resolve_checkpoint_path(
     return Path(default), version
 
 
+def _teleconnection_enabled(settings: APISettings | None) -> bool:
+    if settings is None:
+        return False
+    if not settings.enable_teleconnection:
+        return False
+    return settings.teleconnection_checkpoint_path.is_file()
+
+
 def load_yield_model(
     checkpoint_path: str | None = None,
     *,
     settings: APISettings | None = None,
-) -> YieldSurrogateModel | YieldSurrogateV2:
+) -> YieldModel:
     """
-    Load :class:`YieldSurrogateModel` (v1) or :class:`YieldSurrogateV2` (v2).
+    Load yield surrogate (v1/v2) optionally wrapped with teleconnection GNN.
 
-    v2 uses PAPE with zero-init when loading v1 weights. Missing v2 checkpoints
-    fall back to v1 via :meth:`YieldSurrogateV2.from_v1_checkpoint` when enabled.
+    When ``ENABLE_TELECONNECTION`` is true and the teleconnection checkpoint exists,
+    returns :class:`~models.yield_surrogate_v2_teleconnection.YieldSurrogateV2Teleconnection`.
     """
+    if _teleconnection_enabled(settings):
+        assert settings is not None
+        sur_path = settings.model_checkpoint_path or _V2_DEFAULT
+        if not Path(sur_path).is_file():
+            sur_path = _V2_DEFAULT
+        model = YieldSurrogateV2Teleconnection.from_checkpoints(
+            sur_path,
+            settings.teleconnection_checkpoint_path,
+        )
+        logger.info(
+            "Loaded YieldSurrogateV2 + teleconnection from %s",
+            settings.teleconnection_checkpoint_path,
+        )
+        return model
+
     path, version = _resolve_checkpoint_path(checkpoint_path, settings=settings)
     galileo_dim = 0
     if settings is not None and settings.use_galileo_embedding:
@@ -118,7 +148,7 @@ def load_casej_model(
     *,
     settings: APISettings | None = None,
 ) -> CASEJSurrogate:
-    """Load :class:`~models.casej_surrogate.CASEJSurrogate` for ``/simulate-scenario``."""
+    """Load :class:`~models.casej_surrogate.CASEJSurrogate` (legacy scenario fallback)."""
     galileo_dim = 0
     if settings is not None and settings.use_galileo_embedding:
         galileo_dim = settings.galileo_embedding_dim

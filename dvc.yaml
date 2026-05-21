@@ -2,6 +2,13 @@
 # Core MLOps stages: GEE ingest markers → model training → backbone benchmark.
 
 stages:
+  stage_ingest_teleconnection:
+    cmd: python -m data.teleconnection_ingest --refresh
+    deps:
+      - src/data/teleconnection_ingest.py
+    outs:
+      - data/external/teleconnection_indices.parquet
+
   stage_ingest_gee:
     cmd: python scripts/ingest_gee.py
     deps:

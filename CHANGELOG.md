@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Teleconnection GNN (ENSO Niño 3.4, Atlantic Niño Atl3, IOD) bias correction to yield surrogate (`models.teleconnection_gnn`, `data.teleconnection_ingest`, `YieldSurrogateV2Teleconnection`); scenario API defaults to v2+GNN stack.
 - Phenology-Aware Positional Encoding (PAPE) and `YieldSurrogateV2` with regional cocoa calendars (`config/phenology.yaml`, `models.pape`, `models.yield_surrogate_v2`); API default `YIELD_SURROGATE_VERSION=v2`.
 - Synthetic DiD (Arkhangelsky et al. 2021) and DiD method comparison harness (`analysis.synthdid`, `analysis.did_comparison_harness`).
 - Callaway-Sant'Anna staggered DiD and Borusyak-Jaravel-Spiess imputation estimators for valid causal estimation under staggered shade-tree/agroforestry rollouts (`analysis.csdid`, `analysis.bjs_imputation`, `did_estimator` dispatcher).
