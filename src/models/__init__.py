@@ -23,7 +23,9 @@ from models.yield_surrogate import (
     YieldSurrogateModel,
     predict_with_uncertainty,
 )
+from models.teleconnection_gnn import TeleconnectionGNN
 from models.yield_surrogate_v2 import YieldSurrogateV2
+from models.yield_surrogate_v2_teleconnection import YieldSurrogateV2Teleconnection
 
 __all__ = [
     "CASEJPhysicsLoss",
@@ -43,7 +45,9 @@ __all__ = [
     "PhysicsInformedYieldLoss",
     "YieldPrediction",
     "PhenologyAwarePositionalEncoding",
+    "TeleconnectionGNN",
     "YieldSurrogateModel",
     "YieldSurrogateV2",
+    "YieldSurrogateV2Teleconnection",
     "predict_with_uncertainty",
 ]

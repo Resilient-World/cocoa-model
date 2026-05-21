@@ -21,6 +21,7 @@ dependencies = [
     "netcdf4>=1.6",
     "earthengine-api>=0.1.390",
     "torch>=2.1",
+    "torch-geometric>=2.5",
     "pytorch-lightning>=2.1",
     "huggingface_hub>=0.24",
     "einops>=0.7",

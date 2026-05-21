@@ -39,6 +39,7 @@ from api.scenario_conformal import apply_scenario_conformal
 from models.cqr import ConformalCalibrator, QuantileYieldSurrogate
 from models.yield_surrogate import CLIMATE_IDX, YieldSurrogateModel
 from models.yield_surrogate_v2 import YieldSurrogateV2, region_id_from_country_code, region_id_from_latlon
+from models.yield_surrogate_v2_teleconnection import YieldSurrogateV2Teleconnection
 
 if TYPE_CHECKING:
     from api.feature_resolver import FarmFeatureResolver
@@ -176,14 +177,14 @@ def _biotic_response_block(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def _region_id_tensor(
-    model: YieldSurrogateModel | YieldSurrogateV2,
+    model: YieldSurrogateModel | YieldSurrogateV2 | YieldSurrogateV2Teleconnection,
     climate: Tensor,
     *,
     lat: float,
     lon: float,
     country_code: str | None,
 ) -> Tensor | None:
-    if not isinstance(model, YieldSurrogateV2):
+    if not isinstance(model, (YieldSurrogateV2, YieldSurrogateV2Teleconnection)):
         return None
     if country_code:
         rid = region_id_from_country_code(country_code)
@@ -193,13 +194,25 @@ def _region_id_tensor(
 
 
 def yield_model_forward(
-    model: YieldSurrogateModel | YieldSurrogateV2,
+    model: YieldSurrogateModel | YieldSurrogateV2 | YieldSurrogateV2Teleconnection,
     climate: Tensor,
     static: Tensor,
     *,
     region_id: Tensor | None = None,
+    teleconnection: dict[str, Any] | None = None,
+    lat: float = 6.0,
+    lon: float = -2.0,
 ) -> Tensor:
-    """Dispatch v1/v2 forward (v2 accepts optional ``region_id``)."""
+    """Dispatch v1/v2/teleconnection composite forward."""
+    if isinstance(model, YieldSurrogateV2Teleconnection):
+        return model(
+            climate,
+            static,
+            region_id,
+            teleconnection,
+            lat=lat,
+            lon=lon,
+        )
     if isinstance(model, YieldSurrogateV2):
         return model(climate, static, region_id)
     return model(climate, static)
@@ -207,19 +220,30 @@ def yield_model_forward(
 
 @torch.no_grad()
 def predict_yield_samples(
-    model: YieldSurrogateModel | YieldSurrogateV2,
+    model: YieldSurrogateModel | YieldSurrogateV2 | YieldSurrogateV2Teleconnection,
     climate: Tensor,
     static: Tensor,
     num_samples: int,
     *,
     region_id: Tensor | None = None,
+    teleconnection: dict[str, Any] | None = None,
+    lat: float = 6.0,
+    lon: float = -2.0,
 ) -> Tensor:
     """Run stochastic forward passes; returns ``[num_samples]`` yields."""
     was_training = model.training
     model.eval()
     samples = torch.stack(
         [
-            yield_model_forward(model, climate, static, region_id=region_id).squeeze(0)
+            yield_model_forward(
+                model,
+                climate,
+                static,
+                region_id=region_id,
+                teleconnection=teleconnection,
+                lat=lat,
+                lon=lon,
+            ).squeeze(0)
             for _ in range(num_samples)
         ],
         dim=0,
@@ -373,7 +397,7 @@ def _optional_eudr_status(
 
 def simulate_intervention(
     request: SimulateInterventionRequest,
-    model: YieldSurrogateModel | YieldSurrogateV2,
+    model: YieldSurrogateModel | YieldSurrogateV2 | YieldSurrogateV2Teleconnection,
     feature_resolver: FarmFeatureResolver,
     *,
     num_samples: int = 50,
@@ -430,12 +454,27 @@ def simulate_intervention(
         lon=lon,
         country_code=request.country_code,
     )
+    teleconnection = feature_resolver.resolve_teleconnection(lat, lon, year)
     if not use_cqr:
         samples_cf = predict_yield_samples(
-            model, climate_cf, static_cf, num_samples, region_id=region_id
+            model,
+            climate_cf,
+            static_cf,
+            num_samples,
+            region_id=region_id,
+            teleconnection=teleconnection,
+            lat=lat,
+            lon=lon,
         )
         samples_factual = predict_yield_samples(
-            model, climate_factual, static_factual, num_samples, region_id=region_id
+            model,
+            climate_factual,
+            static_factual,
+            num_samples,
+            region_id=region_id,
+            teleconnection=teleconnection,
+            lat=lat,
+            lon=lon,
         )
 
     ds_cf = _climate_tensor_to_dataset(climate_cf, year)
@@ -558,7 +597,7 @@ def simulate_intervention(
 @torch.no_grad()
 def simulate_climate_attribution(
     request: SimulateClimateAttributionRequest,
-    model: YieldSurrogateModel | YieldSurrogateV2,
+    model: YieldSurrogateModel | YieldSurrogateV2 | YieldSurrogateV2Teleconnection,
     feature_resolver: FarmFeatureResolver,
     *,
     counterfactual_zarr_path: Path,
@@ -612,11 +651,26 @@ def simulate_climate_attribution(
         lon=lon,
         country_code=request.country_code,
     )
+    teleconnection = feature_resolver.resolve_teleconnection(lat, lon, year)
     samples_f = predict_yield_samples(
-        model, climate_factual_tensor, static_cf, num_samples, region_id=region_id
+        model,
+        climate_factual_tensor,
+        static_cf,
+        num_samples,
+        region_id=region_id,
+        teleconnection=teleconnection,
+        lat=lat,
+        lon=lon,
     )
     samples_cf = predict_yield_samples(
-        model, climate_cf_world, static_cf, num_samples, region_id=region_id
+        model,
+        climate_cf_world,
+        static_cf,
+        num_samples,
+        region_id=region_id,
+        teleconnection=teleconnection,
+        lat=lat,
+        lon=lon,
     )
 
     y_f = float(_blend_mc_numpy(samples_f.detach().cpu().numpy(), request.current_yield, yield_blend_weight).mean())
@@ -660,7 +714,7 @@ def simulate_climate_attribution(
 @torch.no_grad()
 def simulate_scenario(
     request: SimulateScenarioRequest,
-    model: CASEJSurrogate,
+    model: CASEJSurrogate | YieldSurrogateModel | YieldSurrogateV2 | YieldSurrogateV2Teleconnection,
     feature_resolver: FarmFeatureResolver,
     *,
     historical_zarr_path: Path,
@@ -730,12 +784,47 @@ def simulate_scenario(
     for tensor in (climate_baseline, climate_projected):
         tensor[..., CLIMATE_IDX["co2_ppm"]] = scenario_co2
 
-    samples_cf = predict_scenario_yield_samples(
-        model, climate_baseline, static_cf, scenario_co2, num_samples
+    use_casej = (
+        settings is not None
+        and getattr(settings, "scenario_yield_backend", "v2_teleconnection") == "casej"
     )
-    samples_factual = predict_scenario_yield_samples(
-        model, climate_projected, static_factual, scenario_co2, num_samples
-    )
+    if use_casej and isinstance(model, CASEJSurrogate):
+        samples_cf = predict_scenario_yield_samples(
+            model, climate_baseline, static_cf, scenario_co2, num_samples
+        )
+        samples_factual = predict_scenario_yield_samples(
+            model, climate_projected, static_factual, scenario_co2, num_samples
+        )
+    else:
+        region_id = _region_id_tensor(
+            model,
+            climate_baseline,
+            lat=lat,
+            lon=lon,
+            country_code=request.country_code,
+        )
+        tele_year = horizon
+        teleconnection = feature_resolver.resolve_teleconnection(lat, lon, tele_year)
+        samples_cf = predict_yield_samples(
+            model,
+            climate_baseline,
+            static_cf,
+            num_samples,
+            region_id=region_id,
+            teleconnection=teleconnection,
+            lat=lat,
+            lon=lon,
+        )
+        samples_factual = predict_yield_samples(
+            model,
+            climate_projected,
+            static_factual,
+            num_samples,
+            region_id=region_id,
+            teleconnection=teleconnection,
+            lat=lat,
+            lon=lon,
+        )
 
     baseline_np = samples_cf.detach().cpu().numpy().reshape(-1)
     projected_np = samples_factual.detach().cpu().numpy().reshape(-1)

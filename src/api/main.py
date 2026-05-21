@@ -152,8 +152,11 @@ def simulate_scenario_endpoint(request: SimulateScenarioRequest) -> SimulateScen
     Applies NASA/GDDP-CMIP6 monthly deltas via ``ScenarioBuilder`` to the historical ERA5 Zarr,
     then runs paired Monte Carlo yields for baseline vs intervention with mean / p10 / p90 bands.
     """
-    model: CASEJSurrogate = app.state.casej_model
     settings: APISettings = app.state.settings
+    if settings.scenario_yield_backend == "casej":
+        model = app.state.casej_model
+    else:
+        model = app.state.yield_model
 
     try:
         return simulate_scenario(
