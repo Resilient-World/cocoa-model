@@ -12,6 +12,7 @@ If background jobs were started from Cursor or a terminal (for example `train_ag
 | `python scripts/fit_ensemble_v2_weights.py` | Thousands of tile forwards × 8 regions × grid search | Fitted `config/ensemble_weights.yaml` regions |
 | `python -m training.train_galileo_cocoa` | Large multimodal encoder | `models/galileo_cocoa_seg.pt` |
 | `python scripts/validate_dvds.py --reps 200 --n 1000` | ~200 × (DVDS + Zhao bootstrap B=500) per replication; multi-hour on laptop CPU | Production gate report `reports/sensitivity/dvds_validation_<date>.md` with full Section 7.1 coverage |
+| `python scripts/run_corrdiff_scenario_bulk.py` (48 strata) | ~190 GPU-hours on H100 (~4 h/stratum) | `data/processed/corrdiff_{ssp}_{horizon}_{region}.zarr` + manifest |
 
 **Stopping incomplete jobs does not require a git revert.** All training logic lives in the repository; only **checkpoints and fitted YAML** are missing until you rerun on GPU/HPC.
 
@@ -118,6 +119,24 @@ python -m analysis.run_evaluation --panel data/raw/farm_panel.parquet --out repo
 ```
 
 Uses PSM + DiD (`src/analysis/`).
+
+### CorrDiff-CMIP6 scenario downscaling (HPC only)
+
+Optional km-scale CMIP6 downscaling for `/simulate-scenario` (`downscaling_method=corrdiff`). Default `linear_delta` works on CPU.
+
+```bash
+pip install -e ".[corrdiff]"
+python scripts/download_corrdiff_checkpoint.py   # HF weights → models/corrdiff_cmip6/
+PYTHONPATH=src python scripts/run_corrdiff_scenario_bulk.py --strata ssp245:2030:ghana
+PYTHONPATH=src python scripts/validate_corrdiff_vs_linear_delta.py --quick
+```
+
+Hardware: **A100-80GB or H100**; checkpoint `nvidia/corrdiff-cmip6-era5`. See [`corrdiff_compute.md`](corrdiff_compute.md).
+
+```bash
+pkill -f "run_corrdiff_scenario_bulk.py" || true
+pkill -f "validate_corrdiff_vs_linear_delta.py" || true
+```
 
 **DVDS MSM validation (deferred on laptop):** Implementation and unit tests are merged; the **full coverage gate** is not run locally until you have more compute (workstation or HPC). Smoke only:
 

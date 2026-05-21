@@ -114,7 +114,7 @@ def validate_stratum_holdout(
     initial_path: Path,
     eta: float,
 ) -> dict[str, float]:
-    key = stratum_key(scenario, horizon, region)
+    key = stratum_key(scenario, horizon, region, downscaling_method="linear_delta")
     q_init = _load_initial_q(initial_path, key)
     updater = ECIIntegral(ALPHA, eta=eta, decay=0.95, window=100, q_init=q_init)
     cov, _, _, _ = run_online_coverage(
@@ -186,6 +186,12 @@ def main() -> None:
         help="Use synthetic SSP-shifted score streams (default when no holdout panel)",
     )
     parser.add_argument("--json-out", type=Path, default=None)
+    parser.add_argument(
+        "--downscaling",
+        choices=("linear_delta", "corrdiff"),
+        default="linear_delta",
+        help="Stratum key suffix; corrdiff uses separate :corrdiff keys",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
@@ -200,7 +206,9 @@ def main() -> None:
     for region in REGIONS:
         for scenario in SCENARIOS:
             for horizon in HORIZONS:
-                key = stratum_key(scenario, horizon, region)
+                key = stratum_key(
+                    scenario, horizon, region, downscaling_method=args.downscaling
+                )
                 if use_synthetic:
                     row = validate_stratum_synthetic(
                         key=key,

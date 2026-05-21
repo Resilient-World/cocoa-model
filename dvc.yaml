@@ -167,3 +167,12 @@ stages:
       - src/analysis/psm_matching.py
     metrics:
       - reports/causal_eval.json
+
+  # Manual HPC stage — CorrDiff-CMIP6 scenario ensembles (~190 GPU-hours for 48 strata)
+  stage_corrdiff_scenario_bulk:
+    cmd: python scripts/run_corrdiff_scenario_bulk.py
+    deps:
+      - scripts/run_corrdiff_scenario_bulk.py
+      - src/counterfactual/corrdiff_downscaler.py
+    outs:
+      - data/processed/corrdiff_bulk_manifest.json

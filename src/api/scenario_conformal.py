@@ -150,6 +150,7 @@ def apply_scenario_conformal(
         request.scenario,
         request.horizon_year,
         resolve_region(request.farm_location.lat, request.farm_location.lon),
+        downscaling_method=request.downscaling_method,
     )
     updater = store.get_updater(key, method=method)
 

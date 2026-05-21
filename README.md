@@ -524,7 +524,7 @@ Uses [`CASEJSurrogate`](src/models/casej_surrogate.py) (PINN emulating Asante et
 
 Train: `python scripts/generate_casej_training_set.py` → `python scripts/train_casej_surrogate.py` → `models/casej_surrogate.pt` (`CASEJ_CHECKPOINT_PATH`).
 
-**Extra request fields:** `scenario` (`ssp245` \| `ssp585`) and `horizon_year` (`2030` \| `2050` \| `2080`). The horizon selects the CMIP6 climatology window used for those monthly deltas; `CLIMATE_REFERENCE_YEAR` still picks which calendar year is sliced from the adjusted ERA5 timeline for the surrogate.
+**Extra request fields:** `scenario` (`ssp245` \| `ssp585`) and `horizon_year` (`2030` \| `2050` \| `2080`). Optional `downscaling_method`: `linear_delta` (default, `ScenarioBuilder` monthly deltas on ERA5) or `corrdiff` (precomputed CorrDiff-CMIP6 ensemble Zarr per stratum — requires `scripts/run_corrdiff_scenario_bulk.py` on GPU; returns stochastic bands aggregated over N diffusion samples). The horizon selects the CMIP6 climatology window used for those monthly deltas; `CLIMATE_REFERENCE_YEAR` still picks which calendar year is sliced from the adjusted ERA5 timeline for the surrogate (CorrDiff uses `horizon_year` as the climate slice).
 
 **Response:** `baseline_yield_tonnes_per_ha` and `projected_yield_tonnes_per_ha` each expose `mean`, `p10`, and `p90` from paired Monte Carlo forwards; `avoided_loss_tonnes` uses per-sample `max(projected − baseline, 0) × farm_size_ha`; `financial_impact_usd_mean` multiplies the **mean** avoided tonnes by `cocoa_price_usd`.
 

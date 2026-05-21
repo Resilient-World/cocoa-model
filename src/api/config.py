@@ -94,6 +94,23 @@ class APISettings(BaseSettings):
     attrici_gmt_file: Path = _REPO_ROOT / "data" / "raw" / "gmt" / "ssa_gmt.nc"
     attrici_cache_dir: Path = _REPO_ROOT / "data" / "cache" / "attrici_counterfactual"
     cmip6_zarr_path: Path = _REPO_ROOT / "data" / "processed" / "cmip6_ensemble.zarr"
+    corrdiff_processed_dir: Path = Field(
+        default=_REPO_ROOT / "data" / "processed",
+        validation_alias="CORRDIFF_PROCESSED_DIR",
+    )
+    corrdiff_allow_inline: bool = Field(
+        default=False,
+        validation_alias="CORRDIFF_ALLOW_INLINE",
+        description="Dev-only: run CorrDiff on cache miss (requires GPU + [corrdiff] extra)",
+    )
+    corrdiff_source_id: str = Field(default="CanESM5", validation_alias="CORRDIFF_SOURCE_ID")
+    corrdiff_variant_label: str = Field(default="r1i1p2f1", validation_alias="CORRDIFF_VARIANT_LABEL")
+    corrdiff_number_of_samples: int = Field(default=8, validation_alias="CORRDIFF_NUMBER_OF_SAMPLES")
+    corrdiff_solver: Literal["euler", "heun"] = Field(default="euler", validation_alias="CORRDIFF_SOLVER")
+    corrdiff_sampler_type: Literal["deterministic", "stochastic"] = Field(
+        default="stochastic",
+        validation_alias="CORRDIFF_SAMPLER_TYPE",
+    )
     static_zarr_path: Path = _REPO_ROOT / "data" / "processed" / "site_static.zarr"
     feature_cache_dir: Path = _REPO_ROOT / "data" / "cache" / "api_features"
     feature_store_root: Path | None = None

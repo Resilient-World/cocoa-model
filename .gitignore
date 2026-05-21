@@ -91,6 +91,9 @@ checkpoints/
 !/data/external/
 !/data/external/.gitkeep
 
+# CorrDiff precomputed scenario ensembles (HPC bulk; see docs/corrdiff_compute.md)
+data/processed/corrdiff_*.zarr
+
 # Large geospatial artifacts
 *.tif
 *.tiff
