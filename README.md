@@ -18,6 +18,7 @@ Geospatial machine learning and causal impact modeling for **resilient cocoa** i
 - [Repository layout](#repository-layout)
 - [Technology stack](#technology-stack)
 - [Getting started](#getting-started)
+  - [Quickstart Demo](#quickstart-demo)
 - [Configuration](#configuration)
 - [Package reference](#package-reference)
   - [`src/data` — ingestion and datasets](#srcdata--ingestion-and-datasets)
@@ -203,6 +204,22 @@ python -m data.gee_auth
 ```
 
 `gee_auth.py` runs a Ghana test point elevation query (SRTM) to verify connectivity.
+
+### Quickstart Demo
+
+Run the full product pipeline on a sample Côte d'Ivoire farm polygon and emit one JSON summary (no GEE credentials required):
+
+```bash
+python scripts/demo_end_to_end.py --mock-gee --pretty
+```
+
+Output: `reports/demo/e2e_civ.json` with `climate_attributed_loss_t_per_ha`, `intervention_avoided_loss_t_per_ha`, `total_avoided_loss_usd` (90% interval), `eudr_status`, and `source_attributions` for every dataset. With Earth Engine configured, omit `--mock-gee` for live FDP / ERA5 sampling.
+
+```bash
+pytest tests/test_demo_end_to_end.py -q
+```
+
+See [CHANGELOG.md](CHANGELOG.md) for release notes (v0.2.0).
 
 ---
 

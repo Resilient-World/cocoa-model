@@ -542,8 +542,12 @@ def simulate_climate_attribution(
         intervention_type=None,
     )
 
-    cf_ds = xr.open_zarr(counterfactual_zarr_path, consolidated=True)
-    factual_ds = _climate_tensor_to_dataset(climate_factual_tensor, year)
+    cf_ds = xr.open_zarr(counterfactual_zarr_path, consolidated=False)
+    era5_path = getattr(feature_resolver.config, "era5_zarr_path", None)
+    if era5_path is not None and Path(era5_path).is_dir():
+        factual_ds = xr.open_zarr(era5_path, consolidated=False)
+    else:
+        factual_ds = _climate_tensor_to_dataset(climate_factual_tensor, year)
     cf_daily = extract_daily_climate_11ch(
         cf_ds,
         lat,
@@ -682,6 +686,7 @@ def simulate_scenario(
 
     avoided_arr = np.maximum(projected_blended - baseline_blended, 0.0) * request.farm_size_ha
     a_mean, a_p10, a_p90 = _mean_p10_p90(avoided_arr)
+    a_mean, a_p10, a_p90 = (max(0.0, a_mean), max(0.0, a_p10), max(0.0, a_p90))
 
     fin = calculate_financial_impact(
         a_mean,
