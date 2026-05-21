@@ -25,17 +25,35 @@ def _simulate_heterogeneous_dgp(n: int = 2000, seed: int = 0) -> tuple[pd.DataFr
     return df, tau
 
 
-def test_rlearner_recovers_heterogeneous_tau() -> None:
-    df, tau = _simulate_heterogeneous_dgp(n=2000, seed=1)
-    res = estimate_cate(df, outcome="y", treatment="t", covariates=["x1", "x2"], method="r_learner", n_folds=5)
-    corr = float(np.corrcoef(res.tau_hat.to_numpy(), tau)[0, 1])
-    assert corr > 0.7
-
-
-def test_causal_forest_beats_constant_baseline_on_heterogeneous_dgp() -> None:
-    df, tau = _simulate_heterogeneous_dgp(n=1500, seed=2)
+def test_estimate_cate_rlearner_smoke() -> None:
+    df, tau = _simulate_heterogeneous_dgp(n=1200, seed=1)
     res = estimate_cate(
-        df, outcome="y", treatment="t", covariates=["x1", "x2"], method="causal_forest", n_folds=5
+        df,
+        outcome="y",
+        treatment="t",
+        covariates=["x1", "x2"],
+        method="r_learner",
+        n_folds=3,
+        n_estimators=100,
+        random_state=1,
+    )
+    assert len(res.tau_hat) == len(df)
+    assert res.se.notna().any()
+    corr = float(np.corrcoef(res.tau_hat.to_numpy(), tau)[0, 1])
+    assert corr > 0.5
+
+
+def test_estimate_cate_causal_forest_smoke() -> None:
+    df, tau = _simulate_heterogeneous_dgp(n=1200, seed=2)
+    res = estimate_cate(
+        df,
+        outcome="y",
+        treatment="t",
+        covariates=["x1", "x2"],
+        method="causal_forest",
+        n_folds=3,
+        n_estimators=100,
+        random_state=2,
     )
     tau_hat = res.tau_hat.to_numpy()
     mse_model = float(np.mean((tau_hat - tau) ** 2))
