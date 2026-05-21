@@ -40,7 +40,7 @@ requests>=2.31
 
 # Optional (Callaway-Sant'Anna upgrade — not pinned yet):
 # differences>=0.2.0
-# linearmodels>=6.0
+linearmodels>=6.0
 
 # Optional: local ERA5 GeoTIFF export (pip install geemap or pip install -e ".[gee]")
 # geemap>=0.30
