@@ -44,6 +44,7 @@ dependencies = [
     "diskcache>=5.6",
     "h3>=4.0",
     "statsmodels>=0.14",  # event-study OLS with cluster-robust SEs
+    "linearmodels>=6.0",  # PanelOLS for BJS imputation staggered DiD
     "pooch>=1.8",
     "requests>=2.31",
     "xesmf>=0.8",
@@ -86,9 +87,8 @@ galileo = [
 # AgriFM Video Swin backbone (timm in core deps; weights via scripts/download_agrifm_weights.py)
 agrifm = []
 
-# Optional (Callaway-Sant'Anna upgrade — not pinned yet):
+# Optional extensions:
 # differences>=0.2.0
-# linearmodels>=6.0
 
 [tool.setuptools]
 package-dir = { "" = "src" }

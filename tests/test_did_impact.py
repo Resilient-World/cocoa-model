@@ -7,6 +7,7 @@ import pytest
 from analysis.did_impact import (
     calculate_avoided_revenue_loss,
     calculate_did_att,
+    did_estimator,
     event_study,
 )
 from analysis.psm_matching import propensity_score_match
@@ -211,3 +212,55 @@ def test_avoided_revenue_ci_propagation() -> None:
         < rev.total_avoided_revenue_usd
         < rev.total_avoided_revenue_ci_high_usd
     )
+
+
+def test_did_estimator_csdid_routes() -> None:
+    rows = []
+    for u in range(30):
+        g = float((u % 3) + 1)
+        for t in range(4):
+            rows.append({
+                "farm_id": f"u{u}",
+                "period": t,
+                "treatment_period": g,
+                "yield": 2.0 + 1.5 * (t >= g) + 0.01 * u,
+            })
+    panel = pd.DataFrame(rows)
+    res = did_estimator(panel, method="csdid", n_boot=50, random_state=0)
+    assert res.method == "csdid_simple_att"
+    assert res.att > 0
+
+
+def test_did_estimator_synthdid_raises() -> None:
+    panel = pd.DataFrame({
+        "farm_id": ["a"],
+        "period": [0],
+        "treatment_period": [np.nan],
+        "yield": [1.0],
+    })
+    with pytest.raises(NotImplementedError):
+        did_estimator(panel, method="synthdid")
+
+
+def test_staggered_deprecation_warning() -> None:
+    rows = []
+    for u, g in enumerate([1, 2, 3, 4]):
+        rows.append({
+            "farm_id": f"f{u}",
+            "match_pair_id": u,
+            "match_role": "treated",
+            "yield_pre_intervention": 1.0,
+            "yield_post_intervention": 2.0,
+            "treatment_period": float(g),
+        })
+        rows.append({
+            "farm_id": f"c{u}",
+            "match_pair_id": u,
+            "match_role": "control",
+            "yield_pre_intervention": 1.0,
+            "yield_post_intervention": 1.1,
+            "treatment_period": np.nan,
+        })
+    wide = pd.DataFrame(rows)
+    with pytest.warns(DeprecationWarning, match="Staggered"):
+        calculate_did_att(wide, unit_col="farm_id", treat_time_col="treatment_period")

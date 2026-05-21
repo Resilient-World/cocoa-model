@@ -10,13 +10,18 @@ Works with output from :func:`analysis.psm_matching.propensity_score_match`.
 
 from __future__ import annotations
 
+import warnings
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal, NamedTuple
+from typing import Literal, NamedTuple, Union
 
 import numpy as np
 import pandas as pd
 
+from analysis._staggered_did_common import is_staggered
+
 MatchRole = Literal["treated", "control"]
+DidMethod = Literal["pair_diff", "csdid", "bjs", "synthdid"]
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +178,8 @@ def calculate_did_att(
     match_pair_id_col: str = "match_pair_id",
     role_col: str = "match_role",
     treatment_col: str = "received_intervention",
+    treat_time_col: str = "treatment_period",
+    unit_col: str = "farm_id",
     n_boot: int = 1000,
     alpha: float = 0.05,
     random_state: int = 42,
@@ -183,7 +190,27 @@ def calculate_did_att(
     with a paired (pair-cluster) bootstrap SE/CI and a normal-approx p-value.
 
     Defaults preserve the previous public API; new uncertainty kwargs are optional.
+
+    Emits :class:`DeprecationWarning` when staggered adoption timing is detected
+    (multiple distinct ``treat_time_col`` values among treated units).
     """
+    if treat_time_col in matched_df.columns and unit_col in matched_df.columns:
+        if is_staggered(matched_df, treat_time_col, unit_col):
+            warnings.warn(
+                "Staggered treatment timing detected: pair-level DiD is not valid. "
+                "Use did_estimator(..., method='csdid') or method='bjs'.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+    elif "treatment_year" in matched_df.columns and unit_col in matched_df.columns:
+        if is_staggered(matched_df.rename(columns={"treatment_year": treat_time_col}), treat_time_col, unit_col):
+            warnings.warn(
+                "Staggered treatment timing detected: pair-level DiD is not valid. "
+                "Use did_estimator(..., method='csdid') or method='bjs'.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
     pairs = _pair_effects(
         matched_df,
         yield_pre_col=yield_pre_col,
@@ -350,3 +377,122 @@ def calculate_avoided_revenue_loss(
         total_avoided_revenue_ci_low_usd=total_low,
         total_avoided_revenue_ci_high_usd=total_high,
     )
+
+
+def _long_to_matched_wide(
+    panel_df: pd.DataFrame,
+    *,
+    unit_col: str,
+    time_col: str,
+    outcome_col: str,
+    treat_time_col: str,
+) -> pd.DataFrame:
+    """Pivot two-period panel to wide pre/post for pair_diff."""
+    times = sorted(panel_df[time_col].unique())
+    if len(times) < 2:
+        raise ValueError("pair_diff requires at least two time periods in panel")
+    pre_t, post_t = times[0], times[-1]
+    pre = panel_df.loc[panel_df[time_col] == pre_t, [unit_col, outcome_col, treat_time_col]].rename(
+        columns={outcome_col: "yield_pre_intervention"}
+    )
+    post = panel_df.loc[panel_df[time_col] == post_t, [unit_col, outcome_col]].rename(
+        columns={outcome_col: "yield_post_intervention"}
+    )
+    wide = pre.merge(post, on=unit_col)
+    wide["match_pair_id"] = np.arange(len(wide))
+    wide["match_role"] = np.where(wide[treat_time_col].notna(), "treated", "control")
+    wide["received_intervention"] = (wide["match_role"] == "treated").astype(int)
+    return wide
+
+
+def did_estimator(
+    df: pd.DataFrame,
+    method: DidMethod = "csdid",
+    *,
+    unit_col: str = "farm_id",
+    time_col: str = "period",
+    treat_time_col: str = "treatment_period",
+    outcome_col: str = "yield",
+    covariate_cols: Sequence[str] | None = None,
+    n_boot: int = 999,
+    alpha: float = 0.05,
+    random_state: int = 42,
+    **kwargs: object,
+) -> Union[DiDResult, "ATTResult", "BJSResult"]:
+    """
+    Route DiD estimation to pair-level, Callaway-Sant'Anna, or BJS imputation.
+
+    Parameters
+    ----------
+    method:
+        ``pair_diff`` — legacy matched pre/post DiD;
+        ``csdid`` — Callaway & Sant'Anna (2021) staggered DR DiD;
+        ``bjs`` — Borusyak, Jaravel & Spiess (2024) imputation;
+        ``synthdid`` — not implemented (raises ``NotImplementedError``).
+    """
+    from analysis.bjs_imputation import BJSResult, BorusyakJaravelSpiess
+    from analysis.csdid import ATTResult, CallawaySantAnna
+
+    if method == "synthdid":
+        raise NotImplementedError(
+            "SynthDiD is not implemented yet. Use method='csdid' or method='bjs'."
+        )
+
+    if method == "pair_diff":
+        wide = df
+        if time_col in df.columns and outcome_col in df.columns:
+            wide = _long_to_matched_wide(
+                df,
+                unit_col=unit_col,
+                time_col=time_col,
+                outcome_col=outcome_col,
+                treat_time_col=treat_time_col,
+            )
+        return calculate_did_att(
+            wide,
+            treat_time_col=treat_time_col,
+            unit_col=unit_col,
+            n_boot=int(kwargs.get("n_boot", n_boot)),  # type: ignore[arg-type]
+            alpha=alpha,
+            random_state=random_state,
+        )
+
+    if method == "csdid":
+        est = CallawaySantAnna(
+            df,
+            unit_col=unit_col,
+            time_col=time_col,
+            treat_time_col=treat_time_col,
+            outcome_col=outcome_col,
+            covariate_cols=covariate_cols,
+            n_boot=n_boot,
+            alpha=alpha,
+            random_state=random_state,
+        )
+        res = est.simple_att()
+        return DiDResult(
+            att=res.att,
+            treated_change_mean=float("nan"),
+            control_change_mean=float("nan"),
+            n_pairs=res.n_cells,
+            se=res.se,
+            ci_low=res.ci_low,
+            ci_high=res.ci_high,
+            p_value=None,
+            method="csdid_simple_att",
+        )
+
+    if method == "bjs":
+        est = BorusyakJaravelSpiess(
+            df,
+            unit_col=unit_col,
+            time_col=time_col,
+            treat_time_col=treat_time_col,
+            outcome_col=outcome_col,
+            covariate_cols=covariate_cols,
+            alpha=alpha,
+            random_state=random_state,
+        )
+        return est.estimate()
+
+    raise ValueError(f"Unknown did method: {method!r}")
