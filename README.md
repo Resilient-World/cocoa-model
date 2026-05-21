@@ -345,6 +345,8 @@ Exports support `drive` or `local` destinations (shared helpers in `era5_ingest`
 
 Designed as a fast surrogate for slow process models (e.g. ALMANAC-style simulators). **Not yet wired** to live ERA5 tensors from `era5_ingest` in production code paths.
 
+**Conformal yield UQ:** [`cqr.py`](src/models/cqr.py) provides split-conformal CQR (`ConformalCalibrator`). For **distribution shift** (e.g. CMIP6 deltas on `/simulate-scenario`), use online methods in [`aci.py`](src/models/aci.py), [`conformal_pid.py`](src/models/conformal_pid.py), [`eci.py`](src/models/eci.py), and [`quantile_yield_surrogate_online.py`](src/models/quantile_yield_surrogate_online.py). `MultiStepACI` stratifies thresholds by horizon (`2030`, `2050`, `2080`). Benchmark: `python -m models.validate_conformal_coverage --benchmark-online`.
+
 ---
 
 ### `src/training` — Prithvi fine-tuning
