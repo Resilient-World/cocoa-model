@@ -18,6 +18,14 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 UQMethod = Literal["mcd", "cqr"]
 
+ConformalMethod = Literal[
+    "split_cqr",
+    "aci",
+    "conformal_pid",
+    "eci",
+    "eci_integral",
+]
+
 
 class APISettings(BaseSettings):
     """Settings for the FastAPI inference service."""
@@ -87,6 +95,27 @@ class APISettings(BaseSettings):
     )
     cqr_checkpoint_path: Path = DEFAULT_CQR_CHECKPOINT
     cqr_calibrator_path: Path = DEFAULT_CQR_CALIBRATOR
+
+    conformal_method: ConformalMethod = Field(
+        default="eci_integral",
+        validation_alias="CONFORMAL_METHOD",
+        description="Online conformal for /simulate-scenario (split_cqr = static CQR)",
+    )
+    online_conformal_state_path: Path = Field(
+        default=_REPO_ROOT / "data" / "processed" / "online_conformal_state.json",
+        validation_alias="ONLINE_CONFORMAL_STATE_PATH",
+    )
+    conformal_initial_state_path: Path = Field(
+        default=_REPO_ROOT / "data" / "processed" / "conformal_initial_state.json",
+        validation_alias="CONFORMAL_INITIAL_STATE_PATH",
+    )
+    redis_url: str | None = Field(default=None, validation_alias="REDIS_URL")
+    conformal_alpha: float = Field(default=0.1, validation_alias="CONFORMAL_ALPHA")
+    eci_eta: float = Field(default=2.5, validation_alias="ECI_ETA")
+    eci_decay: float = Field(default=0.95, validation_alias="ECI_DECAY")
+    eci_window: int = Field(default=100, validation_alias="ECI_WINDOW")
+    aci_eta: float = Field(default=0.005, validation_alias="ACI_ETA")
+    pid_eta: float = Field(default=0.01, validation_alias="PID_ETA")
 
     def resolved_uq_method(self) -> UQMethod:
         """Use CQR when calibrator exists; otherwise fall back to MCD."""

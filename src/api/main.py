@@ -10,6 +10,7 @@ import pandas as pd
 
 from api.config import APISettings
 from api.cqr_loader import load_cqr_bundle
+from api.online_conformal_store import build_store_from_settings
 from api.feature_resolver import build_resolver_from_settings
 from api.model_loader import load_casej_model, load_yield_model
 from api.schemas import (
@@ -61,6 +62,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     cqr_model, cqr_calibrator = load_cqr_bundle(settings)
     app.state.cqr_model = cqr_model
     app.state.cqr_calibrator = cqr_calibrator
+    app.state.scenario_conformal_store = build_store_from_settings(settings)
     yield
 
 
@@ -164,6 +166,9 @@ def simulate_scenario_endpoint(request: SimulateScenarioRequest) -> SimulateScen
             yield_blend_weight=settings.yield_blend_weight,
             climate_year=settings.climate_reference_year,
             settings=settings,
+            cqr_model=app.state.cqr_model,
+            cqr_calibrator=app.state.cqr_calibrator,
+            scenario_conformal_store=app.state.scenario_conformal_store,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

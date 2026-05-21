@@ -21,12 +21,11 @@ logger = logging.getLogger(__name__)
 def load_cqr_bundle(
     settings: APISettings | None = None,
 ) -> tuple[QuantileYieldSurrogate | None, ConformalCalibrator | None]:
-    """Return (quantile model, calibrator) when artifacts exist."""
+    """Return (quantile model, calibrator) when checkpoint exists; calibrator may be None."""
     if settings is None:
         return None, None
 
-    calibrator = load_cqr_calibrator(settings.cqr_calibrator_path)
-    if calibrator is None:
+    if not settings.cqr_checkpoint_path.is_file():
         return None, None
 
     galileo_dim = settings.galileo_embedding_dim if settings.use_galileo_embedding else 0
@@ -34,4 +33,5 @@ def load_cqr_bundle(
         settings.cqr_checkpoint_path,
         galileo_dim=galileo_dim,
     )
+    calibrator = load_cqr_calibrator(settings.cqr_calibrator_path)
     return model, calibrator

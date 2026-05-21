@@ -131,6 +131,16 @@ class RankInterventionsResponse(BaseModel):
 
 UQMethod = Literal["mcd", "cqr"]
 
+ConfidenceMethod = Literal[
+    "mcd",
+    "cqr",
+    "split_cqr",
+    "aci",
+    "conformal_pid",
+    "eci",
+    "eci_integral",
+]
+
 
 class AvoidedLossInterval(BaseModel):
     """Confidence interval for avoided loss (tonnes)."""
@@ -144,13 +154,17 @@ class ConfidenceInterval(BaseModel):
     """Uncertainty bounds for simulation outputs."""
 
     avoided_loss_tonnes: AvoidedLossInterval
-    method: UQMethod = Field(
+    method: ConfidenceMethod = Field(
         default="mcd",
-        description="Uncertainty method: conformalized quantile regression or MC dropout",
+        description="Uncertainty method: MC dropout, CQR, or online conformal (scenario API)",
     )
     empirical_coverage: float | None = Field(
         default=None,
         description="Empirical coverage on calibration split when method=cqr (if known)",
+    )
+    coverage_running_avg: float | None = Field(
+        default=None,
+        description="Rolling mean coverage over the last 1000 online updates for this stratum",
     )
 
 
@@ -309,6 +323,10 @@ class SimulateScenarioResponse(BaseModel):
     financial_impact: FinancialImpactResponse = Field(
         ...,
         description="Avoided-loss valuation in USD, GHS, and XOF",
+    )
+    confidence_interval: ConfidenceInterval | None = Field(
+        default=None,
+        description="Avoided-loss conformal interval (online ECI-Integral by default)",
     )
     eudr_status: "EudrStatusBlock | None" = Field(
         default=None,

@@ -510,6 +510,16 @@ Train: `python scripts/generate_casej_training_set.py` → `python scripts/train
 
 **Response:** `baseline_yield_tonnes_per_ha` and `projected_yield_tonnes_per_ha` each expose `mean`, `p10`, and `p90` from paired Monte Carlo forwards; `avoided_loss_tonnes` uses per-sample `max(projected − baseline, 0) × farm_size_ha`; `financial_impact_usd_mean` multiplies the **mean** avoided tonnes by `cocoa_price_usd`.
 
+**Conformal UQ (default `CONFORMAL_METHOD=eci_integral`):** parallel CQR on SSP-adjusted climate with online ECI-Integral thresholds per `{scenario}:{horizon}:{region}`. Response includes:
+
+| Field | Description |
+|-------|-------------|
+| `confidence_interval.method` | e.g. `eci_integral`, `aci`, `cqr` (when `split_cqr`) |
+| `confidence_interval.coverage_running_avg` | Rolling mean 90% PI coverage over the last 1000 API updates for this stratum |
+| `confidence_interval.avoided_loss_tonnes` | `{ lower, upper, level }` conformal avoided-loss bounds |
+
+Financial impact `ci_low` / `ci_high` use the online conformal interval when conformal is active. Static split-CQR: set `CONFORMAL_METHOD=split_cqr`. See [`docs/conformal_calibration.md`](docs/conformal_calibration.md).
+
 Requires existing directories at `ERA5_ZARR_PATH` and `CMIP6_ZARR_PATH` (see `.env.example`).
 
 ---
