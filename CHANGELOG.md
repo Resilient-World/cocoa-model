@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Synthetic DiD (Arkhangelsky et al. 2021) and DiD method comparison harness (`analysis.synthdid`, `analysis.did_comparison_harness`).
 - Callaway-Sant'Anna staggered DiD and Borusyak-Jaravel-Spiess imputation estimators for valid causal estimation under staggered shade-tree/agroforestry rollouts (`analysis.csdid`, `analysis.bjs_imputation`, `did_estimator` dispatcher).
 - Adaptive Conformal Inference (ACI, Conformal PID, ECI per Wu et al. 2025 ICLR), MultiStepACI for `/simulate-scenario` horizon stratification; online CQR wrapper and `validate_conformal_coverage --benchmark-online` report.
 - `scripts/calibrate_online_conformal.py`, `scripts/validate_scenario_coverage.py`, and [`docs/conformal_calibration.md`](docs/conformal_calibration.md) for scenario conformal bootstrap and 48-strata coverage gates.

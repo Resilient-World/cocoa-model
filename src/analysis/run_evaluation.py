@@ -17,6 +17,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from analysis.did_comparison_harness import compare_did_methods
 from analysis.did_impact import calculate_did_att, event_study
 from analysis.psm_matching import propensity_score_match, standardized_mean_differences
 
@@ -117,6 +118,20 @@ def run_causal_evaluation(panel: pd.DataFrame) -> dict[str, Any]:
     if pretrend_p is None:
         pretrend_p = 1.0
 
+    did_comparison = compare_did_methods(
+        long_panel,
+        methods=["twfe", "csdid", "bjs", "synthdid"],
+        unit_col="farm_id",
+        time_col="period",
+        treat_time_col="treatment_period",
+        outcome_col="yield",
+        covariate_cols=[c for c in covariates if c in long_panel.columns],
+        n_boot=199,
+        n_placebo=100,
+        write_report=True,
+    )
+    logger.info("DiD method comparison:\n%s", did_comparison.to_string(index=False))
+
     return {
         "max_smd": float(balance.max_smd_matched),
         "max_smd_unmatched": float(balance.max_smd_unmatched),
@@ -127,6 +142,7 @@ def run_causal_evaluation(panel: pd.DataFrame) -> dict[str, Any]:
         "did_se": float(did.se) if did.se is not None else None,
         "n_pairs": int(did.n_pairs),
         "method": did.method,
+        "did_method_comparison": did_comparison.to_dict(orient="records"),
     }
 
 

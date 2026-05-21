@@ -428,14 +428,32 @@ def did_estimator(
         ``pair_diff`` — legacy matched pre/post DiD;
         ``csdid`` — Callaway & Sant'Anna (2021) staggered DR DiD;
         ``bjs`` — Borusyak, Jaravel & Spiess (2024) imputation;
-        ``synthdid`` — not implemented (raises ``NotImplementedError``).
+        ``synthdid`` — Arkhangelsky et al. (2021) Synthetic DiD.
     """
     from analysis.bjs_imputation import BJSResult, BorusyakJaravelSpiess
     from analysis.csdid import ATTResult, CallawaySantAnna
+    from analysis.synthdid import SyntheticDiD
 
     if method == "synthdid":
-        raise NotImplementedError(
-            "SynthDiD is not implemented yet. Use method='csdid' or method='bjs'."
+        est = SyntheticDiD(
+            df,
+            unit_col=unit_col,
+            time_col=time_col,
+            treat_time_col=treat_time_col,
+            outcome_col=outcome_col,
+            random_state=random_state,
+        )
+        res = est.estimate()
+        return DiDResult(
+            att=res.att,
+            treated_change_mean=float("nan"),
+            control_change_mean=float("nan"),
+            n_pairs=res.n_treated,
+            se=res.se,
+            ci_low=res.ci_low,
+            ci_high=res.ci_high,
+            p_value=res.p_value,
+            method="synthdid",
         )
 
     if method == "pair_diff":

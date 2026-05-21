@@ -231,15 +231,23 @@ def test_did_estimator_csdid_routes() -> None:
     assert res.att > 0
 
 
-def test_did_estimator_synthdid_raises() -> None:
-    panel = pd.DataFrame({
-        "farm_id": ["a"],
-        "period": [0],
-        "treatment_period": [np.nan],
-        "yield": [1.0],
-    })
-    with pytest.raises(NotImplementedError):
-        did_estimator(panel, method="synthdid")
+def test_did_estimator_synthdid_smoke() -> None:
+    rows = []
+    for u in range(8):
+        g = float(2 if u < 4 else np.nan)
+        for t in range(5):
+            rows.append(
+                {
+                    "farm_id": f"u{u}",
+                    "period": t,
+                    "treatment_period": g,
+                    "yield": 1.0 + 0.5 * (t >= g if not np.isnan(g) else 0) + 0.1 * u,
+                }
+            )
+    panel = pd.DataFrame(rows)
+    res = did_estimator(panel, method="synthdid", n_boot=20, random_state=0)
+    assert res.method == "synthdid"
+    assert np.isfinite(res.att)
 
 
 def test_staggered_deprecation_warning() -> None:
