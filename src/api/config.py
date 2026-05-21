@@ -8,7 +8,7 @@ from typing import Literal
 # Re-export for settings validation
 ExposureBackend = Literal["fdp", "galileo", "aef", "agrifm", "ensemble", "ensemble_v2"]
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from data.cocoa_exposure import DEFAULT_THRESHOLD
@@ -178,6 +178,22 @@ class APISettings(BaseSettings):
     drift_score_cap: float = Field(default=8.0, validation_alias="DRIFT_SCORE_CAP")
     drift_cusum_h: float = Field(default=5.0, validation_alias="DRIFT_CUSUM_H")
     drift_cusum_k: float = Field(default=0.0, validation_alias="DRIFT_CUSUM_K")
+
+    farm_panel_parquet_path: Path = Field(
+        default=_REPO_ROOT / "data" / "raw" / "farm_panel.parquet",
+        validation_alias="FARM_PANEL_PARQUET_PATH",
+    )
+    dvds_lambda_grid: list[float] = Field(
+        default_factory=lambda: [1.1, 1.25, 1.5, 2.0],
+        validation_alias="DVDS_LAMBDA_GRID",
+    )
+
+    @field_validator("dvds_lambda_grid", mode="before")
+    @classmethod
+    def _parse_dvds_lambda_grid(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [float(x.strip()) for x in value.split(",") if x.strip()]
+        return value
 
     @model_validator(mode="after")
     def _default_model_checkpoint(self) -> APISettings:

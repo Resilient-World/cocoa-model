@@ -53,9 +53,27 @@ class FinancialImpactResponse(BaseModel):
     xof: CurrencyFinancialBand
 
 
+class SensitivityBounds(BaseModel):
+    """DVDS sharp ATE partial identification bounds under the marginal sensitivity model."""
+
+    lambda_: float = Field(..., ge=1.0, description="Odds-ratio bound Λ on unmeasured confounding")
+    ate_lower: float = Field(..., description="Sharp lower bound on cooperative ATE (tonnes/ha)")
+    ate_upper: float = Field(..., description="Sharp upper bound on cooperative ATE (tonnes/ha)")
+    ci_lower: float = Field(..., description="95% Wald lower limit for the lower ATE bound")
+    ci_upper: float = Field(..., description="95% Wald upper limit for the upper ATE bound")
+    tipping_point_lambda: float | None = Field(
+        default=None,
+        description="Smallest Λ in [1,10] where the 95% Wald partial-ID band contains zero",
+    )
+
+
 class SimulateInterventionRequest(BaseModel):
     """Request body for POST /simulate-intervention."""
 
+    include_sensitivity: bool = Field(
+        default=False,
+        description="Attach cooperative DVDS sensitivity bounds (requires farm panel parquet or synthetic fallback)",
+    )
     farm_location: FarmLocation
     farm_size_ha: float = Field(..., gt=0.0, description="Farm area in hectares")
     current_yield: float = Field(
@@ -419,6 +437,13 @@ class SimulateInterventionResponse(BaseModel):
     eudr_status: "EudrStatusBlock | None" = Field(
         default=None,
         description="Present when request includes farm_polygon (EUDR Art. 3 / Whisp)",
+    )
+    sensitivity_bounds: list[SensitivityBounds] | None = Field(
+        default=None,
+        description=(
+            "Cooperative observational ATE bounds under Tan's MSM (DVDS); "
+            "not the per-farm MC/CQR interval. Present when include_sensitivity=true."
+        ),
     )
 
     @field_validator("avoided_loss_tonnes", "financial_impact_usd", mode="before")

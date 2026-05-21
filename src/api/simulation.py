@@ -584,6 +584,12 @@ def simulate_intervention(
 
     eudr_status = _optional_eudr_status(request, settings) if settings is not None else None
 
+    sensitivity_bounds = None
+    if request.include_sensitivity and settings is not None:
+        from api.causal_sensitivity import compute_sensitivity_bounds
+
+        sensitivity_bounds = compute_sensitivity_bounds(settings)
+
     return SimulateInterventionResponse(
         baseline_yield_tonnes_per_ha=baseline_yield,
         projected_yield_tonnes_per_ha=projected_yield,
@@ -605,6 +611,7 @@ def simulate_intervention(
             "projected": _biotic_response_block(biotic_factual),
         },
         eudr_status=eudr_status,
+        sensitivity_bounds=sensitivity_bounds,
     )
 
 

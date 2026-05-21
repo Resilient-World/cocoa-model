@@ -11,6 +11,7 @@ If background jobs were started from Cursor or a terminal (for example `train_ag
 | `python scripts/train_agrifm_cocoa.py` (no `--synthetic`) | ~100M-param Video Swin, 50 epochs | `models/agrifm_cocoa_seg.pt` |
 | `python scripts/fit_ensemble_v2_weights.py` | Thousands of tile forwards × 8 regions × grid search | Fitted `config/ensemble_weights.yaml` regions |
 | `python -m training.train_galileo_cocoa` | Large multimodal encoder | `models/galileo_cocoa_seg.pt` |
+| `python scripts/validate_dvds.py --reps 200 --n 1000` | ~200 × (DVDS + Zhao bootstrap B=500) per replication; multi-hour on laptop CPU | Production gate report `reports/sensitivity/dvds_validation_<date>.md` with full Section 7.1 coverage |
 
 **Stopping incomplete jobs does not require a git revert.** All training logic lives in the repository; only **checkpoints and fitted YAML** are missing until you rerun on GPU/HPC.
 
@@ -18,6 +19,7 @@ If background jobs were started from Cursor or a terminal (for example `train_ag
 # Optional: find and stop stray training processes
 pkill -f "train_agrifm_cocoa.py" || true
 pkill -f "fit_ensemble_v2_weights.py" || true
+pkill -f "validate_dvds.py" || true
 ```
 
 CI and DVC smoke stages use `--synthetic` / `--quick` and are the only training expected to pass on CPU.
@@ -116,6 +118,20 @@ python -m analysis.run_evaluation --panel data/raw/farm_panel.parquet --out repo
 ```
 
 Uses PSM + DiD (`src/analysis/`).
+
+**DVDS MSM validation (deferred on laptop):** Implementation and unit tests are merged; the **full coverage gate** is not run locally until you have more compute (workstation or HPC). Smoke only:
+
+```bash
+PYTHONPATH=src python scripts/validate_dvds.py --reps 5 --n 500
+```
+
+Production gate (Section 7.1 binary DGP, 200 replications, Zhao bootstrap comparison):
+
+```bash
+PYTHONPATH=src python scripts/validate_dvds.py --reps 200 --n 1000
+```
+
+See [`docs/sensitivity.md`](sensitivity.md) and commit the generated `reports/sensitivity/dvds_validation_<date>.md` after the full run.
 
 ### Phase 5 — Verify product path
 
