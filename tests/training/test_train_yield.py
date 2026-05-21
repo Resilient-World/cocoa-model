@@ -122,4 +122,5 @@ def test_blend_weight_zero_path_uses_pure_model(
 def test_api_settings_default_blend_zero() -> None:
     settings = APISettings()
     assert settings.yield_blend_weight == 0.0
-    assert settings.model_checkpoint_path == "models/yield_surrogate_v1.pt"
+    assert settings.yield_surrogate_version == "v2"
+    assert settings.model_checkpoint_path == "models/yield_surrogate_v2.pt"

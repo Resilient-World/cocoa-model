@@ -38,6 +38,7 @@ from models.casej_surrogate import CASEJSurrogate
 from api.scenario_conformal import apply_scenario_conformal
 from models.cqr import ConformalCalibrator, QuantileYieldSurrogate
 from models.yield_surrogate import CLIMATE_IDX, YieldSurrogateModel
+from models.yield_surrogate_v2 import YieldSurrogateV2, region_id_from_country_code, region_id_from_latlon
 
 if TYPE_CHECKING:
     from api.feature_resolver import FarmFeatureResolver
@@ -174,18 +175,53 @@ def _biotic_response_block(result: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _region_id_tensor(
+    model: YieldSurrogateModel | YieldSurrogateV2,
+    climate: Tensor,
+    *,
+    lat: float,
+    lon: float,
+    country_code: str | None,
+) -> Tensor | None:
+    if not isinstance(model, YieldSurrogateV2):
+        return None
+    if country_code:
+        rid = region_id_from_country_code(country_code)
+    else:
+        rid = region_id_from_latlon(lat, lon)
+    return torch.tensor([rid], dtype=torch.long, device=climate.device)
+
+
+def yield_model_forward(
+    model: YieldSurrogateModel | YieldSurrogateV2,
+    climate: Tensor,
+    static: Tensor,
+    *,
+    region_id: Tensor | None = None,
+) -> Tensor:
+    """Dispatch v1/v2 forward (v2 accepts optional ``region_id``)."""
+    if isinstance(model, YieldSurrogateV2):
+        return model(climate, static, region_id)
+    return model(climate, static)
+
+
 @torch.no_grad()
 def predict_yield_samples(
-    model: YieldSurrogateModel,
+    model: YieldSurrogateModel | YieldSurrogateV2,
     climate: Tensor,
     static: Tensor,
     num_samples: int,
+    *,
+    region_id: Tensor | None = None,
 ) -> Tensor:
     """Run stochastic forward passes; returns ``[num_samples]`` yields."""
     was_training = model.training
     model.eval()
     samples = torch.stack(
-        [model(climate, static).squeeze(0) for _ in range(num_samples)],
+        [
+            yield_model_forward(model, climate, static, region_id=region_id).squeeze(0)
+            for _ in range(num_samples)
+        ],
         dim=0,
     )
     if was_training:
@@ -337,7 +373,7 @@ def _optional_eudr_status(
 
 def simulate_intervention(
     request: SimulateInterventionRequest,
-    model: YieldSurrogateModel,
+    model: YieldSurrogateModel | YieldSurrogateV2,
     feature_resolver: FarmFeatureResolver,
     *,
     num_samples: int = 50,
@@ -387,9 +423,20 @@ def simulate_intervention(
 
     samples_cf: Tensor | None = None
     samples_factual: Tensor | None = None
+    region_id = _region_id_tensor(
+        model,
+        climate_cf,
+        lat=lat,
+        lon=lon,
+        country_code=request.country_code,
+    )
     if not use_cqr:
-        samples_cf = predict_yield_samples(model, climate_cf, static_cf, num_samples)
-        samples_factual = predict_yield_samples(model, climate_factual, static_factual, num_samples)
+        samples_cf = predict_yield_samples(
+            model, climate_cf, static_cf, num_samples, region_id=region_id
+        )
+        samples_factual = predict_yield_samples(
+            model, climate_factual, static_factual, num_samples, region_id=region_id
+        )
 
     ds_cf = _climate_tensor_to_dataset(climate_cf, year)
     ds_factual = _climate_tensor_to_dataset(climate_factual, year)
@@ -511,7 +558,7 @@ def simulate_intervention(
 @torch.no_grad()
 def simulate_climate_attribution(
     request: SimulateClimateAttributionRequest,
-    model: YieldSurrogateModel,
+    model: YieldSurrogateModel | YieldSurrogateV2,
     feature_resolver: FarmFeatureResolver,
     *,
     counterfactual_zarr_path: Path,
@@ -558,8 +605,19 @@ def simulate_climate_attribution(
     )
     climate_cf_world = torch.from_numpy(cf_daily).unsqueeze(0)
 
-    samples_f = predict_yield_samples(model, climate_factual_tensor, static_cf, num_samples)
-    samples_cf = predict_yield_samples(model, climate_cf_world, static_cf, num_samples)
+    region_id = _region_id_tensor(
+        model,
+        climate_factual_tensor,
+        lat=lat,
+        lon=lon,
+        country_code=request.country_code,
+    )
+    samples_f = predict_yield_samples(
+        model, climate_factual_tensor, static_cf, num_samples, region_id=region_id
+    )
+    samples_cf = predict_yield_samples(
+        model, climate_cf_world, static_cf, num_samples, region_id=region_id
+    )
 
     y_f = float(_blend_mc_numpy(samples_f.detach().cpu().numpy(), request.current_yield, yield_blend_weight).mean())
     y_cf = float(_blend_mc_numpy(samples_cf.detach().cpu().numpy(), request.current_yield, yield_blend_weight).mean())

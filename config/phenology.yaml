@@ -1,0 +1,50 @@
+# Regional cocoa phenology calendars (day-of-year, inclusive start / exclusive end).
+# Wrap year-end ranges as two intervals: [[start, 366], [1, end]].
+#
+# Literature anchors (West Africa bimodal pattern):
+# - Ghana: Adjalloo et al. (2012) — main season Oct–Mar, mid-crop Apr–Jul.
+# - Côte d'Ivoire: Aïkpokpodion (2010) — analogous bimodal calendar.
+#
+# Stages: dry_season | main_crop_setting | main_crop_pod_dev | mid_crop
+
+regions:
+  ghana:
+    dry_season: [[122, 244]]
+    main_crop_setting: [[244, 306]]
+    main_crop_pod_dev: [[306, 366], [1, 91]]
+    mid_crop: [[91, 122]]
+  civ:
+    dry_season: [[122, 244]]
+    main_crop_setting: [[244, 306]]
+    main_crop_pod_dev: [[306, 366], [1, 91]]
+    mid_crop: [[91, 122]]
+  cameroon:
+    dry_season: [[135, 255]]
+    main_crop_setting: [[255, 315]]
+    main_crop_pod_dev: [[315, 366], [1, 100]]
+    mid_crop: [[100, 135]]
+  nigeria:
+    dry_season: [[130, 250]]
+    main_crop_setting: [[250, 310]]
+    main_crop_pod_dev: [[310, 366], [1, 95]]
+    mid_crop: [[95, 130]]
+  indonesia:
+    dry_season: [[90, 200]]
+    main_crop_setting: [[200, 270]]
+    main_crop_pod_dev: [[270, 366], [1, 60]]
+    mid_crop: [[60, 90]]
+  ecuador:
+    dry_season: [[60, 150]]
+    main_crop_setting: [[150, 220]]
+    main_crop_pod_dev: [[220, 366], [1, 30]]
+    mid_crop: [[30, 60]]
+  peru:
+    dry_season: [[60, 150]]
+    main_crop_setting: [[150, 220]]
+    main_crop_pod_dev: [[220, 366], [1, 30]]
+    mid_crop: [[30, 60]]
+  colombia:
+    dry_season: [[90, 200]]
+    main_crop_setting: [[200, 270]]
+    main_crop_pod_dev: [[270, 366], [1, 60]]
+    mid_crop: [[60, 90]]
