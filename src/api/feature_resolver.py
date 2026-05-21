@@ -42,7 +42,10 @@ from data.cocoa_exposure import (
     FDP_COCOA_COLLECTION,
     sample_cocoa_probability_at_point,
 )
-from data.ensemble_weights import DEFAULT_ENSEMBLE_WEIGHTS_PATH
+from data.ensemble_weights import (
+    DEFAULT_ENSEMBLE_V3_WEIGHTS_PATH,
+    DEFAULT_ENSEMBLE_WEIGHTS_PATH,
+)
 from data.era5_ingest import ERA5Ingest
 from data.teleconnection_ingest import (
     DEFAULT_PARQUET as DEFAULT_TELECONNECTION_PARQUET,
@@ -165,7 +168,10 @@ class FeatureResolverConfig:
     cocoa_exposure_threshold: float = DEFAULT_THRESHOLD
     cocoa_exposure_backend: ExposureBackend = "ensemble_v2"
     ensemble_weights_path: Path = DEFAULT_ENSEMBLE_WEIGHTS_PATH
+    ensemble_v3_weights_path: Path = DEFAULT_ENSEMBLE_V3_WEIGHTS_PATH
     agrifm_checkpoint_path: Path = _REPO_ROOT / "models" / "agrifm_cocoa_seg.pt"
+    terramind_checkpoint_path: Path = _REPO_ROOT / "models" / "terramind_cocoa_seg.pt"
+    terramind_tim_checkpoint_path: Path = _REPO_ROOT / "models" / "terramind_tim_cocoa_seg.pt"
     grid_step_deg: float = GRID_ROUND_STEP
     teleconnection_parquet_path: Path = DEFAULT_TELECONNECTION_PARQUET
 
@@ -640,7 +646,10 @@ class FarmFeatureResolver:
             backend=backend,
             project=self.config.gee_project,
             agrifm_checkpoint=self.config.agrifm_checkpoint_path,
+            terramind_checkpoint=self.config.terramind_checkpoint_path,
+            terramind_tim_checkpoint=self.config.terramind_tim_checkpoint_path,
             ensemble_weights_path=self.config.ensemble_weights_path,
+            ensemble_v3_weights_path=self.config.ensemble_v3_weights_path,
         )
 
         return ResolvedStaticFeatures(
@@ -779,6 +788,19 @@ def build_resolver_from_settings(settings: Any) -> FarmFeatureResolver:
             agrifm_checkpoint_path=Path(
                 getattr(settings, "agrifm_checkpoint_path", DEFAULT_AGRIFM_CHECKPOINT)
             ),
+            terramind_checkpoint=Path(
+                getattr(settings, "terramind_checkpoint_path", _REPO_ROOT / "models" / "terramind_cocoa_seg.pt")
+            ),
+            terramind_tim_checkpoint=Path(
+                getattr(
+                    settings,
+                    "terramind_tim_checkpoint_path",
+                    _REPO_ROOT / "models" / "terramind_tim_cocoa_seg.pt",
+                )
+            ),
+            ensemble_v3_weights_path=Path(
+                getattr(settings, "ensemble_v3_weights_path", DEFAULT_ENSEMBLE_V3_WEIGHTS_PATH)
+            ),
             teleconnection_parquet_path=Path(
                 getattr(settings, "teleconnection_parquet_path", DEFAULT_TELECONNECTION_PARQUET)
             ),
@@ -787,11 +809,14 @@ def build_resolver_from_settings(settings: Any) -> FarmFeatureResolver:
 
 
 def _resolve_exposure_backend(settings: Any) -> ExposureBackend:
-    """Map API settings to exposure backend (honours ENSEMBLE_BACKEND=v2)."""
+    """Map API settings to exposure backend (honours ENSEMBLE_BACKEND=v2/v3)."""
     raw = getattr(settings, "cocoa_exposure_backend", "ensemble_v2")
     ensemble_mode = getattr(settings, "ensemble_backend", "v2")
-    if raw in ("ensemble", "ensemble_v2") and ensemble_mode == "v2":
-        return "ensemble_v2"
+    if raw in ("ensemble", "ensemble_v2", "ensemble_v3"):
+        if ensemble_mode == "v3":
+            return "ensemble_v3"
+        if ensemble_mode == "v2":
+            return "ensemble_v2"
     return raw  # type: ignore[return-value]
 
 

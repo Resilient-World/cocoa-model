@@ -93,6 +93,23 @@ stages:
     outs:
       - models/agrifm_cocoa_seg.pt
 
+  stage_train_terramind_cocoa:
+    cmd: >
+      python scripts/train_terramind_cocoa.py
+      --synthetic
+      --max-tiles 100
+      --quick
+      --out models/terramind_cocoa_seg.pt
+    deps:
+      - scripts/train_terramind_cocoa.py
+      - src/training/train_terramind_cocoa.py
+      - src/training/cocoa_terramind_datamodule.py
+      - src/models/terramind_seg.py
+      - src/models/terramind_backbone.py
+      - src/models/terramind_cocoa_head.py
+    outs:
+      - models/terramind_cocoa_seg.pt
+
   stage_download_agrifm:
     cmd: python scripts/download_agrifm_weights.py
     deps:

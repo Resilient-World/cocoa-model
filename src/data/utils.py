@@ -166,9 +166,65 @@ def cocoa_batch_to_galileo_input(
     )
 
 
+def _temporal_mean_bchw(tensor: torch.Tensor) -> torch.Tensor:
+    """Collapse ``[B,T,H,W,C]`` or ``[T,H,W,C]`` to ``[B,C,H,W]`` (mean over time)."""
+    if tensor.dim() == 4:
+        return tensor.mean(dim=0).permute(2, 0, 1).contiguous().unsqueeze(0)
+    if tensor.dim() == 5:
+        return tensor.mean(dim=1).permute(0, 3, 1, 2).contiguous()
+    if tensor.dim() == 3:
+        return tensor.permute(2, 0, 1).unsqueeze(0)
+    if tensor.dim() == 4 and tensor.shape[1] <= 20:
+        return tensor
+    raise ValueError(f"Cannot collapse tensor shape {tuple(tensor.shape)} to BCHW")
+
+
+def _pad_channels(x: torch.Tensor, target_c: int) -> torch.Tensor:
+    if x.shape[1] >= target_c:
+        return x[:, :target_c]
+    pad = target_c - x.shape[1]
+    zeros = torch.zeros(x.shape[0], pad, x.shape[2], x.shape[3], device=x.device, dtype=x.dtype)
+    return torch.cat([x, zeros], dim=1)
+
+
+def cocoa_batch_to_terramind_input(
+    batch_dict: dict[str, torch.Tensor | None],
+) -> dict[str, torch.Tensor]:
+    """
+    Map a cocoa batch dict to TerraMind modality tensors ``[B, C, H, W]``.
+
+    Keys: ``S2L2A`` (12-band), ``S1GRD`` (VV/VH), ``DEM`` (elevation + slope from ``srtm``).
+    """
+    from models.terramind_backbone import DEM_CHANNELS, S1GRD_CHANNELS, S2L2A_CHANNELS
+
+    out: dict[str, torch.Tensor] = {}
+    s2 = batch_dict.get("s2")
+    if s2 is not None:
+        s2_b = _temporal_mean_bchw(s2.float())
+        out["S2L2A"] = _pad_channels(s2_b, S2L2A_CHANNELS)
+
+    s1 = batch_dict.get("s1")
+    if s1 is not None:
+        s1_b = _temporal_mean_bchw(s1.float())
+        out["S1GRD"] = _pad_channels(s1_b, S1GRD_CHANNELS)
+
+    dem = batch_dict.get("srtm") or batch_dict.get("dem")
+    if dem is not None:
+        if dem.dim() == 3:
+            dem = dem.unsqueeze(0).permute(0, 3, 1, 2)
+        elif dem.dim() == 4 and dem.shape[-1] <= 4:
+            dem = dem.permute(0, 3, 1, 2)
+        out["DEM"] = _pad_channels(dem.float(), DEM_CHANNELS)
+
+    if not out:
+        raise ValueError("batch_dict must include at least one of s2, s1, srtm/dem for TerraMind")
+    return out
+
+
 __all__ = [
     "MaskedOutput",
     "cocoa_batch_to_galileo_input",
+    "cocoa_batch_to_terramind_input",
     "construct_galileo_input",
     "location_to_galileo_xyz",
 ]

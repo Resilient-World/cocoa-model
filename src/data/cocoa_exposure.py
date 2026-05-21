@@ -53,7 +53,17 @@ MIN_THRESHOLD = 0.5
 DEFAULT_THRESHOLD = 0.96
 DEFAULT_SCALE_M = 10
 
-ExposureBackend = Literal["fdp", "galileo", "aef", "agrifm", "ensemble", "ensemble_v2"]
+ExposureBackend = Literal[
+    "fdp",
+    "galileo",
+    "aef",
+    "agrifm",
+    "terramind",
+    "terramind_tim",
+    "ensemble",
+    "ensemble_v2",
+    "ensemble_v3",
+]
 
 # Default ensemble v1 blend: AEF, Galileo, FDP (sums to 1.0)
 DEFAULT_ENSEMBLE_WEIGHTS: tuple[float, float, float] = (0.5, 0.3, 0.2)
@@ -62,6 +72,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_GALILEO_CHECKPOINT = _REPO_ROOT / "models" / "galileo_cocoa_seg.pt"
 DEFAULT_AEF_CHECKPOINT = _REPO_ROOT / "models" / "aef_cocoa_head.pt"
 DEFAULT_AGRIFM_CHECKPOINT = _REPO_ROOT / "models" / "agrifm_cocoa_seg.pt"
+DEFAULT_TERRAMIND_CHECKPOINT = _REPO_ROOT / "models" / "terramind_cocoa_seg.pt"
+DEFAULT_TERRAMIND_TIM_CHECKPOINT = _REPO_ROOT / "models" / "terramind_tim_cocoa_seg.pt"
 
 # Renormalized AEF + Galileo weights when FDP tiles are unavailable (0.5 + 0.3 → 1.0)
 GLOBAL_AEF_GAL_WEIGHTS: tuple[float, float] = (0.625, 0.375)
@@ -241,8 +253,11 @@ class CocoaExposureIngest:
         galileo_checkpoint: Path | str | None = None,
         aef_checkpoint: Path | str | None = None,
         agrifm_checkpoint: Path | str | None = None,
+        terramind_checkpoint: Path | str | None = None,
+        terramind_tim_checkpoint: Path | str | None = None,
         ensemble_weights: tuple[float, float, float] = DEFAULT_ENSEMBLE_WEIGHTS,
         ensemble_weights_path: Path | str | None = None,
+        ensemble_v3_weights_path: Path | str | None = None,
         region: str | None = None,
     ) -> None:
         self.aoi = aoi
@@ -255,17 +270,30 @@ class CocoaExposureIngest:
         )
         self.aef_checkpoint = Path(aef_checkpoint) if aef_checkpoint else DEFAULT_AEF_CHECKPOINT
         self.agrifm_checkpoint = Path(agrifm_checkpoint) if agrifm_checkpoint else DEFAULT_AGRIFM_CHECKPOINT
+        self.terramind_checkpoint = (
+            Path(terramind_checkpoint) if terramind_checkpoint else DEFAULT_TERRAMIND_CHECKPOINT
+        )
+        self.terramind_tim_checkpoint = (
+            Path(terramind_tim_checkpoint) if terramind_tim_checkpoint else DEFAULT_TERRAMIND_TIM_CHECKPOINT
+        )
         self.ensemble_weights = ensemble_weights
         self.ensemble_weights_path = (
             Path(ensemble_weights_path)
             if ensemble_weights_path
             else _REPO_ROOT / "config" / "ensemble_weights.yaml"
         )
+        self.ensemble_v3_weights_path = (
+            Path(ensemble_v3_weights_path)
+            if ensemble_v3_weights_path
+            else _REPO_ROOT / "config" / "ensemble_weights_v3.yaml"
+        )
         self.region = normalize_region_key(region) if region else None
         self._probability_image: ee.Image | None = None
         self._galileo_model = None
         self._aef_head = None
         self._agrifm_model = None
+        self._terramind_model = None
+        self._terramind_tim_model = None
 
     def _collection(self) -> ee.ImageCollection:
         start, end = _year_date_range(self.year)
@@ -432,6 +460,96 @@ class CocoaExposureIngest:
         s2 = torch.from_numpy(rng.normal(0.2, 0.05, (1, t, h, w, 10)).astype(np.float32))
         return float(model.predict_proba_numpy(s2))
 
+    def _load_terramind_model(self, *, use_tim: bool = False) -> Any:
+        if use_tim:
+            if self._terramind_tim_model is not None:
+                return self._terramind_tim_model
+            from models.terramind_seg import TerraMindTiMCocoaSegmentation, load_terramind_seg_checkpoint
+
+            path = self.terramind_tim_checkpoint
+            if path.is_file():
+                self._terramind_tim_model = load_terramind_seg_checkpoint(path, use_tim=True)
+            else:
+                logger.warning("TerraMind TiM checkpoint missing at %s; random init", path)
+                self._terramind_tim_model = TerraMindTiMCocoaSegmentation()
+                self._terramind_tim_model.eval()
+            return self._terramind_tim_model
+        if self._terramind_model is not None:
+            return self._terramind_model
+        from models.terramind_seg import TerraMindCocoaSegmentation, load_terramind_seg_checkpoint
+
+        path = self.terramind_checkpoint
+        if path.is_file():
+            self._terramind_model = load_terramind_seg_checkpoint(path, use_tim=False)
+        else:
+            logger.warning("TerraMind checkpoint missing at %s; random init", path)
+            self._terramind_model = TerraMindCocoaSegmentation(freeze_backbone=True)
+            self._terramind_model.eval()
+        return self._terramind_model
+
+    def _terramind_tile_probability(self, lat: float, lon: float, *, use_tim: bool = False) -> float:
+        import torch
+
+        from data.utils import cocoa_batch_to_terramind_input
+
+        model = self._load_terramind_model(use_tim=use_tim)
+        h = w = 64
+        t = 4
+        rng = np.random.default_rng(int(hash((round(lat, 4), round(lon, 4))) % (2**32)))
+        batch = {
+            "s2": torch.from_numpy(rng.normal(0.2, 0.05, (1, t, h, w, 10)).astype(np.float32)),
+            "s1": torch.from_numpy(rng.normal(-12.0, 2.0, (1, t, h, w, 2)).astype(np.float32)),
+            "dem": torch.from_numpy(
+                np.stack(
+                    [
+                        np.full((h, w), 180.0 + 30.0 * lat, dtype=np.float32),
+                        np.full((h, w), 2.0, dtype=np.float32),
+                    ],
+                    axis=-1,
+                )
+            ).unsqueeze(0),
+        }
+        if use_tim:
+            return float(model.predict_proba_numpy(batch).mean())
+        batch["terramind"] = cocoa_batch_to_terramind_input(batch)
+        prob = model.predict_proba(batch)
+        return float(prob.mean().item())
+
+    def _terramind_probability_at_point(self, lat: float, lon: float) -> float:
+        return self._terramind_tile_probability(lat, lon, use_tim=False)
+
+    def _terramind_tim_probability_at_point(self, lat: float, lon: float) -> float:
+        return self._terramind_tile_probability(lat, lon, use_tim=True)
+
+    def _ensemble_v3_blend(
+        self,
+        lat: float,
+        lon: float,
+        *,
+        scale_m: int,
+    ) -> float:
+        from data.ensemble_weights import load_ensemble_v3_weights
+
+        region_key = self.region or region_for_point(lat, lon)
+        weights = load_ensemble_v3_weights(region_key, path=self.ensemble_v3_weights_path)
+        parts: list[tuple[float, float]] = []
+        for key, w in weights.items():
+            if key == "aef":
+                parts.append((w, self._aef_probability_at_point(lat, lon)))
+            elif key == "galileo":
+                parts.append((w, self._galileo_probability_at_point(lat, lon)))
+            elif key == "agrifm":
+                parts.append((w, self._agrifm_probability_at_point(lat, lon)))
+            elif key == "terramind":
+                parts.append((w, self._terramind_probability_at_point(lat, lon)))
+            elif key == "fdp":
+                fdp_p = self._fdp_probability_at_point(lat, lon, scale_m)
+                if fdp_p is not None:
+                    parts.append((w, fdp_p))
+        weight_sum = sum(w for w, _ in parts)
+        blended = sum(w * p for w, p in parts) / max(weight_sum, 1e-9)
+        return float(np.clip(blended, 0.0, 1.0))
+
     def _ensemble_v2_blend(
         self,
         lat: float,
@@ -481,6 +599,15 @@ class CocoaExposureIngest:
 
         if self.backend == "agrifm":
             return self._agrifm_probability_at_point(lat, lon)
+
+        if self.backend == "terramind":
+            return self._terramind_probability_at_point(lat, lon)
+
+        if self.backend == "terramind_tim":
+            return self._terramind_tim_probability_at_point(lat, lon)
+
+        if self.backend == "ensemble_v3":
+            return self._ensemble_v3_blend(lat, lon, scale_m=scale_m)
 
         if self.backend == "ensemble_v2":
             return self._ensemble_v2_blend(lat, lon, scale_m=scale_m)
@@ -649,7 +776,10 @@ def sample_cocoa_probability_at_point(
     galileo_checkpoint: Path | str | None = None,
     aef_checkpoint: Path | str | None = None,
     agrifm_checkpoint: Path | str | None = None,
+    terramind_checkpoint: Path | str | None = None,
+    terramind_tim_checkpoint: Path | str | None = None,
     ensemble_weights_path: Path | str | None = None,
+    ensemble_v3_weights_path: Path | str | None = None,
     project: str | None = None,
 ) -> float:
     """
@@ -672,7 +802,10 @@ def sample_cocoa_probability_at_point(
                 galileo_checkpoint=galileo_checkpoint,
                 aef_checkpoint=aef_checkpoint,
                 agrifm_checkpoint=agrifm_checkpoint,
+                terramind_checkpoint=terramind_checkpoint,
+                terramind_tim_checkpoint=terramind_tim_checkpoint,
                 ensemble_weights_path=ensemble_weights_path,
+                ensemble_v3_weights_path=ensemble_v3_weights_path,
                 region=region_for_point(lat, lon),
             )
             p = ing.sample_point(lat, lon)

@@ -91,6 +91,11 @@ galileo = [
 ]
 # AgriFM Video Swin backbone (timm in core deps; weights via scripts/download_agrifm_weights.py)
 agrifm = []
+# TerraMind 1.0 (IBM-ESA Apache-2.0) + TiM token generation
+terramind = [
+    "terratorch>=1.2.4",
+    "diffusers==0.30.0",
+]
 
 # Optional extensions:
 # differences>=0.2.0
@@ -123,4 +128,5 @@ markers = [
     "integration: tests that call Google Earth Engine (require credentials)",
     "slow: downloads Galileo weights or runs encoder forward pass",
     "slow: AgriFM Video Swin forward (depth-18 stage)",
+    "terramind: TerraMind / TerraTorch registry forward or HF download",
 ]

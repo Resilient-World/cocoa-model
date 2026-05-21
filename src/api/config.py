@@ -105,15 +105,26 @@ class APISettings(BaseSettings):
 
     cocoa_exposure_year: int = 2023
     cocoa_exposure_backend: Literal[
-        "fdp", "galileo", "aef", "agrifm", "ensemble", "ensemble_v2"
+        "fdp",
+        "galileo",
+        "aef",
+        "agrifm",
+        "terramind",
+        "terramind_tim",
+        "ensemble",
+        "ensemble_v2",
+        "ensemble_v3",
     ] = Field(default="ensemble_v2", validation_alias="COCOA_EXPOSURE_BACKEND")
-    ensemble_backend: Literal["v1", "v2"] = Field(
+    ensemble_backend: Literal["v1", "v2", "v3"] = Field(
         default="v2",
         validation_alias="ENSEMBLE_BACKEND",
-        description="Use ensemble_v2 weights when backend is ensemble/ensemble_v2",
+        description="v2 → ensemble_v2 weights; v3 → ensemble_v3 (AEF+Galileo+AgriFM+TerraMind+FDP)",
     )
     ensemble_weights_path: Path = _REPO_ROOT / "config" / "ensemble_weights.yaml"
+    ensemble_v3_weights_path: Path = _REPO_ROOT / "config" / "ensemble_weights_v3.yaml"
     agrifm_checkpoint_path: Path = _REPO_ROOT / "models" / "agrifm_cocoa_seg.pt"
+    terramind_checkpoint_path: Path = _REPO_ROOT / "models" / "terramind_cocoa_seg.pt"
+    terramind_tim_checkpoint_path: Path = _REPO_ROOT / "models" / "terramind_tim_cocoa_seg.pt"
     cocoa_exposure_threshold: float = Field(
         default=DEFAULT_THRESHOLD,
         ge=0.5,

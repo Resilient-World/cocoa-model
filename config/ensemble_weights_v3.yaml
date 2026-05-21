@@ -1,0 +1,14 @@
+schema_version: 1
+fitted_date: null
+default:
+  aef: 0.30
+  galileo: 0.20
+  agrifm: 0.20
+  terramind: 0.20
+  fdp: 0.10
+global:
+  aef: 0.35
+  galileo: 0.25
+  agrifm: 0.20
+  terramind: 0.20
+regions: {}
