@@ -136,4 +136,5 @@ markers = [
     "slow: AgriFM Video Swin forward (depth-18 stage)",
     "terramind: TerraMind / TerraTorch registry forward or HF download",
     "gpu: CorrDiff / Earth2Studio integration (requires GPU and [corrdiff] extra)",
+    "slow: DR policy tree bootstrap or simulation loops",
 ]

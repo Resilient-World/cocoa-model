@@ -473,6 +473,8 @@ Interactive docs: `http://localhost:8000/docs`
 | `GET` | `/health` | Liveness (`{"status": "ok"}`) |
 | `POST` | `/simulate-intervention` | Avoided loss simulation |
 | `POST` | `/simulate-scenario` | Avoided loss under SSP × horizon CMIP6-adjusted ERA5 |
+| `POST` | `/rank-interventions` | Rank farms by CATE for cooperative rollouts |
+| `POST` | `/learn-policy-rules` | Honest DR policy tree/forest → interpretable targeting rules |
 
 #### `POST /simulate-intervention`
 

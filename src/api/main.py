@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
+from typing import Any
 
 from fastapi import FastAPI, HTTPException
 import pandas as pd
@@ -18,6 +19,10 @@ from api.model_loader import load_casej_model, load_yield_model
 from api.schemas import (
     ComplianceDdsRequest,
     ComplianceDdsResponse,
+    LearnPolicyRulesRequest,
+    LearnPolicyRulesResponse,
+    PolicyRule,
+    PolicyRulebook,
     RankInterventionsRequest,
     RankInterventionsResponse,
     SimulateClimateAttributionRequest,
@@ -35,7 +40,13 @@ from api.simulation import (
     simulate_scenario,
 )
 from analysis.heterogeneity import estimate_cate
-from analysis.policy_targeting import rank_farms_by_uplift
+from analysis.policy_targeting import (
+    learn_policy_forest,
+    learn_policy_tree,
+    rank_farms_by_uplift,
+    render_policy_rules,
+    render_policy_rules_from_forest,
+)
 from compliance.eudr import (
     DeforestationResult,
     assess_country_risk,
@@ -252,6 +263,134 @@ def rank_interventions_endpoint(request: RankInterventionsRequest) -> RankInterv
         )
 
     return RankInterventionsResponse(method=request.method, n=int(len(df)), ranked=ranked)
+
+
+def _rulebook_from_tree_result(
+    result: Any,
+    *,
+    method: str,
+    rules_text: list[str],
+    n_samples: int,
+) -> PolicyRulebook:
+    rules: list[PolicyRule] = []
+    for i, row in result.leaf_summary.iterrows():
+        text = str(row["rule_text"]) if pd.notna(row["rule_text"]) and row["rule_text"] else ""
+        rules.append(
+            PolicyRule(
+                rule_id=int(i),
+                rule_text=text,
+                leaf_id=int(row["leaf_id"]),
+                n_units=int(row["n_units"]),
+                treat_fraction=float(row["treat_fraction"]),
+                expected_uplift=float(row["expected_uplift"]),
+                ci_low=float(row["ci_low"]),
+                ci_high=float(row["ci_high"]),
+            )
+        )
+    if not rules and rules_text:
+        for rid, text in enumerate(rules_text):
+            rules.append(
+                PolicyRule(
+                    rule_id=rid,
+                    rule_text=text,
+                    leaf_id=rid,
+                    n_units=0,
+                    treat_fraction=0.0,
+                    expected_uplift=0.0,
+                    ci_low=0.0,
+                    ci_high=0.0,
+                )
+            )
+    return PolicyRulebook(
+        method=method,  # type: ignore[arg-type]
+        feature_names=result.feature_names,
+        treatment_names=result.treatment_names,
+        rules=rules,
+        policy_value_estimate=float(result.policy_value_estimate),
+        policy_value_ci_low=float(result.policy_value_ci[0]),
+        policy_value_ci_high=float(result.policy_value_ci[1]),
+        greedy_policy_value=result.greedy_policy_value,
+        cost_aware=bool(result.cost_aware),
+        n_samples=n_samples,
+    )
+
+
+@app.post(
+    "/learn-policy-rules",
+    response_model=LearnPolicyRulesResponse,
+    summary="Learn interpretable DR policy targeting rules from a farm panel",
+)
+def learn_policy_rules_endpoint(request: LearnPolicyRulesRequest) -> LearnPolicyRulesResponse:
+    """
+    Fit an honest doubly-robust policy tree or forest and return regulator-readable
+    if-then rules with leaf-level uplift statistics.
+    """
+    df = pd.DataFrame(request.rows)
+    if len(df) < request.min_samples_leaf * 2:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Need at least {request.min_samples_leaf * 2} rows for policy learning",
+        )
+    try:
+        if request.learner == "forest":
+            result = learn_policy_forest(
+                df,
+                treatment_col=request.treatment,
+                outcome_col=request.outcome,
+                covariate_cols=request.covariates,
+                max_depth=request.max_depth,
+                min_samples_leaf=request.min_samples_leaf,
+                cost_col=request.cost_col,
+                n_estimators=request.n_estimators,
+                n_folds=request.n_folds,
+                random_state=request.random_state,
+                n_bootstrap=request.n_bootstrap,
+                intervention_cost_usd_per_farm=request.intervention_cost_usd_per_farm,
+                budget=request.budget,
+                recommended_treatment_label=request.recommended_treatment_label,
+                cate_method=request.cate_method,
+            )
+            rules_text = render_policy_rules_from_forest(
+                result,
+                recommended_treatment_label=request.recommended_treatment_label,
+            )
+            rulebook = _rulebook_from_tree_result(
+                result,
+                method="policy_forest",
+                rules_text=rules_text,
+                n_samples=len(df),
+            )
+        else:
+            result = learn_policy_tree(
+                df,
+                treatment_col=request.treatment,
+                outcome_col=request.outcome,
+                covariate_cols=request.covariates,
+                max_depth=request.max_depth,
+                min_samples_leaf=request.min_samples_leaf,
+                cost_col=request.cost_col,
+                n_folds=request.n_folds,
+                random_state=request.random_state,
+                n_bootstrap=request.n_bootstrap,
+                intervention_cost_usd_per_farm=request.intervention_cost_usd_per_farm,
+                budget=request.budget,
+                recommended_treatment_label=request.recommended_treatment_label,
+                cate_method=request.cate_method,
+            )
+            rules_text = render_policy_rules(
+                result,
+                recommended_treatment_label=request.recommended_treatment_label,
+            )
+            rulebook = _rulebook_from_tree_result(
+                result,
+                method="policy_tree",
+                rules_text=rules_text,
+                n_samples=len(df),
+            )
+    except (ValueError, ImportError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return LearnPolicyRulesResponse(rulebook=rulebook)
 
 
 @app.post(

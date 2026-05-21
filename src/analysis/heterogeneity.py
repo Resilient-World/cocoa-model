@@ -63,10 +63,10 @@ def _as_float_array(df: pd.DataFrame, cols: list[str]) -> np.ndarray:
     return x
 
 
-def _default_nuisance_models(
+def default_nuisance_models(
     random_state: int,
 ) -> tuple[HistGradientBoostingRegressor, HistGradientBoostingClassifier]:
-    """HGB nuisances aligned with AIPW / staggered DiD modules."""
+    """HGB nuisances aligned with AIPW / staggered DiD and DR policy learners."""
     return (
         HistGradientBoostingRegressor(
             max_iter=200,
@@ -104,7 +104,7 @@ def _build_causal_forest_dml(
     cv: int,
     random_state: int,
 ) -> CausalForestDML:
-    model_y, model_t = _default_nuisance_models(random_state)
+    model_y, model_t = default_nuisance_models(random_state)
     return CausalForestDML(
         model_y=model_y,
         model_t=model_t,
@@ -412,6 +412,7 @@ __all__ = [
     "CausalForest",
     "RLearnerCATE",
     "RLearner",
+    "default_nuisance_models",
     "estimate_cate",
     "Method",
 ]
