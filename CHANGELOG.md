@@ -20,6 +20,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - AgriFM (Video Swin) backbone (arXiv:2505.21357, RSE 2026): MIT reimplementation in `src/models/agrifm_*`, S2 weight download script, `--backbone agrifm` benchmark, and tests.
 - AgriFM cocoa fine-tuning (`training.train_agrifm_cocoa`, `models/agrifm_cocoa_seg.pt`) with BCE+Dice loss and hard-example mining.
 - Ensemble v2: per-region weights in `config/ensemble_weights.yaml`, `scripts/fit_ensemble_v2_weights.py`, and `benchmark_ensemble_v2_*` reports.
+- TerraMind 1.0 (Apache-2.0) backbone: optional `[terramind]` extra, `src/models/terramind_*`, `cocoa_batch_to_terramind_input`, TiM path, `train_terramind_cocoa`, benchmark `terramind` / `terramind_tim`, DVC `stage_train_terramind_cocoa`.
+- Ensemble v3: five-way NNLS blend (AEF + Galileo + AgriFM + TerraMind + FDP) in `config/ensemble_weights_v3.yaml`, `scripts/fit_ensemble_v3_weights.py`, opt-in via `ENSEMBLE_BACKEND=v3` (production default remains `ensemble_v2`).
 
 ### Changed
 

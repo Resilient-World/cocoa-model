@@ -69,9 +69,11 @@ These models feed `cocoa_prob` in the API and `ensemble_v2` exposure.
 | Galileo seg | `python -m training.train_galileo_cocoa` | `models/galileo_cocoa_seg.pt` |
 | AgriFM backbone | `python scripts/download_agrifm_weights.py` | `models/agrifm/agrifm_s2_pretrained.pt` |
 | AgriFM cocoa | `python scripts/train_agrifm_cocoa.py --pretrained models/agrifm/agrifm_s2_pretrained.pt` | `models/agrifm_cocoa_seg.pt` |
+| TerraMind cocoa | `pip install -e ".[terramind]"` then `python scripts/train_terramind_cocoa.py` | `models/terramind_cocoa_seg.pt` |
 | Ensemble v2 weights | `python scripts/fit_ensemble_v2_weights.py` | `config/ensemble_weights.yaml` (per-region) |
+| Ensemble v3 weights | `python scripts/fit_ensemble_v3_weights.py` | `config/ensemble_weights_v3.yaml` (NNLS, 5-way) |
 
-Detailed AgriFM + ensemble steps: [`docs/agrifm_ensemble_v2_compute.md`](agrifm_ensemble_v2_compute.md).
+Detailed exposure fine-tune + ensemble steps: [`docs/ensemble_v3_compute.md`](ensemble_v3_compute.md).
 
 Benchmark after checkpoints exist:
 
@@ -152,6 +154,7 @@ Synthetic smoke (laptop-friendly):
 
 ```bash
 dvc repro stage_train_agrifm_cocoa
+dvc repro stage_train_terramind_cocoa
 dvc repro stage_train_aef_head
 dvc repro stage_train_joint
 ```
@@ -162,6 +165,6 @@ Full pipeline requires prior ingest and GPU stages; see `dvc.yaml`.
 
 ## Related docs
 
-- [`agrifm_ensemble_v2_compute.md`](agrifm_ensemble_v2_compute.md) — AgriFM fine-tune + ensemble v2 only
+- [`ensemble_v3_compute.md`](ensemble_v3_compute.md) — AgriFM + TerraMind fine-tune + ensemble v2/v3
 - [`MODEL_CARD.md`](MODEL_CARD.md) — thresholds, regulatory mapping
 - [`README.md`](../README.md) — architecture and API

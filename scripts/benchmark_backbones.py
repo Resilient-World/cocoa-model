@@ -46,7 +46,9 @@ DEFAULT_GALILEO_CKPT = _REPO_ROOT / "models" / "galileo_cocoa_seg.pt"
 DEFAULT_AEF_CKPT = _REPO_ROOT / "models" / "aef_cocoa_head.pt"
 DEFAULT_AGRIFM_CKPT = _REPO_ROOT / "models" / "agrifm_cocoa_seg.pt"
 DEFAULT_AGRIFM_PRETRAINED = _REPO_ROOT / "models" / "agrifm" / "agrifm_s2_pretrained.pt"
-BACKBONE_CHOICES = ("prithvi", "galileo", "aef", "fdp", "agrifm", "all")
+DEFAULT_TERRAMIND_CKPT = _REPO_ROOT / "models" / "terramind_cocoa_seg.pt"
+DEFAULT_TERRAMIND_TIM_CKPT = _REPO_ROOT / "models" / "terramind_tim_cocoa_seg.pt"
+BACKBONE_CHOICES = ("prithvi", "galileo", "aef", "fdp", "agrifm", "terramind", "terramind_tim", "all")
 TILE_SIZE = 64
 TIME_STEPS = 4
 PREDICTION_THRESHOLD = 0.5
@@ -265,6 +267,64 @@ class AgriFMPredictor:
             last = s2[:, -1:].expand(-1, pad_t, -1, -1, -1)
             s2 = torch.cat([s2, last], dim=1)
         return self.model.predict_proba_numpy(s2)
+
+
+class TerraMindPredictor:
+    """TerraMind 1.0-base + UPerNet cocoa head (S2L2A + S1GRD + DEM)."""
+
+    name = "TerraMind 1.0-base"
+
+    def __init__(self, checkpoint: Path, *, out_size: int = TILE_SIZE) -> None:
+        from models.terramind_seg import TerraMindCocoaSegmentation, load_terramind_seg_checkpoint
+
+        self._has_checkpoint = checkpoint.is_file()
+        if self._has_checkpoint:
+            self.model = load_terramind_seg_checkpoint(checkpoint, use_tim=False)
+        else:
+            logger.warning("TerraMind checkpoint missing; benchmarking random-init head")
+            self.model = TerraMindCocoaSegmentation(freeze_backbone=True)
+        self.model.eval()
+        _ = self.predict_tile(build_tile_batch(6.0, -4.0, seed=0))
+        self._params_m = count_params_millions(self.model)
+
+    @property
+    def params_millions(self) -> float:
+        return self._params_m
+
+    @torch.no_grad()
+    def predict_tile(self, batch_dict: dict[str, torch.Tensor]) -> np.ndarray:
+        from data.utils import cocoa_batch_to_terramind_input
+
+        batch_dict = {**batch_dict, "terramind": cocoa_batch_to_terramind_input(batch_dict)}
+        prob = self.model.predict_proba(batch_dict)[0, 0].cpu().numpy()
+        return prob.astype(np.float32)
+
+
+class TerraMindTiMPredictor:
+    """TerraMind TiM path (LULC + NDVI token generation)."""
+
+    name = "TerraMind 1.0-base (TiM)"
+
+    def __init__(self, checkpoint: Path, *, out_size: int = TILE_SIZE) -> None:
+        from models.terramind_seg import TerraMindTiMCocoaSegmentation, load_terramind_seg_checkpoint
+
+        self._has_checkpoint = checkpoint.is_file()
+        if self._has_checkpoint:
+            self.model = load_terramind_seg_checkpoint(checkpoint, use_tim=True)
+        else:
+            logger.warning("TerraMind TiM checkpoint missing; benchmarking random-init")
+            self.model = TerraMindTiMCocoaSegmentation()
+        self.model.eval()
+        _ = self.predict_tile(build_tile_batch(6.0, -4.0, seed=0))
+        self._params_m = count_params_millions(self.model)
+
+    @property
+    def params_millions(self) -> float:
+        return self._params_m
+
+    @torch.no_grad()
+    def predict_tile(self, batch_dict: dict[str, torch.Tensor]) -> np.ndarray:
+        return self.model.predict_proba_numpy(batch_dict)
 
 
 class PrithviProxyPredictor:
@@ -604,6 +664,56 @@ def write_agrifm_benchmark_report(
     return path
 
 
+def write_terramind_benchmark_report(
+    results: list[BackboneResult],
+    path: Path,
+    *,
+    region: str | None = None,
+    terramind_checkpoint_present: bool = False,
+    tim: bool = False,
+) -> Path:
+    label = "TerraMind TiM" if tim else "TerraMind 1.0-base"
+    by_me = min(results, key=lambda r: r.mean_error)
+    region_label = (
+        COCOA_REGIONS[region].display_name
+        if region and region in COCOA_REGIONS
+        else "all FDP regions"
+    )
+    lines = [
+        f"# Cocoa backbone benchmark — {label}, {region_label} ({date.today().isoformat()})",
+        "",
+        "Held-out spatial tiles vs Kalischek et al. (2023) in-situ reference. "
+        "Full 5000-tile Ghana/CIV runs are **GPU/deferred**; CI uses ``--quick``.",
+        "",
+        f"**Lowest mean error:** {by_me.name} (MAE={by_me.mean_error:.3f}).",
+        "",
+        "| Backbone | Mean error | mIoU | F1 | Boundary IoU | Latency (ms/tile) | Params (M) |",
+        "|----------|------------|------|-----|--------------|-------------------|------------|",
+    ]
+    for r in results:
+        lines.append(
+            f"| {r.name} | {r.mean_error:.3f} | {r.miou:.3f} | {r.f1:.3f} | {r.boundary_iou:.3f} | "
+            f"{r.latency_ms_median:.1f} | {r.params_millions:.1f} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Notes",
+            "",
+            "- IBM-ESA **TerraMind-1.0-base** (Apache-2.0) via optional ``pip install -e '.[terramind]'``.",
+            "- Relative inference cost vs Galileo-Base: **~1.6×** (TerraMind-B), **~3.2×** (TerraMind-L); "
+            "TiM adds **~30%** for intermediate token generation.",
+            "- Train: ``python scripts/train_terramind_cocoa.py`` → ``models/terramind_cocoa_seg.pt``.",
+            "",
+        ]
+    )
+    if not terramind_checkpoint_present:
+        lines.append("> Checkpoint absent; metrics use proxy/random-init encoder.\n")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
 class EnsembleV1Predictor:
     """Legacy fixed-weight ensemble (0.5 AEF + 0.3 Galileo + 0.2 FDP)."""
 
@@ -776,6 +886,8 @@ def _build_predictors(
     galileo_checkpoint: Path,
     aef_checkpoint: Path,
     agrifm_checkpoint: Path,
+    terramind_checkpoint: Path = DEFAULT_TERRAMIND_CKPT,
+    terramind_tim_checkpoint: Path = DEFAULT_TERRAMIND_TIM_CKPT,
     galileo_model_size: str,
 ) -> list[TilePredictor]:
     if backbones == frozenset({"all"}):
@@ -798,6 +910,10 @@ def _build_predictors(
         predictors.append(PrithviProxyPredictor())
     if "agrifm" in backbones:
         predictors.append(AgriFMPredictor(agrifm_checkpoint))
+    if "terramind" in backbones:
+        predictors.append(TerraMindPredictor(terramind_checkpoint))
+    if "terramind_tim" in backbones:
+        predictors.append(TerraMindTiMPredictor(terramind_tim_checkpoint))
     return predictors
 
 
@@ -809,6 +925,8 @@ def run_benchmark(
     galileo_checkpoint: Path = DEFAULT_GALILEO_CKPT,
     aef_checkpoint: Path = DEFAULT_AEF_CKPT,
     agrifm_checkpoint: Path = DEFAULT_AGRIFM_CKPT,
+    terramind_checkpoint: Path = DEFAULT_TERRAMIND_CKPT,
+    terramind_tim_checkpoint: Path = DEFAULT_TERRAMIND_TIM_CKPT,
     report_dir: Path = DEFAULT_REPORT_DIR,
     latest_out: Path | None = None,
     max_latency_tiles: int = 50,
@@ -825,6 +943,8 @@ def run_benchmark(
         galileo_checkpoint=galileo_checkpoint,
         aef_checkpoint=aef_checkpoint,
         agrifm_checkpoint=agrifm_checkpoint,
+        terramind_checkpoint=terramind_checkpoint,
+        terramind_tim_checkpoint=terramind_tim_checkpoint,
         galileo_model_size=galileo_model_size,
     )
     results = [
@@ -853,6 +973,29 @@ def run_benchmark(
             report_dir / f"benchmark_agrifm_{tag}_{today}.md",
             region=region_key,
             agrifm_checkpoint_present=agrifm_pred._has_checkpoint,
+        )
+
+    if backbones == frozenset({"terramind"}):
+        tm_pred = predictors[0]
+        assert isinstance(tm_pred, TerraMindPredictor)
+        primary_out = report_dir / f"benchmark_terramind_{tag}_{today}.md"
+        write_terramind_benchmark_report(
+            results,
+            primary_out,
+            region=region_key,
+            terramind_checkpoint_present=tm_pred._has_checkpoint,
+            tim=False,
+        )
+    elif backbones == frozenset({"terramind_tim"}):
+        tm_pred = predictors[0]
+        assert isinstance(tm_pred, TerraMindTiMPredictor)
+        primary_out = report_dir / f"benchmark_terramind_tim_{tag}_{today}.md"
+        write_terramind_benchmark_report(
+            results,
+            primary_out,
+            region=region_key,
+            terramind_checkpoint_present=tm_pred._has_checkpoint,
+            tim=True,
         )
 
     if backbones == frozenset({"all"}):
@@ -889,6 +1032,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--galileo-checkpoint", type=Path, default=DEFAULT_GALILEO_CKPT)
     parser.add_argument("--aef-checkpoint", type=Path, default=DEFAULT_AEF_CKPT)
     parser.add_argument("--agrifm-checkpoint", type=Path, default=DEFAULT_AGRIFM_CKPT)
+    parser.add_argument("--terramind-checkpoint", type=Path, default=DEFAULT_TERRAMIND_CKPT)
+    parser.add_argument("--terramind-tim-checkpoint", type=Path, default=DEFAULT_TERRAMIND_TIM_CKPT)
     parser.add_argument(
         "--backbone",
         choices=BACKBONE_CHOICES,
@@ -948,6 +1093,8 @@ def main(argv: list[str] | None = None) -> int:
                 galileo_checkpoint=args.galileo_checkpoint,
                 aef_checkpoint=args.aef_checkpoint,
                 agrifm_checkpoint=args.agrifm_checkpoint,
+                terramind_checkpoint=args.terramind_checkpoint,
+                terramind_tim_checkpoint=args.terramind_tim_checkpoint,
                 report_dir=args.report_dir,
                 galileo_model_size=gal_size,
                 write_legacy_report=True,
@@ -961,6 +1108,8 @@ def main(argv: list[str] | None = None) -> int:
             galileo_checkpoint=args.galileo_checkpoint,
             aef_checkpoint=args.aef_checkpoint,
             agrifm_checkpoint=args.agrifm_checkpoint,
+            terramind_checkpoint=args.terramind_checkpoint,
+            terramind_tim_checkpoint=args.terramind_tim_checkpoint,
             report_dir=args.report_dir,
             latest_out=args.latest_out,
             galileo_model_size=gal_size,
