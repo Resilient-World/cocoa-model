@@ -150,6 +150,27 @@ class AvoidedLossInterval(BaseModel):
     level: float = Field(default=0.9, description="Confidence level (e.g. 0.9 = 90%)")
 
 
+DriftDiagnosis = Literal["none", "covariate_shift", "concept_shift", "out_of_support"]
+
+
+class DriftStatus(BaseModel):
+    """Dashboard payload for per-stratum drift monitoring."""
+
+    stratum_key: str
+    log_martingale: float
+    alarm_active: bool
+    diagnosis: DriftDiagnosis
+    coverage_running_avg: float | None = None
+
+
+class DriftAlarmPayload(BaseModel):
+    """Active drift alarm attached to /simulate-scenario when detected."""
+
+    type: Literal["covariate_shift", "concept_shift", "out_of_support"]
+    log_martingale: float
+    triggered_at: str
+
+
 class ConfidenceInterval(BaseModel):
     """Uncertainty bounds for simulation outputs."""
 
@@ -327,6 +348,14 @@ class SimulateScenarioResponse(BaseModel):
     confidence_interval: ConfidenceInterval | None = Field(
         default=None,
         description="Avoided-loss conformal interval (online ECI-Integral by default)",
+    )
+    drift_alarm: DriftAlarmPayload | None = Field(
+        default=None,
+        description="WCTM drift alarm when non-stationarity is detected",
+    )
+    drift_status: DriftStatus | None = Field(
+        default=None,
+        description="Current WCTM state for this scenario stratum (dashboard)",
     )
     eudr_status: "EudrStatusBlock | None" = Field(
         default=None,

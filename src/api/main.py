@@ -10,7 +10,9 @@ import pandas as pd
 
 from api.config import APISettings
 from api.cqr_loader import load_cqr_bundle
+from api.drift_monitoring import get_drift_status_for_stratum
 from api.online_conformal_store import build_store_from_settings
+from monitoring.drift_store import build_drift_store_from_settings
 from api.feature_resolver import build_resolver_from_settings
 from api.model_loader import load_casej_model, load_yield_model
 from api.schemas import (
@@ -22,6 +24,7 @@ from api.schemas import (
     SimulateClimateAttributionResponse,
     SimulateInterventionRequest,
     SimulateInterventionResponse,
+    DriftStatus,
     SimulateScenarioRequest,
     SimulateScenarioResponse,
 )
@@ -63,6 +66,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.cqr_model = cqr_model
     app.state.cqr_calibrator = cqr_calibrator
     app.state.scenario_conformal_store = build_store_from_settings(settings)
+    app.state.drift_store = build_drift_store_from_settings(settings)
     yield
 
 
@@ -172,6 +176,28 @@ def simulate_scenario_endpoint(request: SimulateScenarioRequest) -> SimulateScen
             cqr_model=app.state.cqr_model,
             cqr_calibrator=app.state.cqr_calibrator,
             scenario_conformal_store=app.state.scenario_conformal_store,
+            drift_store=app.state.drift_store,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get(
+    "/drift-status",
+    response_model=DriftStatus,
+    summary="Current WCTM drift state for a conformal stratum",
+)
+def drift_status_endpoint(stratum: str) -> DriftStatus:
+    """
+    Return persisted WCTM log-martingale, alarm flag, and diagnosis for dashboards.
+
+    ``stratum`` must match ``{scenario}:{horizon_year}:{region}`` (e.g. ``ssp245:2050:ghana``).
+    """
+    try:
+        return get_drift_status_for_stratum(
+            stratum,
+            drift_store=app.state.drift_store,
+            conformal_store=app.state.scenario_conformal_store,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
