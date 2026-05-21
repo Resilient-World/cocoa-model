@@ -55,6 +55,19 @@ tp = tipping_point(snapshot_df, treatment_col="received_intervention", ...)
 
 Validation: `python scripts/validate_dvds.py` → `reports/sensitivity/dvds_validation_<date>.md`.
 
+## Deferred full validation (compute)
+
+The **code and tests** for DVDS are in the repository; the **paper-aligned Monte Carlo gate** is intentionally deferred when you only have laptop CPU.
+
+| Command | Purpose | Typical runtime |
+|---------|---------|-----------------|
+| `python scripts/validate_dvds.py --reps 5 --n 500` | Smoke (CI / local sanity) | Tens of minutes |
+| `python scripts/validate_dvds.py --reps 200 --n 1000` | Full gate: Section 7.1 coverage + Zhao bootstrap width check | Multi-hour; run on HPC or a beefy workstation |
+
+If a background `validate_dvds.py --reps 200` job was started from Cursor, it is **safe to stop** (`pkill -f validate_dvds.py`); no checkpoints are required—only the markdown report under `reports/sensitivity/` is missing until you rerun.
+
+Incomplete smoke output (e.g. 5 replications) is **not** a substitute for the 200-rep gate before treating DVDS validation as production-signed-off. See also [`TRAINING_RUNBOOK.md`](TRAINING_RUNBOOK.md) (*Local runs that did not finish*).
+
 ## References
 
 - Dorn, Guo & Kallus (2022), *Doubly-Valid/Doubly-Sharp Sensitivity Analysis for Causal Inference with Unmeasured Confounding*, arXiv:2112.11449.
