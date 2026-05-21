@@ -54,6 +54,12 @@ from analysis.parallel_trends import (
 )
 from analysis.synthdid import SDIDResult, SyntheticDiD
 from analysis.dvds import DVDSResult, MarginalSensitivityModel, dvds_ate, tipping_point
+from analysis.mediation import (
+    MediationResult,
+    build_intervention_mediation_frame,
+    mediation_analysis,
+    multi_mediator_decomposition,
+)
 from analysis.sensitivity import (
     EValueResult,
     NegativeControlResult,
@@ -123,4 +129,8 @@ __all__ = [
     "MarginalSensitivityModel",
     "dvds_ate",
     "tipping_point",
+    "MediationResult",
+    "mediation_analysis",
+    "multi_mediator_decomposition",
+    "build_intervention_mediation_frame",
 ]

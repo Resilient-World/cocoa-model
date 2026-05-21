@@ -67,9 +67,45 @@ class SensitivityBounds(BaseModel):
     )
 
 
+MediatorId = Literal["microclimate", "soil_moisture", "cssvd_prevalence"]
+
+
+class MediatorEffect(BaseModel):
+    """NDE/NIE decomposition for one canonical mediator."""
+
+    mediator: MediatorId
+    nde: float
+    nie: float
+    total_effect: float
+    proportion_mediated: float
+    nde_ci: tuple[float, float]
+    nie_ci: tuple[float, float]
+    rho_critical: float | None = Field(
+        default=None,
+        description="Smallest ρ in [0,0.9] where bias-adjusted NIE ≤ 0",
+    )
+
+
+class MediationDecomposition(BaseModel):
+    """Optional mediation block on simulate-intervention responses."""
+
+    per_mediator: list[MediatorEffect]
+    path_table: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Ordered multi-mediator path effects when len(mediators) > 1",
+    )
+
+
 class SimulateInterventionRequest(BaseModel):
     """Request body for POST /simulate-intervention."""
 
+    decompose_mediators: list[MediatorId] | None = Field(
+        default=None,
+        description=(
+            "Optional causal mediation (NDE/NIE) for canonical paths; "
+            "microclimate, soil_moisture, cssvd_prevalence. Omit for no extra cost."
+        ),
+    )
     include_sensitivity: bool = Field(
         default=False,
         description="Attach cooperative DVDS sensitivity bounds (requires farm panel parquet or synthetic fallback)",
@@ -530,6 +566,10 @@ class SimulateInterventionResponse(BaseModel):
             "Cooperative observational ATE bounds under Tan's MSM (DVDS); "
             "not the per-farm MC/CQR interval. Present when include_sensitivity=true."
         ),
+    )
+    mediation: MediationDecomposition | None = Field(
+        default=None,
+        description="Present when request.decompose_mediators is non-empty",
     )
 
     @field_validator("avoided_loss_tonnes", "financial_impact_usd", mode="before")

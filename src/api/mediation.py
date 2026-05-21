@@ -1,0 +1,190 @@
+"""Intervention-path mediation: resolve canonical mediators and run g-computation."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Sequence
+
+import numpy as np
+import pandas as pd
+import xarray as xr
+
+from analysis.mediation import (
+    build_intervention_mediation_frame,
+    mediation_analysis,
+    multi_mediator_decomposition,
+)
+from api.schemas import (
+    MediationDecomposition,
+    MediatorEffect,
+    MediatorId,
+    SimulateInterventionRequest,
+)
+
+if TYPE_CHECKING:
+    from torch import Tensor
+
+MEDIATOR_COLUMN: dict[MediatorId, str] = {
+    "microclimate": "microclimate_index",
+    "soil_moisture": "soil_moisture_delta",
+    "cssvd_prevalence": "cssvd_prevalence_delta",
+}
+
+
+def _annual_mean_delta(ds_factual: xr.Dataset, ds_cf: xr.Dataset, var: str) -> float:
+    if var not in ds_factual or var not in ds_cf:
+        return 0.0
+    f = float(ds_factual[var].mean().values)
+    c = float(ds_cf[var].mean().values)
+    return f - c
+
+
+def microclimate_index(ds_factual: xr.Dataset, ds_cf: xr.Dataset) -> float:
+    """Composite annual mean Δtmean, Δvpd, Δrh_mean (standardized sum)."""
+    parts: list[float] = []
+    for var in ("tmean", "vpd", "rh_mean"):
+        if var in ds_factual and var in ds_cf:
+            parts.append(_annual_mean_delta(ds_factual, ds_cf, var))
+    if not parts:
+        return 0.0
+    arr = np.array(parts, dtype=float)
+    std = float(np.std(arr, ddof=1)) if len(arr) > 1 else 1.0
+    return float(np.sum(arr) / max(std, 1e-6))
+
+
+def resolve_mediator_scalars(
+    ds_cf: xr.Dataset,
+    ds_factual: xr.Dataset,
+    *,
+    biotic_baseline: dict[str, Any] | None,
+    biotic_projected: dict[str, Any] | None,
+) -> tuple[dict[str, float], dict[str, float]]:
+    """Path-level mediator values for counterfactual (0) vs factual (1) arms."""
+    sm_cf = float(ds_cf["sm_root"].mean().values) if "sm_root" in ds_cf else 0.0
+    sm_fact = float(ds_factual["sm_root"].mean().values) if "sm_root" in ds_factual else 0.0
+    micro_cf = 0.0
+    micro_fact = microclimate_index(ds_factual, ds_cf)
+
+    cssvd_cf = 0.0
+    cssvd_fact = 0.0
+    if biotic_baseline is not None and biotic_projected is not None:
+        la_b = biotic_baseline.get("loss_attribution") or {}
+        la_p = biotic_projected.get("loss_attribution") or {}
+        if hasattr(la_b, "cssvd"):
+            cssvd_cf = float(la_b.cssvd)
+            cssvd_fact = float(la_p.cssvd)
+        else:
+            cssvd_cf = float(la_b.get("cssvd", 0.0))
+            cssvd_fact = float(la_p.get("cssvd", 0.0))
+
+    cf_vals = {
+        "microclimate_index": micro_cf,
+        "soil_moisture_delta": 0.0,
+        "cssvd_prevalence_delta": 0.0,
+    }
+    fact_vals = {
+        "microclimate_index": micro_fact,
+        "soil_moisture_delta": sm_fact - sm_cf,
+        "cssvd_prevalence_delta": cssvd_fact - cssvd_cf,
+    }
+    return cf_vals, fact_vals
+
+
+def compute_intervention_mediation(
+    request: SimulateInterventionRequest,
+    *,
+    samples_cf: Tensor,
+    samples_factual: Tensor,
+    ds_cf: xr.Dataset,
+    ds_factual: xr.Dataset,
+    biotic_baseline: dict[str, Any] | None,
+    biotic_projected: dict[str, Any] | None,
+    decompose_mediators: Sequence[MediatorId],
+    n_bootstrap: int = 200,
+    random_state: int = 42,
+) -> MediationDecomposition:
+    """Run per-mediator NDE/NIE and optional multi-mediator path table."""
+    lat = request.farm_location.lat
+    lon = request.farm_location.lon
+    cf_vals, fact_vals = resolve_mediator_scalars(
+        ds_cf,
+        ds_factual,
+        biotic_baseline=biotic_baseline,
+        biotic_projected=biotic_projected,
+    )
+    covariate_row = {
+        "lat": lat,
+        "lon": lon,
+        "farm_size_ha": request.farm_size_ha,
+    }
+
+    per_mediator: list[MediatorEffect] = []
+    frames: list[pd.DataFrame] = []
+
+    for med_id in decompose_mediators:
+        col = MEDIATOR_COLUMN[med_id]
+        med_cf = {col: cf_vals[col]}
+        med_fact = {col: fact_vals[col]}
+        frame = build_intervention_mediation_frame(
+            samples_cf=samples_cf.detach().cpu().numpy().reshape(-1),
+            samples_factual=samples_factual.detach().cpu().numpy().reshape(-1),
+            mediator_values_cf=med_cf,
+            mediator_values_factual=med_fact,
+            covariate_row=covariate_row,
+        )
+        frame = frame.rename(columns={"yield": "outcome"})
+        res = mediation_analysis(
+            frame,
+            treatment_col="treatment",
+            outcome_col="outcome",
+            mediator_col=col,
+            covariate_cols=list(covariate_row.keys()),
+            n_bootstrap=n_bootstrap,
+            random_state=random_state,
+        )
+        per_mediator.append(
+            MediatorEffect(
+                mediator=med_id,
+                nde=res.nde,
+                nie=res.nie,
+                total_effect=res.total_effect,
+                proportion_mediated=res.proportion_mediated,
+                nde_ci=res.nde_ci,
+                nie_ci=res.nie_ci,
+                rho_critical=res.rho_critical,
+            )
+        )
+        full_frame = build_intervention_mediation_frame(
+            samples_cf=samples_cf.detach().cpu().numpy().reshape(-1),
+            samples_factual=samples_factual.detach().cpu().numpy().reshape(-1),
+            mediator_values_cf=cf_vals,
+            mediator_values_factual=fact_vals,
+            covariate_row=covariate_row,
+        )
+        full_frame = full_frame.rename(columns={"yield": "outcome"})
+        frames.append(full_frame)
+
+    path_table: list[dict[str, Any]] = []
+    if len(decompose_mediators) > 1:
+        cols = [MEDIATOR_COLUMN[m] for m in decompose_mediators]
+        combined = frames[-1] if frames else pd.DataFrame()
+        if not combined.empty and all(c in combined.columns for c in cols):
+            table = multi_mediator_decomposition(
+                combined,
+                treatment_col="treatment",
+                outcome_col="outcome",
+                mediator_cols=cols,
+                covariate_cols=list(covariate_row.keys()),
+                n_bootstrap=max(50, n_bootstrap // 2),
+                random_state=random_state,
+            )
+            path_table = table.to_dict(orient="records")
+
+    return MediationDecomposition(per_mediator=per_mediator, path_table=path_table)
+
+
+__all__ = [
+    "compute_intervention_mediation",
+    "resolve_mediator_scalars",
+    "microclimate_index",
+    "MEDIATOR_COLUMN",
+]

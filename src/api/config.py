@@ -79,6 +79,13 @@ class APISettings(BaseSettings):
     casej_checkpoint_path: str = "models/casej_surrogate.pt"
     mc_num_samples: int = 50
     yield_blend_weight: float = 0.0
+    mediation_n_bootstrap: int = Field(
+        default=200,
+        ge=50,
+        le=500,
+        validation_alias="MEDIATION_N_BOOTSTRAP",
+        description="Bootstrap reps for intervention mediation (API latency cap)",
+    )
 
     # Feature resolution (geo_mock only when use_real_features=false)
     use_real_features: bool = Field(

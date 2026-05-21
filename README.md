@@ -9,6 +9,16 @@ Geospatial machine learning and causal impact modeling for **resilient cocoa** i
 
 **GitHub:** [Resilient-World/cocoa-model](https://github.com/Resilient-World/cocoa-model)
 
+### What's New in v0.3.0
+
+**Exposure & mapping.** TerraMind 1.0 with an optional TiM path (`terramind_tim` backend) joins the exposure stack; the v5 demo samples both the default ensemble and TerraMind+TiM at the CIV farm point.
+
+**Trust & sensitivity.** WCTM drift monitoring surfaces `drift_status` on scenario responses; DVDS cooperative ATE bounds attach via `include_sensitivity` on intervention calls. The demo reports Λ=1.5 bounds and honest DR policy-tree rules from a synthetic cooperative panel.
+
+**Future climate.** CorrDiff-CMIP6 remains opt-in (`downscaling_method=corrdiff`, `CORRDIFF_AVAILABLE` + Zarr cache); linear delta-change is still the default offline path.
+
+**Targeting & mediation.** Causal mediation decomposes shade-tree effects through microclimate, soil moisture, and CSSVD (`decompose_mediators`). The refreshed end-to-end demo writes `reports/demo/e2e_civ_v5.json` and a plain-language markdown summary — see [CHANGELOG.md](CHANGELOG.md) and [`docs/mediation_analysis.md`](docs/mediation_analysis.md).
+
 ---
 
 ## Table of contents
@@ -212,6 +222,7 @@ Run the full product pipeline on a sample Côte d'Ivoire farm polygon and emit o
 
 ```bash
 python scripts/demo_end_to_end.py --mock-gee --pretty
+# → reports/demo/e2e_civ_v5.json and e2e_civ_v5.md
 ```
 
 Output: `reports/demo/e2e_civ.json` with `climate_attributed_loss_t_per_ha`, `intervention_avoided_loss_t_per_ha`, `total_avoided_loss_usd` (90% interval), `eudr_status`, and `source_attributions` for every dataset. With Earth Engine configured, omit `--mock-gee` for live FDP / ERA5 sampling.
@@ -220,7 +231,7 @@ Output: `reports/demo/e2e_civ.json` with `climate_attributed_loss_t_per_ha`, `in
 pytest tests/test_demo_end_to_end.py -q
 ```
 
-See [CHANGELOG.md](CHANGELOG.md) for release notes (v0.2.0).
+See [CHANGELOG.md](CHANGELOG.md) for release notes (v0.3.0).
 
 ---
 
