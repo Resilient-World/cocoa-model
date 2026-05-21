@@ -46,6 +46,7 @@ from analysis.parallel_trends import (
     placebo_pretreatment_did,
 )
 from analysis.synthdid import SDIDResult, SyntheticDiD
+from analysis.dvds import DVDSResult, MarginalSensitivityModel, dvds_ate, tipping_point
 from analysis.sensitivity import (
     EValueResult,
     NegativeControlResult,
@@ -104,4 +105,8 @@ __all__ = [
     "negative_control_outcome_test",
     "rosenbaum_bounds",
     "rosenbaum_gamma_at_alpha",
+    "DVDSResult",
+    "MarginalSensitivityModel",
+    "dvds_ate",
+    "tipping_point",
 ]
