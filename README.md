@@ -27,6 +27,7 @@ Geospatial machine learning and causal impact modeling for **resilient cocoa** i
   - [`src/analysis` — causal inference](#srcanalysis--causal-inference)
   - [`src/api` — intervention simulation service](#srcapi--intervention-simulation-service)
 - [End-to-end workflows](#end-to-end-workflows)
+- [Training runbook (GPU / deferred)](#training-runbook-gpu--deferred)
 - [Testing](#testing)
 - [Data versioning (DVC)](#data-versioning-dvc)
 - [Design decisions and limitations](#design-decisions-and-limitations)
@@ -306,7 +307,7 @@ Latest reports: [`reports/backbones/benchmark_<region>_<date>.md`](reports/backb
 
 **Exposure API:** `CocoaExposureIngest(..., backend="fdp" | "galileo" | "aef" | "agrifm" | "ensemble" | "ensemble_v2")`. Production default: **`ensemble_v2`** (`COCOA_EXPOSURE_BACKEND=ensemble_v2`, `ENSEMBLE_BACKEND=v2`). Legacy v1 ensemble: `0.5 × AEF + 0.3 × Galileo + 0.2 × FDP`. Checkpoints: `models/aef_cocoa_head.pt`, `models/galileo_cocoa_seg.pt`, `models/agrifm_cocoa_seg.pt` (`python scripts/train_agrifm_cocoa.py`), weights YAML via `python scripts/fit_ensemble_v2_weights.py`.
 
-> **Note:** Fine-tuning, ensemble weight fitting, and full benchmark reports require **GPU (or HPC) compute** and are not run in CI. See [`docs/agrifm_ensemble_v2_compute.md`](docs/agrifm_ensemble_v2_compute.md) for the ordered workflow and which artifacts to produce before treating `ensemble_v2` as production-ready.
+> **Note:** Production training (exposure fine-tunes, yield/CQR, ensemble weights, ERA5 ingest) requires **GPU or HPC** and is not run on a laptop in CI. See **[`docs/TRAINING_RUNBOOK.md`](docs/TRAINING_RUNBOOK.md)** for the full avoided-loss model checklist; AgriFM + ensemble v2 detail is in [`docs/agrifm_ensemble_v2_compute.md`](docs/agrifm_ensemble_v2_compute.md). Incomplete local training jobs can be stopped without losing code—only checkpoints are missing until you rerun on stronger compute.
 
 **ERA5 outputs (per pixel, per year):**
 
@@ -508,6 +509,16 @@ Train: `python scripts/generate_casej_training_set.py` → `python scripts/train
 **Response:** `baseline_yield_tonnes_per_ha` and `projected_yield_tonnes_per_ha` each expose `mean`, `p10`, and `p90` from paired Monte Carlo forwards; `avoided_loss_tonnes` uses per-sample `max(projected − baseline, 0) × farm_size_ha`; `financial_impact_usd_mean` multiplies the **mean** avoided tonnes by `cocoa_price_usd`.
 
 Requires existing directories at `ERA5_ZARR_PATH` and `CMIP6_ZARR_PATH` (see `.env.example`).
+
+---
+
+## Training runbook (GPU / deferred)
+
+Use **[`docs/TRAINING_RUNBOOK.md`](docs/TRAINING_RUNBOOK.md)** when you have access to a GPU machine or cluster. It lists:
+
+- Which background training jobs are safe to kill if they never finished on your laptop
+- Phases: GEE ingest → exposure checkpoints (AEF, Galileo, AgriFM, ensemble v2 YAML) → yield + CQR → CASEJ scenarios → causal panel eval → `demo_end_to_end.py` / API smoke
+- Artifacts to commit or DVC-track in follow-up PRs
 
 ---
 
