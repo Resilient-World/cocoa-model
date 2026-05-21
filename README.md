@@ -289,14 +289,17 @@ Segmentation backbones are compared on a **5000-tile held-out** set per FDP regi
 python scripts/benchmark_backbones.py --n-tiles 5000 --region ghana
 python scripts/benchmark_backbones.py --all-regions --quick   # 200 tiles/region, Galileo-nano
 python scripts/benchmark_backbones.py --quick                 # 200 tiles, all regions pooled
+python scripts/benchmark_backbones.py --backbone agrifm --region ghana --quick
+python scripts/download_agrifm_weights.py                   # S2 pretrained weights (Apache-2.0)
 ```
 
-Latest reports: [`reports/backbones/benchmark_<region>_<date>.md`](reports/backbones/) and [`benchmark_aef_<region>_<date>.md`](reports/backbones/) (mean error + mIoU/F1).
+Latest reports: [`reports/backbones/benchmark_<region>_<date>.md`](reports/backbones/) and [`benchmark_aef_<region>_<date>.md`](reports/backbones/) (mean error + mIoU/F1). AgriFM-only runs write [`benchmark_agrifm_<region>_<date>.md`](reports/backbones/).
 
 | Role | Backbone | Notes |
 |------|----------|--------|
 | **Production (candidate)** | **AlphaEarth Foundations (AEF)** + MLP head | GEE `GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL` 64-D annual embeddings (arXiv:2507.22291); near-zero inference via [`alphaearth_embeddings.py`](src/data/alphaearth_embeddings.py) + [`aef_cocoa_head.py`](src/models/aef_cocoa_head.py) |
 | **Production (active)** | **Galileo-Base** + binary seg head | Multimodal S2×10, S1 VV/VH, ERA5 monthly (5 vars → Galileo time bands), DEM; 10 m `P(cocoa)` via [`galileo_seg.py`](src/models/galileo_seg.py) |
+| **Foundation (agriculture)** | **AgriFM (Video Swin)** | Li et al. (RSE 2026; arXiv:2505.21357); S2 10-band temporal stack; MIT reimplementation in [`agrifm_backbone.py`](src/models/agrifm_backbone.py) + [`agrifm_cocoa_head.py`](src/models/agrifm_cocoa_head.py); **Apache-2.0** pretrained weights via [`download_agrifm_weights.py`](scripts/download_agrifm_weights.py) |
 | **Prior (weak supervision)** | FDP 2025a | GEE `model_2025a`; threshold 0.96 |
 | **Baseline** | Prithvi-EO-2.0 | TerraTorch `prithvi_eo_v2_100_tl` (6-band stem in benchmark when full checkpoint absent) |
 

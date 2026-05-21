@@ -53,6 +53,14 @@ stages:
     outs:
       - models/joint.pt
 
+  stage_download_agrifm:
+    cmd: python scripts/download_agrifm_weights.py
+    deps:
+      - scripts/download_agrifm_weights.py
+    outs:
+      - models/agrifm/agrifm_s2_pretrained.pt
+      - models/agrifm/agrifm_s2_pretrained.pt.sha256
+
   stage_benchmark:
     cmd: >
       python scripts/benchmark_backbones.py

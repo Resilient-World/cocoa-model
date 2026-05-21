@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- AgriFM (Video Swin) backbone (arXiv:2505.21357, RSE 2026): MIT reimplementation in `src/models/agrifm_*`, S2 weight download script, `--backbone agrifm` benchmark, and tests.
+
 ## [0.2.0] - 2026-05-20
 
 ### Added
