@@ -725,6 +725,63 @@ def resolve_exposure_probability(
     )
 
 
+def sample_buffer_composition(
+    lat: float,
+    lon: float,
+    *,
+    buffer_m: float = 500,
+    cocoa_prob_threshold: float = 0.5,
+    year: int = 2023,
+    project: str | None = None,
+):
+    """Delegate to :func:`data.cssvd_landscape_features.sample_buffer_composition`."""
+    from data.cssvd_landscape_features import sample_buffer_composition as _sample
+
+    return _sample(
+        lat,
+        lon,
+        buffer_m=buffer_m,
+        cocoa_prob_threshold=cocoa_prob_threshold,
+        year=year,
+        project=project,
+    )
+
+
+def sample_canopy_fragmentation_index(
+    lat: float,
+    lon: float,
+    *,
+    buffer_m: float = 1000,
+    project: str | None = None,
+) -> float:
+    """Delegate to :func:`data.cssvd_landscape_features.sample_canopy_fragmentation_index`."""
+    from data.cssvd_landscape_features import sample_canopy_fragmentation_index as _sample
+
+    return _sample(lat, lon, buffer_m=buffer_m, project=project)
+
+
+def build_landscape_feature_row(
+    lat: float,
+    lon: float,
+    year: int,
+    *,
+    project: str | None = None,
+    cocoa_prob_threshold: float = 0.5,
+    use_gee_climate: bool = False,
+):
+    """Delegate to :func:`data.cssvd_landscape_features.build_landscape_feature_row`."""
+    from data.cssvd_landscape_features import build_landscape_feature_row as _build
+
+    return _build(
+        lat,
+        lon,
+        year,
+        project=project,
+        cocoa_prob_threshold=cocoa_prob_threshold,
+        use_gee_climate=use_gee_climate,
+    )
+
+
 __all__ = [
     "CocoaExposureIngest",
     "ExposureBackend",
@@ -749,6 +806,9 @@ __all__ = [
     "region_geometry",
     "region_latlon_bounds",
     "resolve_exposure_probability",
+    "build_landscape_feature_row",
+    "sample_buffer_composition",
+    "sample_canopy_fragmentation_index",
     "sample_cocoa_probability_at_point",
     "validate_threshold",
 ]

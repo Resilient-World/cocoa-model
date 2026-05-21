@@ -144,8 +144,12 @@ def _climate_tensor_to_dataset(climate: Tensor, year: int) -> xr.Dataset:
 def _biotic_static_features(
     intervention_type: InterventionType | None,
     *,
+    lat: float | None = None,
+    lon: float | None = None,
+    year: int | None = None,
     cssvd_prevalence_pct: float = 15.0,
     cssvd_tolerance: float = 1.0,
+    settings: Any | None = None,
 ) -> dict[str, Any]:
     """Farm static covariates for biotic loss (CRIG prevalence mock until raster wired)."""
     shade = ShadeSpecies.UNSHADED
@@ -154,11 +158,23 @@ def _biotic_static_features(
         raw_shade = deltas.get("shade_species")
         if raw_shade is not None:
             shade = ShadeSpecies(str(raw_shade))
-    return {
+    out: dict[str, Any] = {
         "cssvd_prevalence_pct": cssvd_prevalence_pct,
         "cssvd_tolerance": cssvd_tolerance,
         "shade_species": shade,
     }
+    if lat is not None and lon is not None:
+        out["lat"] = float(lat)
+        out["lon"] = float(lon)
+    if year is not None:
+        out["year"] = int(year)
+    if settings is not None:
+        if getattr(settings, "enable_cssvd_landscape", False):
+            ckpt = getattr(settings, "cssvd_landscape_checkpoint", None)
+            if ckpt is not None and Path(ckpt).is_file():
+                out["use_cssvd_landscape"] = True
+                out["cssvd_landscape_checkpoint"] = str(ckpt)
+    return out
 
 
 def _biotic_response_block(result: dict[str, Any]) -> dict[str, Any]:
@@ -479,16 +495,14 @@ def simulate_intervention(
 
     ds_cf = _climate_tensor_to_dataset(climate_cf, year)
     ds_factual = _climate_tensor_to_dataset(climate_factual, year)
-    biotic_cf = apply_biotic_losses(
-        1.0,
-        ds_cf,
-        _biotic_static_features(None),
+    biotic_static_cf = _biotic_static_features(
+        None, lat=lat, lon=lon, year=year, settings=settings
     )
-    biotic_factual = apply_biotic_losses(
-        1.0,
-        ds_factual,
-        _biotic_static_features(request.intervention_type),
+    biotic_static_factual = _biotic_static_features(
+        request.intervention_type, lat=lat, lon=lon, year=year, settings=settings
     )
+    biotic_cf = apply_biotic_losses(1.0, ds_cf, biotic_static_cf)
+    biotic_factual = apply_biotic_losses(1.0, ds_factual, biotic_static_factual)
     biotic_cf_frac = float(biotic_cf["surviving_fraction"])
     biotic_fact_frac = float(biotic_factual["surviving_fraction"])
 
@@ -841,16 +855,14 @@ def simulate_scenario(
 
     ds_cf = _climate_tensor_to_dataset(climate_baseline, year)
     ds_factual = _climate_tensor_to_dataset(climate_projected, year)
-    biotic_cf = apply_biotic_losses(
-        1.0,
-        ds_cf,
-        _biotic_static_features(None),
+    biotic_static_cf = _biotic_static_features(
+        None, lat=lat, lon=lon, year=year, settings=settings
     )
-    biotic_factual = apply_biotic_losses(
-        1.0,
-        ds_factual,
-        _biotic_static_features(request.intervention_type),
+    biotic_static_factual = _biotic_static_features(
+        request.intervention_type, lat=lat, lon=lon, year=year, settings=settings
     )
+    biotic_cf = apply_biotic_losses(1.0, ds_cf, biotic_static_cf)
+    biotic_factual = apply_biotic_losses(1.0, ds_factual, biotic_static_factual)
     biotic_cf_frac = float(biotic_cf["surviving_fraction"])
     biotic_fact_frac = float(biotic_factual["surviving_fraction"])
 

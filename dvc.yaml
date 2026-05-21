@@ -9,6 +9,24 @@ stages:
     outs:
       - data/external/teleconnection_indices.parquet
 
+  stage_train_cssvd_landscape:
+    cmd: >
+      python scripts/train_cssvd_landscape.py
+      --synthetic
+      --n-synthetic 500
+      --checkpoint models/cssvd_landscape.joblib
+    deps:
+      - scripts/train_cssvd_landscape.py
+      - src/hazards/cssvd_landscape.py
+      - src/data/dumont_supplement.py
+      - src/data/cssvd_landscape_features.py
+      - src/data/cssvd_strain_atlas.py
+      - data/external/dumont_cssvd_plots_synthetic.csv
+      - data/external/muller2018_wa_strain_atlas.geojson
+    outs:
+      - models/cssvd_landscape.joblib
+      - reports/cssvd_landscape_metrics.json
+
   stage_ingest_gee:
     cmd: python scripts/ingest_gee.py
     deps:
