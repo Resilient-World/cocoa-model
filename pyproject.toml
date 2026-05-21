@@ -96,6 +96,11 @@ terramind = [
     "terratorch>=1.2.4",
     "diffusers==0.30.0",
 ]
+# CorrDiff-CMIP6 km-scale downscaling (NVIDIA Modulus / Earth2Studio, Apache-2.0)
+corrdiff = [
+    "nvidia-modulus[earth2studio]>=1.0",
+    "nvidia-earth2studio[corrdiff]>=0.8",
+]
 
 # Optional extensions:
 # differences>=0.2.0
@@ -130,4 +135,5 @@ markers = [
     "slow: downloads Galileo weights or runs encoder forward pass",
     "slow: AgriFM Video Swin forward (depth-18 stage)",
     "terramind: TerraMind / TerraTorch registry forward or HF download",
+    "gpu: CorrDiff / Earth2Studio integration (requires GPU and [corrdiff] extra)",
 ]

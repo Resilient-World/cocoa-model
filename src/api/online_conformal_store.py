@@ -2,6 +2,7 @@
 Persist online conformal thresholds and rolling coverage for /simulate-scenario strata.
 
 Stratum key: ``{scenario}:{horizon_year}:{region}`` (48 FDP × SSP × horizon combinations).
+CorrDiff traffic uses suffix ``:corrdiff`` on the same triple.
 Uses Redis when ``REDIS_URL`` is set; otherwise atomic JSON at ``online_conformal_state_path``.
 """
 
@@ -41,8 +42,15 @@ _UPDATER_TYPES = (
 COVERAGE_WINDOW_MAX = 1000
 
 
-def stratum_key(scenario: str, horizon_year: int | str, region: str) -> str:
-    return f"{scenario}:{int(horizon_year)}:{region}"
+def stratum_key(
+    scenario: str,
+    horizon_year: int | str,
+    region: str,
+    *,
+    downscaling_method: str = "linear_delta",
+) -> str:
+    base = f"{scenario}:{int(horizon_year)}:{region}"
+    return f"{base}:corrdiff" if downscaling_method == "corrdiff" else base
 
 
 @dataclass

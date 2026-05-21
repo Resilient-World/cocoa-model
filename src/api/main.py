@@ -179,7 +179,10 @@ def simulate_scenario_endpoint(request: SimulateScenarioRequest) -> SimulateScen
             drift_store=app.state.drift_store,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        msg = str(exc)
+        if "CorrDiff cache" in msg or "CorrDiff requires" in msg or "CorrDiffCMIP6" in msg:
+            raise HTTPException(status_code=503, detail=msg) from exc
+        raise HTTPException(status_code=400, detail=msg) from exc
 
 
 @app.get(

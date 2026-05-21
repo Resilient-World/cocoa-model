@@ -12,11 +12,17 @@ from counterfactual.attrici_runner import (
     ZarrCounterfactualProvider,
     load_counterfactual,
 )
+from counterfactual.corrdiff_downscaler import (
+    CorrDiffCMIP6Downscaler,
+    corrdiff_cache_path,
+)
 
 __all__ = [
     "ATTRICIRunner",
+    "CorrDiffCMIP6Downscaler",
     "CounterfactualClimateProvider",
     "SUPPORTED_VARIABLES",
     "ZarrCounterfactualProvider",
+    "corrdiff_cache_path",
     "load_counterfactual",
 ]

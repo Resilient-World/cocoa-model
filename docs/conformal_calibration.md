@@ -16,6 +16,8 @@ Examples:
 | File | Purpose |
 |------|---------|
 | `data/processed/conformal_initial_state.json` | Bootstrap `q_t` per stratum (from calibration script) |
+
+**CorrDiff downscaling:** When `POST /simulate-scenario` uses `downscaling_method=corrdiff`, online conformal and drift keys append `:corrdiff` (e.g. `ssp245:2050:ghana:corrdiff`). Linear delta-change traffic keeps the original 48 keys without the suffix.
 | `data/processed/online_conformal_state.json` | Live `q_t` + rolling coverage window (last 1000 calls) |
 
 Set `REDIS_URL` to mirror the JSON blob in Redis (`online_conformal_state` key). If Redis is unavailable, the API falls back to the JSON file.

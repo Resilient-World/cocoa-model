@@ -237,6 +237,7 @@ class ConformalConfidenceInterval(BaseModel):
 
 ScenarioSSP = Literal["ssp245", "ssp585"]
 ScenarioHorizonYear = Literal[2030, 2050, 2080]
+DownscalingMethod = Literal["linear_delta", "corrdiff"]
 
 
 class SimulateScenarioRequest(BaseModel):
@@ -270,6 +271,10 @@ class SimulateScenarioRequest(BaseModel):
     horizon_year: ScenarioHorizonYear = Field(
         ...,
         description="Calendar year defining the CMIP6 climatology window for delta-change",
+    )
+    downscaling_method: DownscalingMethod = Field(
+        default="linear_delta",
+        description="linear_delta (ScenarioBuilder) or corrdiff (precomputed CorrDiff-CMIP6 Zarr ensemble)",
     )
 
 
@@ -378,6 +383,14 @@ class SimulateScenarioResponse(BaseModel):
     eudr_status: "EudrStatusBlock | None" = Field(
         default=None,
         description="Present when request includes farm_polygon (EUDR Art. 3 / Whisp)",
+    )
+    downscaling_method: DownscalingMethod = Field(
+        default="linear_delta",
+        description="Climate downscaling path used for this response",
+    )
+    corrdiff_samples_used: int | None = Field(
+        default=None,
+        description="Number of CorrDiff ensemble members when downscaling_method=corrdiff",
     )
 
 

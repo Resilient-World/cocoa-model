@@ -71,6 +71,7 @@ def apply_drift_monitoring(
         request.scenario,
         request.horizon_year,
         _region_from_request(request, settings),
+        downscaling_method=request.downscaling_method,
     )
     sigma_t = sigma_from_interval(interval_lo, interval_hi)
     score = score_from_yield_observation(y_obs, y_pred, sigma_t)
@@ -143,8 +144,13 @@ def get_drift_status_for_stratum(
 ) -> DriftStatus:
     if drift_store is None:
         raise ValueError("Drift store not configured")
-    if stratum.count(":") != 2:
-        raise ValueError(f"Invalid stratum key (expected scenario:horizon:region): {stratum}")
+    parts = stratum.split(":")
+    if len(parts) == 4 and parts[-1] == "corrdiff":
+        parts = parts[:-1]
+    if len(parts) != 3:
+        raise ValueError(
+            f"Invalid stratum key (expected scenario:horizon:region or ...:corrdiff): {stratum}"
+        )
     coverage_avg = None
     if conformal_store is not None:
         coverage_avg = conformal_store.coverage_running_avg(stratum)

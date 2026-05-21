@@ -30,12 +30,19 @@ from api.schemas import (
     YieldUncertaintyBand,
 )
 from counterfactual.cmip6_scenarios import ScenarioBuilder
+from counterfactual.corrdiff_downscaler import (
+    DEFAULT_OUTPUT_VARIABLES,
+    CorrDiffCMIP6Downscaler,
+    corrdiff_cache_missing_message,
+    corrdiff_cache_path,
+    load_corrdiff_scenario_ensemble,
+)
 from hazards import apply_biotic_losses
 from hazards.black_pod import ShadeSpecies
 from analysis.climate_attribution import extract_daily_climate_11ch
 from models.casej_process import co2_ppm_for_ssp
 from models.casej_surrogate import CASEJSurrogate
-from api.scenario_conformal import apply_scenario_conformal
+from api.scenario_conformal import apply_scenario_conformal, resolve_region
 from models.cqr import ConformalCalibrator, QuantileYieldSurrogate
 from models.yield_surrogate import CLIMATE_IDX, YieldSurrogateModel
 from models.yield_surrogate_v2 import YieldSurrogateV2, region_id_from_country_code, region_id_from_latlon
@@ -780,13 +787,8 @@ def simulate_scenario(
     year = int(climate_year or 2023)
     horizon = int(request.horizon_year)
     window = (f"{horizon}-01-01", f"{horizon}-12-31")
-
-    builder = ScenarioBuilder(
-        str(historical_zarr_path.resolve()),
-        str(cmip6_zarr_path.resolve()),
-    )
-    ds_scenario = builder.build_scenario(request.scenario, window)
-    climate_scenario = climate_tensor_from_dataset_point(ds_scenario, lat, lon, year)
+    downscaling = request.downscaling_method
+    corrdiff_n: int | None = None
 
     static_base = feature_resolver.resolve_static_with_galileo(lat, lon, year)
     static_cf = _encode_static(
@@ -801,55 +803,107 @@ def simulate_scenario(
     )
 
     scenario_co2 = co2_ppm_for_ssp(request.scenario, horizon)
-    climate_baseline = climate_scenario.clone()
-    climate_projected = _apply_intervention_climate(climate_scenario, request.intervention_type)
-    for tensor in (climate_baseline, climate_projected):
-        tensor[..., CLIMATE_IDX["co2_ppm"]] = scenario_co2
+
+    if downscaling == "linear_delta":
+        builder = ScenarioBuilder(
+            str(historical_zarr_path.resolve()),
+            str(cmip6_zarr_path.resolve()),
+        )
+        ds_scenario = builder.build_scenario(request.scenario, window)
+        climate_ensemble = [climate_tensor_from_dataset_point(ds_scenario, lat, lon, year)]
+    else:
+        processed_dir = (
+            settings.corrdiff_processed_dir
+            if settings is not None
+            else historical_zarr_path.parent
+        )
+        region = resolve_region(lat, lon)
+        cache = corrdiff_cache_path(processed_dir, request.scenario, horizon, region)
+        if not cache.is_dir():
+            if settings is not None and settings.corrdiff_allow_inline:
+                downscaler = CorrDiffCMIP6Downscaler(
+                    experiment_id=request.scenario,  # type: ignore[arg-type]
+                    source_id=settings.corrdiff_source_id,
+                    variant_label=settings.corrdiff_variant_label,
+                    number_of_samples=settings.corrdiff_number_of_samples,
+                    solver=settings.corrdiff_solver,
+                    sampler_type=settings.corrdiff_sampler_type,
+                    region=region,
+                    historical_zarr_path=historical_zarr_path,
+                    cmip6_zarr_path=cmip6_zarr_path,
+                )
+                downscaler.downscale_horizon_year(
+                    horizon, list(DEFAULT_OUTPUT_VARIABLES)
+                )
+                downscaler.to_zarr(cache)
+            else:
+                raise ValueError(corrdiff_cache_missing_message(cache, request.scenario, horizon, region))
+        try:
+            climate_ensemble = load_corrdiff_scenario_ensemble(
+                cache_path=cache, lat=lat, lon=lon, year=horizon
+            )
+        except FileNotFoundError as exc:
+            raise ValueError(str(exc)) from exc
+        corrdiff_n = len(climate_ensemble)
+
+    climate_baseline = climate_ensemble[0].clone()
+    climate_projected = _apply_intervention_climate(climate_ensemble[0], request.intervention_type)
 
     use_casej = (
         settings is not None
         and getattr(settings, "scenario_yield_backend", "v2_teleconnection") == "casej"
     )
-    if use_casej and isinstance(model, CASEJSurrogate):
-        samples_cf = predict_scenario_yield_samples(
-            model, climate_baseline, static_cf, scenario_co2, num_samples
-        )
-        samples_factual = predict_scenario_yield_samples(
-            model, climate_projected, static_factual, scenario_co2, num_samples
-        )
-    else:
-        region_id = _region_id_tensor(
-            model,
-            climate_baseline,
-            lat=lat,
-            lon=lon,
-            country_code=request.country_code,
-        )
-        tele_year = horizon
-        teleconnection = feature_resolver.resolve_teleconnection(lat, lon, tele_year)
-        samples_cf = predict_yield_samples(
-            model,
-            climate_baseline,
-            static_cf,
-            num_samples,
-            region_id=region_id,
-            teleconnection=teleconnection,
-            lat=lat,
-            lon=lon,
-        )
-        samples_factual = predict_yield_samples(
-            model,
-            climate_projected,
-            static_factual,
-            num_samples,
-            region_id=region_id,
-            teleconnection=teleconnection,
-            lat=lat,
-            lon=lon,
-        )
+    baseline_draws: list[np.ndarray] = []
+    projected_draws: list[np.ndarray] = []
+    for climate_scenario in climate_ensemble:
+        climate_b = climate_scenario.clone()
+        climate_p = _apply_intervention_climate(climate_scenario, request.intervention_type)
+        for tensor in (climate_b, climate_p):
+            tensor[..., CLIMATE_IDX["co2_ppm"]] = scenario_co2
 
-    baseline_np = samples_cf.detach().cpu().numpy().reshape(-1)
-    projected_np = samples_factual.detach().cpu().numpy().reshape(-1)
+        if use_casej and isinstance(model, CASEJSurrogate):
+            samples_cf = predict_scenario_yield_samples(
+                model, climate_b, static_cf, scenario_co2, num_samples
+            )
+            samples_factual = predict_scenario_yield_samples(
+                model, climate_p, static_factual, scenario_co2, num_samples
+            )
+        else:
+            region_id = _region_id_tensor(
+                model,
+                climate_b,
+                lat=lat,
+                lon=lon,
+                country_code=request.country_code,
+            )
+            teleconnection = feature_resolver.resolve_teleconnection(lat, lon, horizon)
+            samples_cf = predict_yield_samples(
+                model,
+                climate_b,
+                static_cf,
+                num_samples,
+                region_id=region_id,
+                teleconnection=teleconnection,
+                lat=lat,
+                lon=lon,
+            )
+            samples_factual = predict_yield_samples(
+                model,
+                climate_p,
+                static_factual,
+                num_samples,
+                region_id=region_id,
+                teleconnection=teleconnection,
+                lat=lat,
+                lon=lon,
+            )
+        baseline_draws.append(samples_cf.detach().cpu().numpy().reshape(-1))
+        projected_draws.append(samples_factual.detach().cpu().numpy().reshape(-1))
+
+    baseline_np = np.concatenate(baseline_draws)
+    projected_np = np.concatenate(projected_draws)
+    for tensor in (climate_baseline, climate_projected):
+        tensor[..., CLIMATE_IDX["co2_ppm"]] = scenario_co2
 
     baseline_blended = _blend_mc_numpy(baseline_np, request.current_yield, yield_blend_weight)
     projected_blended = _blend_mc_numpy(projected_np, request.current_yield, yield_blend_weight)
@@ -918,7 +972,9 @@ def simulate_scenario(
     return SimulateScenarioResponse(
         scenario=request.scenario,
         horizon_year=request.horizon_year,
-        climate_reference_year=year,
+        downscaling_method=downscaling,
+        corrdiff_samples_used=corrdiff_n,
+        climate_reference_year=year if downscaling == "linear_delta" else horizon,
         baseline_yield_tonnes_per_ha=YieldUncertaintyBand(mean=b_mean, p10=b_p10, p90=b_p90),
         projected_yield_tonnes_per_ha=YieldUncertaintyBand(mean=p_mean, p10=p_p10, p90=p_p90),
         avoided_loss_tonnes=AvoidedLossUncertaintyBand(mean=a_mean, p10=a_p10, p90=a_p90),
