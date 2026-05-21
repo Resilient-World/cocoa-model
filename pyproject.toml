@@ -45,6 +45,7 @@ dependencies = [
     "h3>=4.0",
     "statsmodels>=0.14",  # event-study OLS with cluster-robust SEs
     "linearmodels>=6.0",  # PanelOLS for BJS imputation staggered DiD
+    "cvxpy>=1.5",  # Synthetic DiD simplex QPs (Apache-2.0)
     "pooch>=1.8",
     "requests>=2.31",
     "xesmf>=0.8",

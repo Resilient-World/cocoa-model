@@ -2,6 +2,7 @@
 
 from analysis.bjs_imputation import BJSResult, BorusyakJaravelSpiess
 from analysis.csdid import ATTGTResult, ATTResult, CSEventStudyResult, CallawaySantAnna
+from analysis.did_comparison_harness import compare_did_methods, write_did_comparison_report
 from analysis.did_impact import (
     AvoidedRevenueResult,
     DiDResult,
@@ -29,6 +30,7 @@ from analysis.parallel_trends import (
     goodman_bacon_decomposition,
     placebo_pretreatment_did,
 )
+from analysis.synthdid import SDIDResult, SyntheticDiD
 from analysis.sensitivity import (
     EValueResult,
     NegativeControlResult,
@@ -46,6 +48,10 @@ __all__ = [
     "calculate_did_att",
     "did_estimator",
     "DidMethod",
+    "compare_did_methods",
+    "write_did_comparison_report",
+    "SyntheticDiD",
+    "SDIDResult",
     "event_study",
     "CallawaySantAnna",
     "ATTGTResult",
