@@ -53,6 +53,21 @@ stages:
     outs:
       - models/joint.pt
 
+  stage_train_agrifm_cocoa:
+    cmd: >
+      python scripts/train_agrifm_cocoa.py
+      --synthetic
+      --max-tiles 100
+      --quick
+      --out models/agrifm_cocoa_seg.pt
+    deps:
+      - scripts/train_agrifm_cocoa.py
+      - src/training/train_agrifm_cocoa.py
+      - src/training/cocoa_agrifm_datamodule.py
+      - src/models/agrifm_seg.py
+    outs:
+      - models/agrifm_cocoa_seg.pt
+
   stage_download_agrifm:
     cmd: python scripts/download_agrifm_weights.py
     deps:

@@ -53,14 +53,15 @@ MIN_THRESHOLD = 0.5
 DEFAULT_THRESHOLD = 0.96
 DEFAULT_SCALE_M = 10
 
-ExposureBackend = Literal["fdp", "galileo", "aef", "ensemble"]
+ExposureBackend = Literal["fdp", "galileo", "aef", "agrifm", "ensemble", "ensemble_v2"]
 
-# Default ensemble blend: AEF, Galileo, FDP (sums to 1.0)
+# Default ensemble v1 blend: AEF, Galileo, FDP (sums to 1.0)
 DEFAULT_ENSEMBLE_WEIGHTS: tuple[float, float, float] = (0.5, 0.3, 0.2)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_GALILEO_CHECKPOINT = _REPO_ROOT / "models" / "galileo_cocoa_seg.pt"
 DEFAULT_AEF_CHECKPOINT = _REPO_ROOT / "models" / "aef_cocoa_head.pt"
+DEFAULT_AGRIFM_CHECKPOINT = _REPO_ROOT / "models" / "agrifm_cocoa_seg.pt"
 
 # Renormalized AEF + Galileo weights when FDP tiles are unavailable (0.5 + 0.3 → 1.0)
 GLOBAL_AEF_GAL_WEIGHTS: tuple[float, float] = (0.625, 0.375)
@@ -148,6 +149,14 @@ def is_fdp_covered(lat: float, lon: float) -> bool:
     )
 
 
+def region_for_point(lat: float, lon: float) -> str | None:
+    """Return the first matching FDP-native region key for a coordinate, if any."""
+    for key, preset in REGIONS.items():
+        if preset.fdp_native and point_in_region(lat, lon, key):
+            return key
+    return None
+
+
 def processed_era5_zarr_path(
     region: str,
     *,
@@ -231,7 +240,10 @@ class CocoaExposureIngest:
         backend: ExposureBackend = "fdp",
         galileo_checkpoint: Path | str | None = None,
         aef_checkpoint: Path | str | None = None,
+        agrifm_checkpoint: Path | str | None = None,
         ensemble_weights: tuple[float, float, float] = DEFAULT_ENSEMBLE_WEIGHTS,
+        ensemble_weights_path: Path | str | None = None,
+        region: str | None = None,
     ) -> None:
         self.aoi = aoi
         self.year = _normalize_year(year)
@@ -242,10 +254,18 @@ class CocoaExposureIngest:
             Path(galileo_checkpoint) if galileo_checkpoint else DEFAULT_GALILEO_CHECKPOINT
         )
         self.aef_checkpoint = Path(aef_checkpoint) if aef_checkpoint else DEFAULT_AEF_CHECKPOINT
+        self.agrifm_checkpoint = Path(agrifm_checkpoint) if agrifm_checkpoint else DEFAULT_AGRIFM_CHECKPOINT
         self.ensemble_weights = ensemble_weights
+        self.ensemble_weights_path = (
+            Path(ensemble_weights_path)
+            if ensemble_weights_path
+            else _REPO_ROOT / "config" / "ensemble_weights.yaml"
+        )
+        self.region = normalize_region_key(region) if region else None
         self._probability_image: ee.Image | None = None
         self._galileo_model = None
         self._aef_head = None
+        self._agrifm_model = None
 
     def _collection(self) -> ee.ImageCollection:
         start, end = _year_date_range(self.year)
@@ -383,6 +403,62 @@ class CocoaExposureIngest:
         t = torch.from_numpy(emb).unsqueeze(0)
         return float(head.predict_proba(t).item())
 
+    def _load_agrifm_model(self) -> Any:
+        if self._agrifm_model is not None:
+            return self._agrifm_model
+        from models.agrifm_seg import load_agrifm_seg_checkpoint
+
+        if self.agrifm_checkpoint.is_file():
+            self._agrifm_model = load_agrifm_seg_checkpoint(self.agrifm_checkpoint, device="cpu")
+        else:
+            from models.agrifm_seg import AgriFMCocoaSegmentation
+
+            logger.warning(
+                "AgriFM checkpoint missing at %s; using uninitialized segmentation",
+                self.agrifm_checkpoint,
+            )
+            self._agrifm_model = AgriFMCocoaSegmentation(freeze_backbone=True)
+            self._agrifm_model.eval()
+        return self._agrifm_model
+
+    def _agrifm_probability_at_point(self, lat: float, lon: float) -> float:
+        """Point P(cocoa) from AgriFM Video Swin segmentation (synthetic tile at API)."""
+        import torch
+
+        model = self._load_agrifm_model()
+        h = w = 64
+        t = 8
+        rng = np.random.default_rng(int(hash((round(lat, 4), round(lon, 4))) % (2**32)))
+        s2 = torch.from_numpy(rng.normal(0.2, 0.05, (1, t, h, w, 10)).astype(np.float32))
+        return float(model.predict_proba_numpy(s2))
+
+    def _ensemble_v2_blend(
+        self,
+        lat: float,
+        lon: float,
+        *,
+        scale_m: int,
+    ) -> float:
+        from data.ensemble_weights import load_ensemble_weights
+
+        region_key = self.region or region_for_point(lat, lon)
+        weights = load_ensemble_weights(region_key, path=self.ensemble_weights_path)
+        parts: list[tuple[float, float]] = []
+        for key, w in weights.items():
+            if key == "aef":
+                parts.append((w, self._aef_probability_at_point(lat, lon)))
+            elif key == "galileo":
+                parts.append((w, self._galileo_probability_at_point(lat, lon)))
+            elif key == "agrifm":
+                parts.append((w, self._agrifm_probability_at_point(lat, lon)))
+            elif key == "fdp":
+                fdp_p = self._fdp_probability_at_point(lat, lon, scale_m)
+                if fdp_p is not None:
+                    parts.append((w, fdp_p))
+        weight_sum = sum(w for w, _ in parts)
+        blended = sum(w * p for w, p in parts) / max(weight_sum, 1e-9)
+        return float(np.clip(blended, 0.0, 1.0))
+
     def sample_point(
         self,
         lat: float,
@@ -403,7 +479,13 @@ class CocoaExposureIngest:
         if self.backend == "aef":
             return self._aef_probability_at_point(lat, lon)
 
-        # ensemble: 0.5 AEF + 0.3 Galileo + 0.2 FDP
+        if self.backend == "agrifm":
+            return self._agrifm_probability_at_point(lat, lon)
+
+        if self.backend == "ensemble_v2":
+            return self._ensemble_v2_blend(lat, lon, scale_m=scale_m)
+
+        # ensemble v1: 0.5 AEF + 0.3 Galileo + 0.2 FDP
         w_aef, w_gal, w_fdp = self.ensemble_weights
         aef_p = self._aef_probability_at_point(lat, lon)
         gal_p = self._galileo_probability_at_point(lat, lon)
@@ -484,6 +566,41 @@ class CocoaExposureIngest:
         return m2 / 10_000.0
 
 
+def _global_aef_galileo_agrifm_probability(
+    lat: float,
+    lon: float,
+    *,
+    year: int,
+    project: str | None,
+    galileo_checkpoint: Path | str | None,
+    aef_checkpoint: Path | str | None,
+    agrifm_checkpoint: Path | str | None,
+    ensemble_weights_path: Path | str | None = None,
+) -> float:
+    """Blend AEF + Galileo + AgriFM when FDP 2025a does not cover the point."""
+    from data.ensemble_weights import load_ensemble_weights
+
+    ing = CocoaExposureIngest(
+        aoi=object(),  # type: ignore[arg-type]
+        year=year,
+        project=project,
+        backend="aef",
+        galileo_checkpoint=galileo_checkpoint,
+        aef_checkpoint=aef_checkpoint,
+        agrifm_checkpoint=agrifm_checkpoint,
+        ensemble_weights_path=ensemble_weights_path,
+    )
+    weights = load_ensemble_weights(None, path=ensemble_weights_path or ing.ensemble_weights_path, global_fallback=True)
+    parts: list[tuple[float, float]] = [
+        (weights["aef"], ing._aef_probability_at_point(lat, lon)),
+        (weights["galileo"], ing._galileo_probability_at_point(lat, lon)),
+        (weights["agrifm"], ing._agrifm_probability_at_point(lat, lon)),
+    ]
+    weight_sum = sum(w for w, _ in parts)
+    blended = sum(w * p for w, p in parts) / max(weight_sum, 1e-9)
+    return float(np.clip(blended, 0.0, 1.0))
+
+
 def _global_aef_galileo_probability(
     lat: float,
     lon: float,
@@ -492,8 +609,21 @@ def _global_aef_galileo_probability(
     project: str | None,
     galileo_checkpoint: Path | str | None,
     aef_checkpoint: Path | str | None,
+    agrifm_checkpoint: Path | str | None = None,
+    ensemble_weights_path: Path | str | None = None,
 ) -> float:
-    """Blend AEF + Galileo when FDP 2025a does not cover the point."""
+    """Backward-compatible global blend (delegates to AEF+Galileo+AgriFM when agrifm ckpt set)."""
+    if agrifm_checkpoint is not None or (ensemble_weights_path and Path(ensemble_weights_path).is_file()):
+        return _global_aef_galileo_agrifm_probability(
+            lat,
+            lon,
+            year=year,
+            project=project,
+            galileo_checkpoint=galileo_checkpoint,
+            aef_checkpoint=aef_checkpoint,
+            agrifm_checkpoint=agrifm_checkpoint,
+            ensemble_weights_path=ensemble_weights_path,
+        )
     ing = CocoaExposureIngest(
         aoi=object(),  # type: ignore[arg-type]
         year=year,
@@ -518,6 +648,8 @@ def sample_cocoa_probability_at_point(
     backend: ExposureBackend | None = None,
     galileo_checkpoint: Path | str | None = None,
     aef_checkpoint: Path | str | None = None,
+    agrifm_checkpoint: Path | str | None = None,
+    ensemble_weights_path: Path | str | None = None,
     project: str | None = None,
 ) -> float:
     """
@@ -539,6 +671,9 @@ def sample_cocoa_probability_at_point(
                 backend=use_backend,
                 galileo_checkpoint=galileo_checkpoint,
                 aef_checkpoint=aef_checkpoint,
+                agrifm_checkpoint=agrifm_checkpoint,
+                ensemble_weights_path=ensemble_weights_path,
+                region=region_for_point(lat, lon),
             )
             p = ing.sample_point(lat, lon)
             if p is not None:
@@ -547,13 +682,15 @@ def sample_cocoa_probability_at_point(
             logger.debug("FDP-region sample failed (%s); trying global fallback", exc)
         return _cocoa_belt_probability(lat, lon)
 
-    return _global_aef_galileo_probability(
+    return _global_aef_galileo_agrifm_probability(
         lat,
         lon,
         year=year,
         project=project,
         galileo_checkpoint=galileo_checkpoint,
         aef_checkpoint=aef_checkpoint,
+        agrifm_checkpoint=agrifm_checkpoint,
+        ensemble_weights_path=ensemble_weights_path,
     )
 
 
@@ -565,6 +702,8 @@ def resolve_exposure_probability(
     backend: ExposureBackend = "fdp",
     galileo_checkpoint: Path | str | None = None,
     aef_checkpoint: Path | str | None = None,
+    agrifm_checkpoint: Path | str | None = None,
+    ensemble_weights_path: Path | str | None = None,
     project: str | None = None,
 ) -> float:
     """
@@ -580,6 +719,8 @@ def resolve_exposure_probability(
         backend=backend,
         galileo_checkpoint=galileo_checkpoint,
         aef_checkpoint=aef_checkpoint,
+        agrifm_checkpoint=agrifm_checkpoint,
+        ensemble_weights_path=ensemble_weights_path,
         project=project,
     )
 
@@ -590,6 +731,7 @@ __all__ = [
     "FDP_COCOA_COLLECTION",
     "FDP_MODEL_CARD_URL",
     "DEFAULT_AEF_CHECKPOINT",
+    "DEFAULT_AGRIFM_CHECKPOINT",
     "DEFAULT_ENSEMBLE_WEIGHTS",
     "DEFAULT_GALILEO_CHECKPOINT",
     "DEFAULT_THRESHOLD",

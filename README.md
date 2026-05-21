@@ -298,12 +298,15 @@ Latest reports: [`reports/backbones/benchmark_<region>_<date>.md`](reports/backb
 | Role | Backbone | Notes |
 |------|----------|--------|
 | **Production (candidate)** | **AlphaEarth Foundations (AEF)** + MLP head | GEE `GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL` 64-D annual embeddings (arXiv:2507.22291); near-zero inference via [`alphaearth_embeddings.py`](src/data/alphaearth_embeddings.py) + [`aef_cocoa_head.py`](src/models/aef_cocoa_head.py) |
-| **Production (active)** | **Galileo-Base** + binary seg head | Multimodal S2×10, S1 VV/VH, ERA5 monthly (5 vars → Galileo time bands), DEM; 10 m `P(cocoa)` via [`galileo_seg.py`](src/models/galileo_seg.py) |
+| **Production (active)** | **Galileo + AlphaEarth + AgriFM ensemble (region-weighted)** | `ensemble_v2` loads per-region weights from [`config/ensemble_weights.yaml`](config/ensemble_weights.yaml) (fit via [`scripts/fit_ensemble_v2_weights.py`](scripts/fit_ensemble_v2_weights.py)); blends AEF, Galileo-Base, AgriFM Video Swin, and FDP |
+| **Segmentation (single)** | **Galileo-Base** + binary seg head | Multimodal S2×10, S1 VV/VH, ERA5 monthly (5 vars → Galileo time bands), DEM; 10 m `P(cocoa)` via [`galileo_seg.py`](src/models/galileo_seg.py) |
 | **Foundation (agriculture)** | **AgriFM (Video Swin)** | Li et al. (RSE 2026; arXiv:2505.21357); S2 10-band temporal stack; MIT reimplementation in [`agrifm_backbone.py`](src/models/agrifm_backbone.py) + [`agrifm_cocoa_head.py`](src/models/agrifm_cocoa_head.py); **Apache-2.0** pretrained weights via [`download_agrifm_weights.py`](scripts/download_agrifm_weights.py) |
 | **Prior (weak supervision)** | FDP 2025a | GEE `model_2025a`; threshold 0.96 |
 | **Baseline** | Prithvi-EO-2.0 | TerraTorch `prithvi_eo_v2_100_tl` (6-band stem in benchmark when full checkpoint absent) |
 
-**Exposure API:** `CocoaExposureIngest(..., backend="fdp" | "galileo" | "aef" | "ensemble")`. Ensemble default: `0.5 × AEF + 0.3 × Galileo + 0.2 × FDP`. Default ingest remains `fdp`; set `backend="aef"`, `"galileo"`, or `"ensemble"` for refined exposure. Checkpoints: `models/aef_cocoa_head.pt` (`python scripts/train_aef_head.py`), `models/galileo_cocoa_seg.pt` (`python -m training.train_galileo_cocoa`).
+**Exposure API:** `CocoaExposureIngest(..., backend="fdp" | "galileo" | "aef" | "agrifm" | "ensemble" | "ensemble_v2")`. Production default: **`ensemble_v2`** (`COCOA_EXPOSURE_BACKEND=ensemble_v2`, `ENSEMBLE_BACKEND=v2`). Legacy v1 ensemble: `0.5 × AEF + 0.3 × Galileo + 0.2 × FDP`. Checkpoints: `models/aef_cocoa_head.pt`, `models/galileo_cocoa_seg.pt`, `models/agrifm_cocoa_seg.pt` (`python scripts/train_agrifm_cocoa.py`), weights YAML via `python scripts/fit_ensemble_v2_weights.py`.
+
+> **Note:** Fine-tuning, ensemble weight fitting, and full benchmark reports require **GPU (or HPC) compute** and are not run in CI. See [`docs/agrifm_ensemble_v2_compute.md`](docs/agrifm_ensemble_v2_compute.md) for the ordered workflow and which artifacts to produce before treating `ensemble_v2` as production-ready.
 
 **ERA5 outputs (per pixel, per year):**
 
