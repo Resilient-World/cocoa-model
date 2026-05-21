@@ -35,12 +35,59 @@ def test_run_end_to_end_demo_mock_gee(tmp_path, mock_whisp: MockWhispClient) -> 
         cmip6_zarr_path=tmp_path / "cmip6.zarr",
         era5_counterfactual_zarr_path=tmp_path / "era5_cf.zarr",
         use_real_features=False,
+        mediation_n_bootstrap=50,
     )
 
-    with patch(
-        "scripts.demo_end_to_end.sample_cocoa_probability_at_point",
-        return_value=0.72,
+    with (
+        patch(
+            "scripts.demo_end_to_end.sample_cocoa_probability_at_point",
+            return_value=0.72,
+        ),
+        patch("scripts.demo_end_to_end._run_policy_targeting_demo") as mock_policy,
+        patch("scripts.demo_end_to_end.build_resolver_from_settings") as mock_resolver,
+        patch("api.simulation._optional_eudr_status", return_value=None),
+        patch("api.causal_sensitivity.compute_sensitivity_bounds", return_value=[]),
+        patch("api.mediation.compute_intervention_mediation") as mock_med,
+        patch("scripts.demo_end_to_end.simulate_scenario") as mock_scenario,
     ):
+        from api.schemas import AvoidedLossUncertaintyBand, YieldUncertaintyBand
+
+        mock_scenario.return_value = type(
+            "ScenarioResp",
+            (),
+            {
+                "baseline_yield_tonnes_per_ha": YieldUncertaintyBand(mean=1.4, p10=1.2, p90=1.6),
+                "projected_yield_tonnes_per_ha": YieldUncertaintyBand(mean=1.7, p10=1.5, p90=1.9),
+                "avoided_loss_tonnes": AvoidedLossUncertaintyBand(mean=0.75, p10=0.5, p90=1.0),
+                "financial_impact_usd_mean": 2400.0,
+                "drift_status": None,
+                "drift_alarm": None,
+            },
+        )()
+        from api.schemas import MediationDecomposition, MediatorEffect
+
+        mock_med.return_value = MediationDecomposition(
+            per_mediator=[
+                MediatorEffect(
+                    mediator="microclimate",
+                    nde=0.1,
+                    nie=0.05,
+                    total_effect=0.15,
+                    proportion_mediated=0.33,
+                    nde_ci=(0.0, 0.2),
+                    nie_ci=(0.0, 0.1),
+                    rho_critical=0.5,
+                )
+            ],
+            path_table=[],
+        )
+        mock_policy.return_value = {"policy_value": 0.1, "n_rules_shown": 1, "rules": ["IF x THEN treat"], "covariates": []}
+        from tests.test_api_simulate import StubFeatureResolver
+
+        stub = StubFeatureResolver()
+        stub.config = settings
+        stub.resolve_teleconnection = lambda lat, lon, year: None  # type: ignore[method-assign]
+        mock_resolver.return_value = stub
         payload = asyncio.run(
             demo.run_end_to_end_demo(
                 settings=settings,
@@ -59,12 +106,18 @@ def test_run_end_to_end_demo_mock_gee(tmp_path, mock_whisp: MockWhispClient) -> 
     assert payload["cocoa_exposure_probability"] == pytest.approx(0.72)
     assert payload["eudr_status"]["risk_class"] == "standard"
     assert payload["eudr_status"]["deforestation_post_2020"] is False
+    assert payload.get("version") == "0.3.0"
+    assert "exposure_terramind_tim" in payload
+    assert "policy_targeting" in payload
 
     ids = {a["id"] for a in payload["source_attributions"]}
-    assert {"whisp", "fdp_cocoa_2025a", "era5_land", "cmip6", "attrici", "casej_surrogate"} <= ids
+    assert {"whisp", "fdp_cocoa_2025a", "era5_land", "cmip6", "attrici", "casej_surrogate", "mediation"} <= ids
 
     assert "scenario_ssp585_2050" in payload
     assert payload["scenario_ssp585_2050"]["avoided_loss_tonnes"]["mean"] >= 0.0
+
+    if payload.get("mediation_shade_trees"):
+        assert len(payload["mediation_shade_trees"]["per_mediator"]) >= 1
 
 
 def test_demo_main_writes_json(tmp_path) -> None:
@@ -88,6 +141,6 @@ def test_write_era5_and_attrici_zarr_roundtrip(tmp_path) -> None:
     era5 = tmp_path / "era5.zarr"
     cf = tmp_path / "cf.zarr"
     demo.write_era5_demo_zarr(era5, demo.SAMPLE_LAT, demo.SAMPLE_LON)
-    demo.write_attrici_counterfactual_zarr(era5, cf, lat=demo.SAMPLE_LAT, lon=demo.SAMPLE_LON)
+    demo.write_attrici_counterfactual_zarr(era5, cf)
     assert era5.is_dir()
     assert cf.is_dir()

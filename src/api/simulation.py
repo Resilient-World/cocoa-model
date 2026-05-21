@@ -592,10 +592,32 @@ def simulate_intervention(
     eudr_status = _optional_eudr_status(request, settings) if settings is not None else None
 
     sensitivity_bounds = None
-    if request.include_sensitivity and settings is not None:
+    if getattr(request, "include_sensitivity", False) and settings is not None:
         from api.causal_sensitivity import compute_sensitivity_bounds
 
         sensitivity_bounds = compute_sensitivity_bounds(settings)
+
+    mediation_block = None
+    decompose = getattr(request, "decompose_mediators", None)
+    if decompose and samples_cf is not None and samples_factual is not None:
+        from api.mediation import compute_intervention_mediation
+
+        n_boot = 200
+        if settings is not None:
+            n_boot = int(getattr(settings, "mediation_n_bootstrap", 200))
+        biotic_base = biotic_cf
+        biotic_proj = biotic_factual
+        mediation_block = compute_intervention_mediation(
+            request,
+            samples_cf=samples_cf,
+            samples_factual=samples_factual,
+            ds_cf=ds_cf,
+            ds_factual=ds_factual,
+            biotic_baseline=biotic_base,
+            biotic_projected=biotic_proj,
+            decompose_mediators=decompose,
+            n_bootstrap=n_boot,
+        )
 
     return SimulateInterventionResponse(
         baseline_yield_tonnes_per_ha=baseline_yield,
@@ -619,6 +641,7 @@ def simulate_intervention(
         },
         eudr_status=eudr_status,
         sensitivity_bounds=sensitivity_bounds,
+        mediation=mediation_block,
     )
 
 

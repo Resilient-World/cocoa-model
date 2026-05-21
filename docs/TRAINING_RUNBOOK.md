@@ -198,8 +198,26 @@ Full pipeline requires prior ingest and GPU stages; see `dvc.yaml`.
 
 ---
 
+## Demo v0.3.0 CPU cost (offline)
+
+| Module | Typical laptop time | Env / notes |
+|--------|---------------------|-------------|
+| **Mediation** (`decompose_mediators` × 3) | ~30–90 s | `MEDIATION_N_BOOTSTRAP=200` (API default); full 500 in offline scripts |
+| **Policy tree** (demo panel, `n_bootstrap=0`) | ~5–15 s | Synthetic 400-farm panel only |
+| **DVDS** (`include_sensitivity`) | ~2–5 s | Uses synthetic panel fallback when no parquet |
+| **WCTM drift** on scenario | &lt;1 s | Empty drift store until `validate_drift_detection.py` seeds strata |
+| **CorrDiff scenario** | skipped by default | Set `CORRDIFF_AVAILABLE=true` and precompute Zarr via `run_corrdiff_scenario_bulk.py` |
+
+```bash
+USE_REAL_FEATURES=false python scripts/demo_end_to_end.py --mock-gee --pretty
+# outputs: reports/demo/e2e_civ_v5.json + e2e_civ_v5.md
+```
+
+---
+
 ## Related docs
 
+- [`mediation_analysis.md`](mediation_analysis.md) — NDE/NIE, mediator IDs, ρ sensitivity
 - [`ensemble_v3_compute.md`](ensemble_v3_compute.md) — AgriFM + TerraMind fine-tune + ensemble v2/v3
 - [`MODEL_CARD.md`](MODEL_CARD.md) — thresholds, regulatory mapping
 - [`README.md`](../README.md) — architecture and API
