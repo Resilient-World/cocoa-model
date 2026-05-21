@@ -147,6 +147,79 @@ class RankInterventionsResponse(BaseModel):
     ranked: list[RankedFarmRecommendation]
 
 
+PolicyLearnerMethod = Literal["policy_tree", "policy_forest"]
+
+
+class PolicyRule(BaseModel):
+    """One interpretable leaf rule from a DR policy tree."""
+
+    rule_id: int
+    rule_text: str
+    leaf_id: int
+    n_units: int
+    treat_fraction: float = Field(..., ge=0.0, le=1.0)
+    expected_uplift: float
+    ci_low: float
+    ci_high: float
+
+
+class PolicyRulebook(BaseModel):
+    """Learned targeting rules with aggregate policy value."""
+
+    method: PolicyLearnerMethod
+    feature_names: list[str]
+    treatment_names: list[str]
+    rules: list[PolicyRule]
+    policy_value_estimate: float
+    policy_value_ci_low: float
+    policy_value_ci_high: float
+    greedy_policy_value: float | None = None
+    cost_aware: bool = False
+    n_samples: int
+
+
+class LearnPolicyRulesRequest(BaseModel):
+    """Request body for POST /learn-policy-rules."""
+
+    rows: list[dict] = Field(..., description="Panel rows with outcome, treatment, and covariates")
+    outcome: str
+    treatment: str
+    covariates: list[str]
+    learner: Literal["tree", "forest"] = Field(
+        default="tree",
+        description="policy_tree (fast) or policy_forest (500 trees, offline/HPC)",
+    )
+    cost_col: str | None = Field(
+        default=None,
+        description="Per-unit cost column; enables net-benefit (uplift − cost) policy learning",
+    )
+    farm_area_col: str = Field(default="farm_size_ha")
+    cocoa_price_usd: float = Field(default=3000.0, ge=0.0)
+    intervention_cost_usd_per_farm: float = Field(default=0.0, ge=0.0)
+    budget: float | None = Field(
+        default=None,
+        ge=0.0,
+        description="Budget for greedy CATE/cost baseline comparison",
+    )
+    max_depth: int = Field(default=4, ge=1, le=12)
+    min_samples_leaf: int = Field(default=50, ge=10)
+    n_estimators: int = Field(default=500, ge=10, le=2000)
+    n_folds: int = Field(default=5, ge=2, le=10)
+    n_bootstrap: int = Field(default=100, ge=20, le=500)
+    random_state: int = 42
+    recommended_treatment_label: str = Field(
+        default="treat",
+        description="Label embedded in rendered rules (e.g. treat_with_shade_trees)",
+    )
+    cate_method: Literal["r_learner", "causal_forest"] = Field(default="r_learner")
+
+
+class LearnPolicyRulesResponse(BaseModel):
+    """Response from POST /learn-policy-rules."""
+
+    rulebook: PolicyRulebook
+
+
 UQMethod = Literal["mcd", "cqr"]
 
 ConfidenceMethod = Literal[
