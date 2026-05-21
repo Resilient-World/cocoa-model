@@ -51,6 +51,15 @@ class APISettings(BaseSettings):
         validation_alias="YIELD_SURROGATE_ALLOW_V1_FALLBACK",
         description="When v2 checkpoint is missing, load v1 weights via from_v1_checkpoint",
     )
+    enable_cssvd_landscape: bool = Field(
+        default=False,
+        validation_alias="ENABLE_CSSVD_LANDSCAPE",
+        description="Use Dumont et al. landscape CSSVD incidence model when checkpoint exists",
+    )
+    cssvd_landscape_checkpoint: Path = Field(
+        default=_REPO_ROOT / "models" / "cssvd_landscape.joblib",
+        validation_alias="CSSVD_LANDSCAPE_CHECKPOINT",
+    )
     enable_teleconnection: bool = Field(
         default=True,
         validation_alias="ENABLE_TELECONNECTION",

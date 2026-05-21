@@ -1,0 +1,39 @@
+{
+  "type": "FeatureCollection",
+  "name": "muller2018_wa_cssv_strain_atlas_simplified",
+  "crs": {"type": "name", "properties": {"name": "EPSG:4326"}},
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {"strain_region": "1A", "label": "Ghana coastal / western belt"},
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[-3.2, 4.5], [-1.0, 4.5], [-1.0, 6.8], [-3.2, 6.8], [-3.2, 4.5]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {"strain_region": "1B", "label": "Ghana eastern / Togo border"},
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[-1.0, 4.5], [0.9, 4.5], [0.9, 7.5], [-1.0, 7.5], [-1.0, 4.5]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {"strain_region": "1C", "label": "Cote d'Ivoire eastern"},
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[-4.5, 4.0], [-2.5, 4.0], [-2.5, 7.0], [-4.5, 7.0], [-4.5, 4.0]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {"strain_region": "2", "label": "Cote d'Ivoire western / central"},
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[-8.5, 4.0], [-4.5, 4.0], [-4.5, 9.5], [-8.5, 9.5], [-8.5, 4.0]]]
+      }
+    }
+  ]
+}

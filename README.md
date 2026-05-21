@@ -326,6 +326,22 @@ Latest reports: [`reports/backbones/benchmark_<region>_<date>.md`](reports/backb
 
 Exports support `drive` or `local` destinations (shared helpers in `era5_ingest`).
 
+#### CSSVD landscape incidence (Dumont et al. 2025)
+
+[`cssvd_landscape.py`](src/hazards/cssvd_landscape.py) predicts **12-month CSSVD incidence** from landscape and climate covariates (ensemble cocoa probability, 500 m non-cocoa buffer, 1 km canopy fragmentation, CHIRPS extreme precipitation, ERA5 growing-season diurnal range, Muller 2018 strain region). Training uses scikit-survival CoxBoost-style boosting on the Dumont supplement joined to [`cssvd_landscape_features.py`](src/data/cssvd_landscape_features.py).
+
+```bash
+# Place journal supplement at data/external/dumont_cssvd_plots.csv (or use synthetic CI data)
+python scripts/train_cssvd_landscape.py --synthetic --checkpoint models/cssvd_landscape.joblib
+# Optional: precompute GEE features for all plots
+python scripts/train_cssvd_landscape.py --use-gee
+
+export ENABLE_CSSVD_LANDSCAPE=true
+export CSSVD_LANDSCAPE_CHECKPOINT=models/cssvd_landscape.joblib
+```
+
+When enabled, [`composite.py`](src/hazards/composite.py) maps predicted incidence to Ofori et al. yield loss; otherwise static `cssvd_prevalence_pct` is used. DVC stage: `stage_train_cssvd_landscape` in [`dvc.yaml`](dvc.yaml).
+
 ---
 
 ### `src/models` — yield surrogate
