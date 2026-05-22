@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+
 import numpy as np
 import pandas as pd
 

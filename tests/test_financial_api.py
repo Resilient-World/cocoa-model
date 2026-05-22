@@ -25,7 +25,9 @@ def _cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         pricing.ICCO_CACHE, index=False
     )
     pd.DataFrame({"date": dates, "usd_per_ghs": 12.0}).to_parquet(pricing.FX_GHS_CACHE, index=False)
-    pd.DataFrame({"date": dates, "usd_per_xof": 600.0}).to_parquet(pricing.FX_XOF_CACHE, index=False)
+    pd.DataFrame({"date": dates, "usd_per_xof": 600.0}).to_parquet(
+        pricing.FX_XOF_CACHE, index=False
+    )
 
 
 def test_calculate_financial_impact_tri_currency() -> None:

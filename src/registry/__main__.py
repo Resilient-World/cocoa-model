@@ -12,7 +12,9 @@ from registry.mlflow_registry import promote_challenger
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Promote MLflow challenger to champion")
     parser.add_argument("--model", required=True)
-    parser.add_argument("--gate-result", type=Path, default=Path("release_evidence/gate_result.json"))
+    parser.add_argument(
+        "--gate-result", type=Path, default=Path("release_evidence/gate_result.json")
+    )
     parser.add_argument("--env", default="staging")
     args = parser.parse_args(argv)
     gate: dict = {}

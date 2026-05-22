@@ -7,8 +7,8 @@ import pytest
 
 from data.schemas import (
     ERA5DailySchema,
-    FDPProbabilitySchema,
     FarmPanelSchema,
+    FDPProbabilitySchema,
     validate_dataframe,
 )
 

@@ -66,9 +66,8 @@ def _norm_ppf(p: float) -> float:
     plow = 0.02425
     if p < plow:
         q = math.sqrt(-2.0 * math.log(p))
-        return (
-            (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5])
-            / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1.0)
+        return (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / (
+            (((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1.0
         )
     if p > 1.0 - plow:
         q = math.sqrt(-2.0 * math.log(1.0 - p))
@@ -140,4 +139,10 @@ def reinsurance_layer(
     capacity = exhaust - attachment
     ceded = min(excess, capacity)
     net = gross - ceded
-    return {"gross": gross, "ceded": ceded, "net": net, "attachment": attachment, "exhaust": exhaust}
+    return {
+        "gross": gross,
+        "ceded": ceded,
+        "net": net,
+        "attachment": attachment,
+        "exhaust": exhaust,
+    }

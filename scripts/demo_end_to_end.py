@@ -30,6 +30,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT / "src"))
 
+from analysis.policy_targeting import learn_policy_tree, render_policy_rules
 from api.config import APISettings
 from api.cqr_loader import load_cqr_bundle
 from api.eudr import EudrDueDiligenceRequest, EudrStatusBlock, run_eudr_due_diligence
@@ -49,7 +50,6 @@ from api.simulation import (
     simulate_intervention,
     simulate_scenario,
 )
-from analysis.policy_targeting import learn_policy_tree, render_policy_rules
 from counterfactual.corrdiff_downscaler import corrdiff_cache_path, write_synthetic_corrdiff_cache
 from data.alphaearth_embeddings import AEF_ANNUAL_COLLECTION, AEF_ATTRIBUTION
 from data.cocoa_exposure import (
@@ -59,9 +59,8 @@ from data.cocoa_exposure import (
 )
 from data.era5_ingest import CHIRPS_DAILY, ERA5_DAILY, ERA5_LAND_DAILY
 from data.farm_panel import load_synthetic_panel
-from data.whisp_client import WHISP_DOCS_URL, WHISP_PORTAL_URL, MockWhispClient, WhispClient
+from data.whisp_client import WHISP_PORTAL_URL, MockWhispClient, WhispClient
 from monitoring.drift_store import build_drift_store_from_settings
-from models.yield_surrogate import CLIMATE_CHANNEL_NAMES
 
 logger = logging.getLogger(__name__)
 
@@ -108,14 +107,18 @@ def build_demo_settings(*, mock_gee: bool) -> APISettings:
     return settings
 
 
-def write_era5_demo_zarr(path: Path, lat: float, lon: float, year: int = DEFAULT_CLIMATE_YEAR) -> None:
+def write_era5_demo_zarr(
+    path: Path, lat: float, lon: float, year: int = DEFAULT_CLIMATE_YEAR
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     times = pd.date_range(f"{year}-01-01", periods=365, freq="D")
     seasonal = np.sin(2 * np.pi * np.arange(365) / 365.0)
     tmax = (31.0 + 2.0 * seasonal).astype(np.float32)
     tmin = (tmax - 7.0).astype(np.float32)
     tmean = (0.5 * (tmax + tmin)).astype(np.float32)
-    precip = np.clip(np.abs(np.random.default_rng(7).normal(4.0, 2.0, 365)), 0, 60).astype(np.float32)
+    precip = np.clip(np.abs(np.random.default_rng(7).normal(4.0, 2.0, 365)), 0, 60).astype(
+        np.float32
+    )
     srad = (18.0 + 2.0 * seasonal).astype(np.float32)
     rh = np.clip(78.0 + 5.0 * seasonal, 5, 100).astype(np.float32)
     wind = np.full(365, 2.0, dtype=np.float32)
@@ -210,26 +213,97 @@ def build_source_attributions(
     uq_method: str,
 ) -> list[dict[str, str]]:
     base = [
-        {"id": "whisp", "role": "EUDR deforestation screening", "citation": f"Open Foris Whisp ({WHISP_PORTAL_URL})"},
-        {"id": "eudr_regulation", "role": "Legal baseline (forest cutoff 2020-12-31)", "citation": "EU Regulation (EU) 2023/1115"},
-        {"id": "fdp_cocoa_2025a", "role": "Cocoa exposure probability", "citation": f"FDP 2025a ({FDP_MODEL_CARD_URL})", "asset": FDP_COCOA_COLLECTION},
-        {"id": "aef", "role": "Cocoa exposure (embeddings)", "citation": AEF_ATTRIBUTION, "asset": AEF_ANNUAL_COLLECTION},
-        {"id": "terramind_tim", "role": "TerraMind 1.0 + TiM exposure sample", "citation": "IBM-ESA TerraMind-1.0-base + TiM path"},
-        {"id": "era5_land", "role": "Historical daily climate", "citation": "ECMWF ERA5-Land", "asset": ERA5_LAND_DAILY},
+        {
+            "id": "whisp",
+            "role": "EUDR deforestation screening",
+            "citation": f"Open Foris Whisp ({WHISP_PORTAL_URL})",
+        },
+        {
+            "id": "eudr_regulation",
+            "role": "Legal baseline (forest cutoff 2020-12-31)",
+            "citation": "EU Regulation (EU) 2023/1115",
+        },
+        {
+            "id": "fdp_cocoa_2025a",
+            "role": "Cocoa exposure probability",
+            "citation": f"FDP 2025a ({FDP_MODEL_CARD_URL})",
+            "asset": FDP_COCOA_COLLECTION,
+        },
+        {
+            "id": "aef",
+            "role": "Cocoa exposure (embeddings)",
+            "citation": AEF_ATTRIBUTION,
+            "asset": AEF_ANNUAL_COLLECTION,
+        },
+        {
+            "id": "terramind_tim",
+            "role": "TerraMind 1.0 + TiM exposure sample",
+            "citation": "IBM-ESA TerraMind-1.0-base + TiM path",
+        },
+        {
+            "id": "era5_land",
+            "role": "Historical daily climate",
+            "citation": "ECMWF ERA5-Land",
+            "asset": ERA5_LAND_DAILY,
+        },
         {"id": "era5", "role": "Daily Tmax/Tmin", "asset": ERA5_DAILY},
         {"id": "chirps", "role": "Daily precipitation", "asset": CHIRPS_DAILY},
-        {"id": "cmip6", "role": f"Future climate ({DEFAULT_SCENARIO} {DEFAULT_HORIZON_YEAR})", "citation": "CMIP6 delta-change"},
-        {"id": "attrici", "role": "No-climate-change counterfactual", "citation": "Mengel et al. (2021) ATTRICI"},
-        {"id": "yield_surrogate", "role": "Attribution + intervention + mediation", "citation": "YieldSurrogate v2"},
-        {"id": "casej_surrogate", "role": "SSP scenario yields", "citation": "CASEJ neural surrogate"},
-        {"id": "wctm_drift", "role": "Conformal drift monitoring", "citation": "WCTM (WATCH, ICML 2025)"},
-        {"id": "dvds", "role": "Cooperative ATE sensitivity bounds", "citation": "Tan MSM / DVDS (Dorn et al. 2022)"},
-        {"id": "corrdiff", "role": "Optional CorrDiff-CMIP6 downscaling", "citation": "NVIDIA CorrDiff + Earth2Studio"},
-        {"id": "policy_tree", "role": "Honest DR targeting rules", "citation": "DRPolicyTree (econml)"},
-        {"id": "mediation", "role": "NDE/NIE path decomposition", "citation": "Imai-Keele-Yamamoto g-computation"},
-        {"id": "icco_pricing", "role": "Financial valuation", "citation": "ICCO / farm-gate pass-through"},
+        {
+            "id": "cmip6",
+            "role": f"Future climate ({DEFAULT_SCENARIO} {DEFAULT_HORIZON_YEAR})",
+            "citation": "CMIP6 delta-change",
+        },
+        {
+            "id": "attrici",
+            "role": "No-climate-change counterfactual",
+            "citation": "Mengel et al. (2021) ATTRICI",
+        },
+        {
+            "id": "yield_surrogate",
+            "role": "Attribution + intervention + mediation",
+            "citation": "YieldSurrogate v2",
+        },
+        {
+            "id": "casej_surrogate",
+            "role": "SSP scenario yields",
+            "citation": "CASEJ neural surrogate",
+        },
+        {
+            "id": "wctm_drift",
+            "role": "Conformal drift monitoring",
+            "citation": "WCTM (WATCH, ICML 2025)",
+        },
+        {
+            "id": "dvds",
+            "role": "Cooperative ATE sensitivity bounds",
+            "citation": "Tan MSM / DVDS (Dorn et al. 2022)",
+        },
+        {
+            "id": "corrdiff",
+            "role": "Optional CorrDiff-CMIP6 downscaling",
+            "citation": "NVIDIA CorrDiff + Earth2Studio",
+        },
+        {
+            "id": "policy_tree",
+            "role": "Honest DR targeting rules",
+            "citation": "DRPolicyTree (econml)",
+        },
+        {
+            "id": "mediation",
+            "role": "NDE/NIE path decomposition",
+            "citation": "Imai-Keele-Yamamoto g-computation",
+        },
+        {
+            "id": "icco_pricing",
+            "role": "Financial valuation",
+            "citation": "ICCO / farm-gate pass-through",
+        },
         {"id": "uq_method", "role": "90% uncertainty interval", "citation": uq_method.upper()},
-        {"id": "exposure_backend", "role": "Default exposure resolver", "citation": exposure_backend},
+        {
+            "id": "exposure_backend",
+            "role": "Default exposure resolver",
+            "citation": exposure_backend,
+        },
     ]
     return base
 
@@ -344,8 +418,12 @@ def write_markdown_summary(payload: dict[str, Any], path: Path) -> None:
     tm = payload.get("exposure_terramind_tim", {})
     lines.append(f"1. **TerraMind+TiM exposure:** {tm.get('cocoa_probability', 'n/a')}")
     attr = payload.get("climate_attribution_detail", {})
-    lines.append(f"2. **ATTRICI attribution:** factual {attr.get('factual_yield_t_per_ha', 0):.2f} vs CF {attr.get('counterfactual_yield_t_per_ha', 0):.2f} t/ha")
-    lines.append(f"3. **Intervention:** avoided {payload.get('intervention_avoided_loss_t_per_ha', 0):.3f} t/ha")
+    lines.append(
+        f"2. **ATTRICI attribution:** factual {attr.get('factual_yield_t_per_ha', 0):.2f} vs CF {attr.get('counterfactual_yield_t_per_ha', 0):.2f} t/ha"
+    )
+    lines.append(
+        f"3. **Intervention:** avoided {payload.get('intervention_avoided_loss_t_per_ha', 0):.3f} t/ha"
+    )
     med = payload.get("mediation_shade_trees", {})
     if med:
         lines.append("4. **Mediation (shade trees):**")
@@ -356,12 +434,16 @@ def write_markdown_summary(payload: dict[str, Any], path: Path) -> None:
             )
     scen = payload.get("scenario_ssp585_2050", {})
     drift = scen.get("drift_status")
-    lines.append(f"5. **SSP5-8.5 2050:** avoided loss mean {scen.get('avoided_loss_tonnes', {}).get('mean', 0):.2f} t")
+    lines.append(
+        f"5. **SSP5-8.5 2050:** avoided loss mean {scen.get('avoided_loss_tonnes', {}).get('mean', 0):.2f} t"
+    )
     if drift:
         lines.append(f"6. **WCTM drift:** alarm={drift.get('drift_alarm', False)}")
     dvds = payload.get("dvds_sensitivity", {})
     if dvds:
-        lines.append(f"7. **DVDS (Λ={dvds.get('lambda', 1.5)}):** bounds [{dvds.get('ate_lower')}, {dvds.get('ate_upper')}]")
+        lines.append(
+            f"7. **DVDS (Λ={dvds.get('lambda', 1.5)}):** bounds [{dvds.get('ate_lower')}, {dvds.get('ate_upper')}]"
+        )
     pol = payload.get("policy_targeting", {})
     if pol.get("rules"):
         lines.append("8. **Policy rules (top):**")
@@ -605,7 +687,9 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Also write legacy e2e_civ.json filename",
     )
-    parser.add_argument("--md-out", type=Path, default=None, help="Markdown summary (default: sibling .md)")
+    parser.add_argument(
+        "--md-out", type=Path, default=None, help="Markdown summary (default: sibling .md)"
+    )
     parser.add_argument("--mock-gee", action="store_true", help="Offline geo_mock + synthetic Zarr")
     parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     args = parser.parse_args(argv)

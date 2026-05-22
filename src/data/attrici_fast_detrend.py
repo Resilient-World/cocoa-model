@@ -12,18 +12,18 @@ state variables — never detrended directly.
 
 from __future__ import annotations
 
-import structlog
-
 import argparse
 import logging
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Literal, Sequence
+from typing import Literal
 
 import numpy as np
 import pandas as pd
 import requests
+import structlog
 import xarray as xr
 
 from data.era5_ingest import (
@@ -488,8 +488,13 @@ def main(argv: list[str] | None = None) -> int:
     gmt = load_gistemp_loti()
     log.info("Loaded smoothed GISTEMP LOTI (%d years)", len(gmt))
 
+    from data.attrici_counterfactual import ATTRICICounterfactual
+
     ds = xr.open_zarr(args.era5_zarr, consolidated=True)
-    model = ATTRICICounterfactual(gmt, variables=variables, )  # type: ignore[arg-type]
+    model = ATTRICICounterfactual(
+        gmt,
+        variables=variables,
+    )  # type: ignore[arg-type]
     cf = model.fit_transform(ds)
 
     out = ds.copy()

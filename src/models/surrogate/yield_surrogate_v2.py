@@ -4,22 +4,21 @@ YieldSurrogateV2: v1 mechanistic + GRU surrogate with PAPE on the climate branch
 
 from __future__ import annotations
 
-import structlog
-
 from pathlib import Path
 from typing import Any
 
+import structlog
 import torch
 from torch import Tensor
 
-from data.cocoa_exposure import REGIONS, normalize_region_key
+from data.cocoa_exposure import REGIONS
 from finance.pricing import infer_country_code
-from models.io.checkpoint_migration import is_v1_static_checkpoint, migrate_v1_static_to_v2
 from models.features.pape import (
     REGION_KEYS,
     PhenologyAwarePositionalEncoding,
     region_to_id,
 )
+from models.io.checkpoint_migration import is_v1_static_checkpoint, migrate_v1_static_to_v2
 from models.surrogate.yield_surrogate import (
     N_STATIC_SITE,
     MechanisticTraces,
@@ -44,7 +43,9 @@ def region_id_from_country_code(country_code: str) -> int:
     """Map ISO3 producer code to phenology region id."""
     key = _ISO3_TO_REGION.get(country_code.strip().upper())
     if key is None:
-        raise KeyError(f"Unknown country_code {country_code!r}; expected one of {sorted(_ISO3_TO_REGION)}")
+        raise KeyError(
+            f"Unknown country_code {country_code!r}; expected one of {sorted(_ISO3_TO_REGION)}"
+        )
     return region_to_id(key)
 
 

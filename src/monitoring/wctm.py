@@ -11,9 +11,10 @@ Root-cause rules follow Section 3.6 (parallel label-WCTM and X-CTM).
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Literal, Sequence
+from typing import Literal
 
 DriftDiagnosis = Literal["none", "covariate_shift", "concept_shift", "out_of_support"]
 
@@ -286,9 +287,7 @@ def covariate_nonconformity(
         return 0.0, vec
     ema_f = [float(x) for x in ema]
     dist = math.sqrt(sum((a - b) ** 2 for a, b in zip(vec, ema_f, strict=True)))
-    new_ema = [
-        (1.0 - ema_decay) * e + ema_decay * v for e, v in zip(ema_f, vec, strict=True)
-    ]
+    new_ema = [(1.0 - ema_decay) * e + ema_decay * v for e, v in zip(ema_f, vec, strict=True)]
     return dist, new_ema
 
 

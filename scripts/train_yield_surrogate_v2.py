@@ -12,7 +12,6 @@ import argparse
 import logging
 import sys
 from pathlib import Path
-from typing import Any
 
 import mlflow
 import numpy as np
@@ -20,7 +19,6 @@ import pandas as pd
 import torch
 import xarray as xr
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.model_selection import train_test_split
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
@@ -34,9 +32,9 @@ from models.pape import region_to_id
 from models.yield_surrogate import (
     CLIMATE_CHANNEL_NAMES,
     CLIMATE_IDX,
-    CocoaPINNLoss,
     STATIC_FEATURE_NAMES,
     STATIC_IDX,
+    CocoaPINNLoss,
     pack_tree_age_static,
 )
 from models.yield_surrogate_v2 import YieldSurrogateV2, region_id_from_latlon
@@ -151,7 +149,9 @@ class YieldSurrogateV2Dataset(Dataset[dict[str, Tensor]]):
         if not zarr_path.is_dir():
             matches = list(self.era5_dir.glob(f"{farm_id}*.zarr"))
             if not matches:
-                raise FileNotFoundError(f"No ERA5 Zarr for farm_id={farm_id!r} under {self.era5_dir}")
+                raise FileNotFoundError(
+                    f"No ERA5 Zarr for farm_id={farm_id!r} under {self.era5_dir}"
+                )
             zarr_path = matches[0]
         ds = xr.open_zarr(zarr_path, consolidated=True)
         if "gdd_cocoa" not in ds.data_vars:

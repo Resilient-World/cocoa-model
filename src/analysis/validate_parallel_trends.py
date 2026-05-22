@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import structlog
-
 import argparse
 import json
 import sys
 from pathlib import Path
+
+import structlog
 
 log = structlog.get_logger(__name__)
 MIN_PRETREND_PVALUE = 0.10

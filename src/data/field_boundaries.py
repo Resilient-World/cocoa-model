@@ -11,12 +11,13 @@ Install: ``pip install -e ".[ftw]"``
 
 from __future__ import annotations
 
-import structlog
-
 import math
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Sequence
+from typing import TYPE_CHECKING
+
+import structlog
 
 if TYPE_CHECKING:
     import geopandas as gpd
@@ -90,10 +91,10 @@ def aggregate_to_parcels(
     stats: Sequence[str] = ("mean", "std"),
 ) -> gpd.GeoDataFrame:
     """
-    Zonal statistics from a raster onto FTW parcel polygons.
+      Zonal statistics from a raster onto FTW parcel polygons.
 
-    Used downstream to aggregate ERA5 / Sentinel features to parcel units via
-  ``rasterstats.zonal_stats``.
+      Used downstream to aggregate ERA5 / Sentinel features to parcel units via
+    ``rasterstats.zonal_stats``.
     """
     from rasterstats import zonal_stats
 

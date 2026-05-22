@@ -49,7 +49,5 @@ def test_distribution_shift_pid_reconverges() -> None:
 def test_wu_table_pid_coverage(fixture_name: str) -> None:
     scores = np.load(FIXTURES / f"{fixture_name}.npz")["scores"]
     pid = ConformalPID(alpha=ALPHA, eta=0.01, window=100)
-    cov, _, _, _ = run_online_coverage(
-        pid, scores, alpha=ALPHA, burn_in=200, warm_start=200
-    )
+    cov, _, _, _ = run_online_coverage(pid, scores, alpha=ALPHA, burn_in=200, warm_start=200)
     assert NOMINAL - WU_TOL <= cov <= NOMINAL + WU_TOL

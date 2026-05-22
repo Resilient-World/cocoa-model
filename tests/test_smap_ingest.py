@@ -19,8 +19,14 @@ def test_smap_to_zarr_writes_expected_schema(tmp_path: Path) -> None:
     shape = (len(time), 1, 1)
     ds = xr.Dataset(
         {
-            "sm_rootzone": (("time", "latitude", "longitude"), np.full(shape, 0.25, dtype=np.float32)),
-            "sm_surface": (("time", "latitude", "longitude"), np.full(shape, 0.18, dtype=np.float32)),
+            "sm_rootzone": (
+                ("time", "latitude", "longitude"),
+                np.full(shape, 0.25, dtype=np.float32),
+            ),
+            "sm_surface": (
+                ("time", "latitude", "longitude"),
+                np.full(shape, 0.18, dtype=np.float32),
+            ),
         },
         coords={"time": time, "latitude": lat, "longitude": lon},
     )
@@ -31,4 +37,3 @@ def test_smap_to_zarr_writes_expected_schema(tmp_path: Path) -> None:
 
     reopened = xr.open_zarr(out, consolidated=True)
     assert set(reopened.data_vars) == {"sm_rootzone", "sm_surface"}
-

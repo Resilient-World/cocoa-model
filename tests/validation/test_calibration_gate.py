@@ -7,7 +7,9 @@ from pathlib import Path
 
 from validation.calibration_metrics import CalibrationReport, run_calibration_gate
 
-_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "promotion" / "baseline_calibration.json"
+_FIXTURE = (
+    Path(__file__).resolve().parents[1] / "fixtures" / "promotion" / "baseline_calibration.json"
+)
 
 
 def test_gate_against_fixture() -> None:

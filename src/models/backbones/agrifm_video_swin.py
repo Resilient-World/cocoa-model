@@ -16,7 +16,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
-from einops import rearrange, reduce as einops_reduce
+from einops import rearrange
+from einops import reduce as einops_reduce
 from timm.layers import DropPath, trunc_normal_
 
 
@@ -103,7 +104,7 @@ def _compute_mask(
                 cnt += 1
     mask_windows = _window_partition(img_mask, window_size).squeeze(-1)
     attn_mask = mask_windows.unsqueeze(1) - mask_windows.unsqueeze(2)
-    return attn_mask.masked_fill(attn_mask != 0, float(-100.0)).masked_fill(attn_mask == 0, float(0.0))
+    return attn_mask.masked_fill(attn_mask != 0, (-100.0)).masked_fill(attn_mask == 0, 0.0)
 
 
 class Mlp(nn.Module):
@@ -150,9 +151,7 @@ class WindowAttention3D(nn.Module):
         self.scale = qk_scale or head_dim**-0.5
         self.relative_position_bias_table = nn.Parameter(
             torch.zeros(
-                (2 * window_size[0] - 1)
-                * (2 * window_size[1] - 1)
-                * (2 * window_size[2] - 1),
+                (2 * window_size[0] - 1) * (2 * window_size[1] - 1) * (2 * window_size[2] - 1),
                 num_heads,
             )
         )
@@ -179,7 +178,11 @@ class WindowAttention3D(nn.Module):
 
     def forward(self, x: torch.Tensor, mask: torch.Tensor | None) -> torch.Tensor:
         B_, N, C = x.shape
-        qkv = self.qkv(x).reshape(B_, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+        qkv = (
+            self.qkv(x)
+            .reshape(B_, N, 3, self.num_heads, C // self.num_heads)
+            .permute(2, 0, 3, 1, 4)
+        )
         q, k, v = qkv[0], qkv[1], qkv[2]
         attn = (q * self.scale) @ k.transpose(-2, -1)
         idx = self.relative_position_index[:N, :N].reshape(-1)
@@ -246,7 +249,9 @@ class SwinTransformerBlock3D(nn.Module):
         x = F.pad(x, (0, 0, 0, pad_r, 0, pad_b, 0, pad_d1))
         _, Dp, Hp, Wp, _ = x.shape
         if any(i > 0 for i in shift_size):
-            shifted_x = torch.roll(x, shifts=(-shift_size[0], -shift_size[1], -shift_size[2]), dims=(1, 2, 3))
+            shifted_x = torch.roll(
+                x, shifts=(-shift_size[0], -shift_size[1], -shift_size[2]), dims=(1, 2, 3)
+            )
             attn_mask = mask_matrix
         else:
             shifted_x = x

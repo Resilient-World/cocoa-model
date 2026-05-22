@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Sequence
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
@@ -223,8 +224,8 @@ def _compute_intervention_mediation_impl(
 
 
 __all__ = [
-    "compute_intervention_mediation",
-    "resolve_mediator_scalars",
-    "microclimate_index",
     "MEDIATOR_COLUMN",
+    "compute_intervention_mediation",
+    "microclimate_index",
+    "resolve_mediator_scalars",
 ]

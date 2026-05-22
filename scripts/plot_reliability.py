@@ -64,8 +64,7 @@ def main(argv: list[str] | None = None) -> int:
         ax1.axhline(1.0, color="k", linestyle="--", alpha=0.5)
     ax1.set_xlabel("PIT")
     ax1.set_title(
-        f"PIT p={data.get('pit_chi2_p', float('nan')):.3f} "
-        f"({data.get('pit_shape', '?')})"
+        f"PIT p={data.get('pit_chi2_p', float('nan')):.3f} ({data.get('pit_shape', '?')})"
     )
 
     ax2 = axes[2]

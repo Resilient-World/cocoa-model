@@ -8,14 +8,13 @@ when the RCASEJ / CASEJ Fortran engine is not installed locally.
 
 from __future__ import annotations
 
-import structlog
-
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
+import structlog
 import yaml
 
 log = structlog.get_logger(__name__)
@@ -232,15 +231,7 @@ def run_casej_yearly(
     biomass_g = 0.0
     for t in range(len(tmean)):
         f_w = float(np.clip(sw / (0.45 * awc), 0.0, 1.0))
-        d_b = (
-            p.rue_mj
-            * srad[t]
-            * f_w
-            * f_vpd[t]
-            * f_temp[t]
-            * f_co2
-            * f_age
-        )
+        d_b = p.rue_mj * srad[t] * f_w * f_vpd[t] * f_temp[t] * f_co2 * f_age
         biomass_g += d_b
         et_crop = et0[t] * p.kc
         sw = float(np.clip(sw + precip[t] - et_crop, 0.0, awc))

@@ -73,7 +73,9 @@ def fetch_climate_and_soil(lat: float, lon: float) -> tuple[Tensor, Tensor]:
     vpd = np.clip(es - ea, 0.05, 3.5)
 
     et0 = np.clip(3.2 + 0.4 * seasonal + rng.normal(0, 0.15, SEQUENCE_LENGTH), 1.5, 6.0)
-    sm_root = np.clip(0.28 + 0.04 * np.cos(seasonal) + rng.normal(0, 0.02, SEQUENCE_LENGTH), 0.12, 0.42)
+    sm_root = np.clip(
+        0.28 + 0.04 * np.cos(seasonal) + rng.normal(0, 0.02, SEQUENCE_LENGTH), 0.12, 0.42
+    )
     wind10m = np.clip(2.0 + rng.normal(0, 0.35, SEQUENCE_LENGTH), 0.5, 6.0)
 
     co2_base = 415.0 + (lat * 0.1) + (lon * 0.05)

@@ -7,17 +7,15 @@ inputs, and re-encodes for downstream segmentation.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import structlog
-
-from typing import Sequence
-
 import torch
 import torch.nn as nn
 
 from models.backbones.terramind_backbone import (
     DEFAULT_MODALITIES,
     DEFAULT_TIM_VARIANT,
-    ModalityKey,
     TerraMindBackbone,
     _collapse_tokens_to_map,
     _load_terramind_encoder,
@@ -46,7 +44,9 @@ class TerraMindTiM(nn.Module):
         super().__init__()
         self.variant = variant
         self.tim_encoder = _load_terramind_encoder(variant, pretrained=pretrained, tim=True)
-        self.reencoder = TerraMindBackbone(variant=reencode_variant, freeze=True, pretrained=pretrained)
+        self.reencoder = TerraMindBackbone(
+            variant=reencode_variant, freeze=True, pretrained=pretrained
+        )
         self._use_proxy = isinstance(self.tim_encoder, nn.Module) and not hasattr(
             self.tim_encoder, "generate"
         )
@@ -56,7 +56,9 @@ class TerraMindTiM(nn.Module):
         out = [str(m).upper() for m in tim_modalities]
         bad = [m for m in out if m not in SUPPORTED_TIM_MODALITIES]
         if bad:
-            raise ValueError(f"tim_modalities must be subset of {sorted(SUPPORTED_TIM_MODALITIES)}; got {bad}")
+            raise ValueError(
+                f"tim_modalities must be subset of {sorted(SUPPORTED_TIM_MODALITIES)}; got {bad}"
+            )
         return out
 
     def _generate_modality_proxy(self, s2: torch.Tensor, name: str) -> torch.Tensor:
@@ -70,14 +72,16 @@ class TerraMindTiM(nn.Module):
             return ndvi.clamp(-1, 1)
         # LULC proxy: edge-heavy classes from band std
         std = s2.std(dim=1, keepdim=True)
-        return (std / (std.max(dim=-1, keepdim=True).values.max(dim=-2, keepdim=True).values + 1e-6)).clamp(
-            0, 1
-        )
+        return (
+            std / (std.max(dim=-1, keepdim=True).values.max(dim=-2, keepdim=True).values + 1e-6)
+        ).clamp(0, 1)
 
     def _generate_modality(self, x: dict[str, torch.Tensor], name: str) -> torch.Tensor:
         if hasattr(self.tim_encoder, "generate"):
             try:
-                gen = self.tim_encoder.generate({k: x.get(k) for k in x if k in DEFAULT_MODALITIES}, [name])
+                gen = self.tim_encoder.generate(
+                    {k: x.get(k) for k in x if k in DEFAULT_MODALITIES}, [name]
+                )
                 if isinstance(gen, dict) and name in gen:
                     return _collapse_tokens_to_map(gen[name])
             except Exception as exc:

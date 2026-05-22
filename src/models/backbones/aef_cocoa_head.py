@@ -7,10 +7,9 @@ Trained on Kalischek et al. (2023) in-situ labels with frozen AEF vectors as inp
 
 from __future__ import annotations
 
-import structlog
-
 from pathlib import Path
 
+import structlog
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -69,9 +68,7 @@ class AEFCocoaHead(nn.Module):
         if embeddings.dim() == 3:
             embeddings = embeddings.squeeze(1)
         if embeddings.shape[-1] != self.embedding_dim:
-            raise ValueError(
-                f"Expected last dim {self.embedding_dim}, got {embeddings.shape[-1]}"
-            )
+            raise ValueError(f"Expected last dim {self.embedding_dim}, got {embeddings.shape[-1]}")
         return self.net(embeddings).squeeze(-1)
 
     @torch.no_grad()
@@ -121,7 +118,7 @@ def load_aef_cocoa_head(
 
 
 __all__ = [
-    "AEFCocoaHead",
     "DEFAULT_AEF_CHECKPOINT",
+    "AEFCocoaHead",
     "load_aef_cocoa_head",
 ]

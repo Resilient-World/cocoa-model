@@ -12,7 +12,7 @@ from api.config import APISettings
 from api.main import app
 from api.schemas import SensitivityBounds
 from models.yield_surrogate import N_CLIMATE_CHANNELS, YieldSurrogateModel
-from tests.test_api_simulate import StubFeatureResolver, VALID_PAYLOAD
+from tests.test_api_simulate import VALID_PAYLOAD, StubFeatureResolver
 
 
 class _SensitivityStubResolver(StubFeatureResolver):

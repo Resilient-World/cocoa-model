@@ -14,8 +14,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT / "src"))
 
-from analysis.tcav import tcav_scores  # noqa: E402
-from models.surrogate.yield_surrogate import YieldSurrogateModel  # noqa: E402
+from analysis.tcav import tcav_scores
+from models.surrogate.yield_surrogate import YieldSurrogateModel
 
 
 def main(argv: list[str] | None = None) -> int:

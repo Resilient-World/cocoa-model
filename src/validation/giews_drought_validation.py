@@ -7,14 +7,12 @@ years in the cocoa belt (2015–16 El Niño, 2023–24 dryness).
 
 from __future__ import annotations
 
-import structlog
-
 import json
 import logging
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
+import structlog
 
 from validation._report import ValidationResult, write_report
 
@@ -114,7 +112,9 @@ def run_giews_validation(
             f"≥ {DROUGHT_CONSISTENCY_GATE:.0%} of GIEWS drought country-years show "
             "positive climate-attributable loss"
         ),
-        notes=details[:8] if details else [f"Episodes validated: {', '.join(e['label'] for e in episodes)}"],
+        notes=details[:8]
+        if details
+        else [f"Episodes validated: {', '.join(e['label'] for e in episodes)}"],
     )
 
 
@@ -123,7 +123,9 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(description="GIEWS drought validation")
     parser.add_argument("--giews-json", type=Path, default=DEFAULT_GIEWS_JSON)
-    parser.add_argument("--causal-json", type=Path, default=_REPO_ROOT / "reports" / "causal_eval.json")
+    parser.add_argument(
+        "--causal-json", type=Path, default=_REPO_ROOT / "reports" / "causal_eval.json"
+    )
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
     args = parser.parse_args(argv)
 

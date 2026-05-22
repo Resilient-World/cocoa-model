@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import torch
 import pytest
+import torch
 
 from models.galileo_seg import ERA5_GALILEO_COUNT, GalileoCocoaSegmentation
 

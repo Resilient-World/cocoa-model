@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.util
-import sys
 from pathlib import Path
 
 _SRC = Path(__file__).resolve().parents[1] / "src"

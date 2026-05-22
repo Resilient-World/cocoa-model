@@ -10,21 +10,21 @@ Methodology: Mengel et al. (2021), *Geosci. Model Dev.* 14, 5269–5284.
 
 from __future__ import annotations
 
-import structlog
-
 import hashlib
 import json
 import shutil
 import tempfile
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
+import structlog
 import xarray as xr
 
 from counterfactual.attrici_runner import (
-    ATTRICIRunner,
     SUPPORTED_VARIABLES,
+    ATTRICIRunner,
     load_counterfactual,
 )
 from data.attrici_fast_detrend import recompute_derived_counterfactuals
@@ -246,7 +246,9 @@ class ATTRICICounterfactual:
         work = Path(tempfile.mkdtemp(prefix="attrici_cf_", dir=self.cache_dir))
         try:
             factual_subset = work / "factual_subset.zarr"
-            self._subset_factual(vars_norm, region=region, time_range=time_range, out_zarr=factual_subset)
+            self._subset_factual(
+                vars_norm, region=region, time_range=time_range, out_zarr=factual_subset
+            )
 
             runner = ATTRICIRunner(
                 gmt_file=self.gmt_file,
@@ -295,10 +297,10 @@ class ATTRICICounterfactual:
 
 
 __all__ = [
-    "ATTRICICounterfactual",
     "ERA5_VARIABLES",
     "ISIMIP_ALIASES",
     "MENGEL_2021_REF",
+    "ATTRICICounterfactual",
     "RegionBounds",
     "TimeRange",
     "normalize_variables",

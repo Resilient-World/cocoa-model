@@ -13,7 +13,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT / "src"))
 
-from models.backbones.olmoearth_backbone import HF_REPO_BY_SIZE  # noqa: E402
+from models.backbones.olmoearth_backbone import HF_REPO_BY_SIZE
 
 DEFAULT_OUT = _REPO_ROOT / "models" / "olmoearth"
 

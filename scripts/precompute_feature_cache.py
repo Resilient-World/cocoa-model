@@ -33,10 +33,10 @@ import xarray as xr
 from api.feature_resolver import (
     DEFAULT_ERA5_ZARR,
     DEFAULT_FEATURES_CACHE_ZARR,
-    FarmFeatureResolver,
-    FeatureResolverConfig,
     RESOLVED_STATIC_NAMES,
     SEQUENCE_LENGTH,
+    FarmFeatureResolver,
+    FeatureResolverConfig,
     _climate_tensor_from_dataset,
     _lat_lon_coord_names,
     round_to_grid,
@@ -77,7 +77,9 @@ def grid_cells(
     return [(float(lat), float(lon)) for lat in lats for lon in lons]
 
 
-def subsample_cells(cells: list[tuple[float, float]], max_points: int, seed: int) -> list[tuple[float, float]]:
+def subsample_cells(
+    cells: list[tuple[float, float]], max_points: int, seed: int
+) -> list[tuple[float, float]]:
     if len(cells) <= max_points:
         return cells
     rng = np.random.default_rng(seed)
@@ -133,7 +135,9 @@ def build_cache_dataset(
         for year in years:
             if era5_path is not None and era5_path.is_dir():
                 try:
-                    climates[year][li, lj, :, :] = _climate_from_era5_zarr(era5_path, lat_r, lon_r, year)
+                    climates[year][li, lj, :, :] = _climate_from_era5_zarr(
+                        era5_path, lat_r, lon_r, year
+                    )
                     continue
                 except Exception as exc:
                     logger.debug("ERA5 zarr miss (%s, %s, %d): %s", lat_r, lon_r, year, exc)
@@ -222,16 +226,16 @@ def main(argv: list[str] | None = None) -> int:
 
     era5 = args.era5_zarr if args.era5_zarr.is_dir() else None
     if era5 is None:
-        logger.warning("ERA5 Zarr not found at %s; climate will use GEE/mock per cell", args.era5_zarr)
+        logger.warning(
+            "ERA5 Zarr not found at %s; climate will use GEE/mock per cell", args.era5_zarr
+        )
 
     ds = build_cache_dataset(cells, years=years, resolver=resolver, era5_path=era5)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     ds.to_zarr(args.out, mode="w", consolidated=True)
     logger.info("Wrote %s (%d lat × %d lon)", args.out, ds.sizes["latitude"], ds.sizes["longitude"])
 
-    index = pd.DataFrame(
-        [{"lat": lat, "lon": lon} for lat, lon in cells]
-    )
+    index = pd.DataFrame([{"lat": lat, "lon": lon} for lat, lon in cells])
     index_path = args.out.parent / "features_cache_index.parquet"
     index.to_parquet(index_path, index=False)
     logger.info("Wrote cell index %s", index_path)

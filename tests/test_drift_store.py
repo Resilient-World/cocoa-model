@@ -55,7 +55,10 @@ def test_stratum_isolation(tmp_path: Path) -> None:
         diagnosis="none",
         alarm_at=None,
     )
-    assert store.get_wctm("ssp585:2080:civ").log_martingale < store.get_wctm("ssp245:2030:ghana").log_martingale
+    assert (
+        store.get_wctm("ssp585:2080:civ").log_martingale
+        < store.get_wctm("ssp245:2030:ghana").log_martingale
+    )
 
 
 def test_drift_stratum_state_serialization() -> None:

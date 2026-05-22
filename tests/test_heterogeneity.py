@@ -59,4 +59,3 @@ def test_estimate_cate_causal_forest_smoke() -> None:
     mse_model = float(np.mean((tau_hat - tau) ** 2))
     mse_const = float(np.mean((np.full_like(tau, tau.mean()) - tau) ** 2))
     assert mse_model < mse_const
-

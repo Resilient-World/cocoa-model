@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]

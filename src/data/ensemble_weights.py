@@ -7,11 +7,10 @@ and stored in ``config/ensemble_weights.yaml``.
 
 from __future__ import annotations
 
-import structlog
-
 from pathlib import Path
 from typing import Any
 
+import structlog
 import yaml
 
 from data.cocoa_exposure import normalize_region_key
@@ -95,7 +94,9 @@ def load_ensemble_weights(
     return _normalize_weights(block, BACKEND_KEYS)
 
 
-def save_ensemble_weights_yaml(doc: dict[str, Any], path: Path | str = DEFAULT_ENSEMBLE_WEIGHTS_PATH) -> Path:
+def save_ensemble_weights_yaml(
+    doc: dict[str, Any], path: Path | str = DEFAULT_ENSEMBLE_WEIGHTS_PATH
+) -> Path:
     """Persist ensemble weights document."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)

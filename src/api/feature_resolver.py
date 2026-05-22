@@ -19,8 +19,6 @@ to use :mod:`api.geo_mock` (tests only).
 
 from __future__ import annotations
 
-import structlog
-
 import math
 import os
 from collections import OrderedDict
@@ -31,32 +29,34 @@ from typing import Any
 import ee
 import numpy as np
 import pandas as pd
+import structlog
 import torch
 import xarray as xr
 import xee  # noqa: F401 — registers the ``ee`` Xarray backend
 from torch import Tensor
 
+from api.telemetry import trace_span
 from data.cocoa_exposure import (
     DEFAULT_AGRIFM_CHECKPOINT,
     DEFAULT_THRESHOLD,
     ExposureBackend,
-    FDP_COCOA_COLLECTION,
     sample_cocoa_probability_at_point,
 )
 from data.ensemble_weights import (
     DEFAULT_ENSEMBLE_V3_WEIGHTS_PATH,
     DEFAULT_ENSEMBLE_WEIGHTS_PATH,
 )
-from api.telemetry import trace_span
 from data.era5_ingest import ERA5Ingest
+from data.feature_store import FeatureStore
+from data.gee_auth import initialize_earth_engine
 from data.teleconnection_ingest import (
     DEFAULT_PARQUET as DEFAULT_TELECONNECTION_PARQUET,
+)
+from data.teleconnection_ingest import (
     get_indices_for_year,
     load_indices_table,
     region_key_from_latlon,
 )
-from data.feature_store import FeatureStore
-from data.gee_auth import initialize_earth_engine
 from models.yield_surrogate import (
     CLIMATE_CHANNEL_NAMES,
     DEFAULT_PLANTING_DENSITY,
@@ -265,7 +265,9 @@ def _climate_tensor_from_dataset(ds: xr.Dataset, year: int) -> np.ndarray:
             if "co2_ppm" in annual.data_vars:
                 values = np.asarray(annual["co2_ppm"].values, dtype=np.float32).reshape(-1)
             else:
-                values = np.full(SEQUENCE_LENGTH, DEFAULT_CO2_PPM + (year - 2020) * 2.5, dtype=np.float32)
+                values = np.full(
+                    SEQUENCE_LENGTH, DEFAULT_CO2_PPM + (year - 2020) * 2.5, dtype=np.float32
+                )
         else:
             var = _pick_var(annual, _ZARR_CLIMATE_ALIASES[name])
             values = np.asarray(annual[var].values, dtype=np.float32).reshape(-1)
@@ -522,7 +524,9 @@ class FarmFeatureResolver:
         if "climate" not in ds.data_vars:
             raise KeyError("features_cache missing 'climate' variable")
         if "year" in ds["climate"].dims:
-            block = ds["climate"].sel(year=year, **{lat_name: lat_r, lon_name: lon_r}, method="nearest")
+            block = ds["climate"].sel(
+                year=year, **{lat_name: lat_r, lon_name: lon_r}, method="nearest"
+            )
         else:
             block = ds["climate"].sel(**{lat_name: lat_r, lon_name: lon_r}, method="nearest")
         arr = np.asarray(block.values, dtype=np.float32)
@@ -601,7 +605,9 @@ class FarmFeatureResolver:
         )
         return self._pack_model_static_vector(resolved, lat, lon, tree_age, density)
 
-    def _resolve_static_from_gee(self, lat: float, lon: float, *, year: int) -> ResolvedStaticFeatures:
+    def _resolve_static_from_gee(
+        self, lat: float, lon: float, *, year: int
+    ) -> ResolvedStaticFeatures:
         initialize_earth_engine(project=self.config.gee_project)
         point = ee.Geometry.Point([lon, lat])
         fdp_year = (
@@ -784,9 +790,7 @@ def build_resolver_from_settings(settings: Any) -> FarmFeatureResolver:
             use_galileo_embedding=bool(getattr(settings, "use_galileo_embedding", False)),
             galileo_embedding_dim=int(getattr(settings, "galileo_embedding_dim", 128)),
             gee_project=getattr(settings, "earthengine_project", None),
-            farm_registry_path=Path(
-                getattr(settings, "farm_registry_path", DEFAULT_FARM_REGISTRY)
-            ),
+            farm_registry_path=Path(getattr(settings, "farm_registry_path", DEFAULT_FARM_REGISTRY)),
             cocoa_exposure_year=int(getattr(settings, "cocoa_exposure_year", 2023)),
             cocoa_exposure_threshold=float(
                 getattr(settings, "cocoa_exposure_threshold", DEFAULT_THRESHOLD)
@@ -799,7 +803,11 @@ def build_resolver_from_settings(settings: Any) -> FarmFeatureResolver:
                 getattr(settings, "agrifm_checkpoint_path", DEFAULT_AGRIFM_CHECKPOINT)
             ),
             terramind_checkpoint_path=Path(
-                getattr(settings, "terramind_checkpoint_path", _REPO_ROOT / "models" / "terramind_cocoa_seg.pt")
+                getattr(
+                    settings,
+                    "terramind_checkpoint_path",
+                    _REPO_ROOT / "models" / "terramind_cocoa_seg.pt",
+                )
             ),
             terramind_tim_checkpoint_path=Path(
                 getattr(
@@ -833,17 +841,17 @@ def _resolve_exposure_backend(settings: Any) -> ExposureBackend:
 __all__ = [
     "DEFAULT_ERA5_ZARR",
     "DEFAULT_FEATURES_CACHE_ZARR",
-    "FarmFeatureResolver",
-    "FeatureResolverConfig",
     "GRID_ROUND_STEP",
     "ISRIC_SOILGRIDS_DATA_URL",
     "RESOLVED_STATIC_NAMES",
-    "ResolvedStaticFeatures",
     "SITE_STATIC_DIM",
+    "FarmFeatureResolver",
+    "FeatureResolverConfig",
+    "ResolvedStaticFeatures",
     "build_resolver_from_settings",
     "climate_tensor_from_dataset_point",
     "resolve_climate",
-    "resolve_teleconnection",
     "resolve_static",
+    "resolve_teleconnection",
     "round_to_grid",
 ]

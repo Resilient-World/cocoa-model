@@ -82,7 +82,12 @@ def generate_lhs(
     params = load_casej_params(params_path)
     rows: list[dict] = []
     for i in range(n_samples):
-        weather = synthesize_daily_weather(365, seed=seed + i, temp_offset_c=float(temp_offset[i]), precip_scale=float(precip_scale[i]))
+        weather = synthesize_daily_weather(
+            365,
+            seed=seed + i,
+            temp_offset_c=float(temp_offset[i]),
+            precip_scale=float(precip_scale[i]),
+        )
         site = CASEJSite(
             lat=float(lats[i]),
             lon=float(lons[i]),
@@ -123,7 +128,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--params", type=Path, default=DEFAULT_PARAMS)
-    parser.add_argument("--use-rcase2", action="store_true", help="Reserved: prefer RCASE2 when installed")
+    parser.add_argument(
+        "--use-rcase2", action="store_true", help="Reserved: prefer RCASE2 when installed"
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")

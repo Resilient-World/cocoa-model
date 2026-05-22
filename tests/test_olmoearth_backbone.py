@@ -44,17 +44,19 @@ def test_olmoearth_seg_forward() -> None:
         "OlmoEarthCocoaSegmentation",
         (),
         {
-            "__init__": lambda self, model_size="base", use_hf=True: setattr(
-                self,
-                "backbone",
-                bb_mod.OlmoEarthBackbone(model_size=model_size, use_hf=use_hf),
-            )
-            or setattr(
-                self,
-                "head",
-                head_mod.OlmoEarthCocoaSegHead(
-                    embed_dim=bb_mod.EMBED_DIM_BY_SIZE[model_size], out_size=(64, 64)
-                ),
+            "__init__": lambda self, model_size="base", use_hf=True: (
+                setattr(
+                    self,
+                    "backbone",
+                    bb_mod.OlmoEarthBackbone(model_size=model_size, use_hf=use_hf),
+                )
+                or setattr(
+                    self,
+                    "head",
+                    head_mod.OlmoEarthCocoaSegHead(
+                        embed_dim=bb_mod.EMBED_DIM_BY_SIZE[model_size], out_size=(64, 64)
+                    ),
+                )
             ),
         },
     )

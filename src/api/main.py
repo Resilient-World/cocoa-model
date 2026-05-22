@@ -3,28 +3,37 @@
 from __future__ import annotations
 
 import os
-from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
+import pandas as pd
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
-import pandas as pd
 
-from common.logging import configure_logging
-from api.config import APISettings
+from analysis.heterogeneity import estimate_cate
+from analysis.policy_targeting import (
+    learn_policy_forest,
+    learn_policy_tree,
+    rank_farms_by_uplift,
+    render_policy_rules,
+    render_policy_rules_from_forest,
+)
 from api import metrics as prom_metrics
 from api import telemetry
-from api.observability_middleware import register_observability_middleware
+from api.config import APISettings
 from api.cqr_loader import load_cqr_bundle
 from api.drift_monitoring import get_drift_status_for_stratum
-from api.online_conformal_store import build_store_from_settings
-from monitoring.drift_store import build_drift_store_from_settings
+from api.eudr import router as eudr_router
 from api.feature_resolver import build_resolver_from_settings
+from api.interpret import router as interpret_router
 from api.model_loader import load_casej_model, load_yield_model
+from api.observability_middleware import register_observability_middleware
+from api.online_conformal_store import build_store_from_settings
 from api.schemas import (
     ComplianceDdsRequest,
     ComplianceDdsResponse,
+    DriftStatus,
     LearnPolicyRulesRequest,
     LearnPolicyRulesResponse,
     PolicyRule,
@@ -35,25 +44,15 @@ from api.schemas import (
     SimulateClimateAttributionResponse,
     SimulateInterventionRequest,
     SimulateInterventionResponse,
-    DriftStatus,
     SimulateScenarioRequest,
     SimulateScenarioResponse,
 )
-from api.eudr import router as eudr_router
-from api.interpret import router as interpret_router
 from api.simulation import (
     simulate_climate_attribution,
     simulate_intervention,
     simulate_scenario,
 )
-from analysis.heterogeneity import estimate_cate
-from analysis.policy_targeting import (
-    learn_policy_forest,
-    learn_policy_tree,
-    rank_farms_by_uplift,
-    render_policy_rules,
-    render_policy_rules_from_forest,
-)
+from common.logging import configure_logging
 from compliance.eudr import (
     DeforestationResult,
     assess_country_risk,
@@ -62,8 +61,8 @@ from compliance.eudr import (
     validate_geolocation,
 )
 from models.conformal import load_conformal_if_exists
-from models.casej_surrogate import CASEJSurrogate
 from models.yield_surrogate import YieldSurrogateModel
+from monitoring.drift_store import build_drift_store_from_settings
 
 
 @asynccontextmanager
@@ -281,7 +280,9 @@ def rank_interventions_endpoint(request: RankInterventionsRequest) -> RankInterv
     prom_metrics.inc_policy_endpoint("rank-interventions")
     df = pd.DataFrame(request.rows)
     if request.farm_area_col not in df.columns:
-        raise HTTPException(status_code=400, detail=f"Missing farm area column '{request.farm_area_col}'")
+        raise HTTPException(
+            status_code=400, detail=f"Missing farm area column '{request.farm_area_col}'"
+        )
     try:
         cate = estimate_cate(
             df,
@@ -300,7 +301,11 @@ def rank_interventions_endpoint(request: RankInterventionsRequest) -> RankInterv
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    farm_id = ranked_df["farm_id"] if "farm_id" in ranked_df.columns else pd.Series([None] * len(ranked_df), index=ranked_df.index)
+    farm_id = (
+        ranked_df["farm_id"]
+        if "farm_id" in ranked_df.columns
+        else pd.Series([None] * len(ranked_df), index=ranked_df.index)
+    )
     ranked = []
     for idx in ranked_df.index:
         ranked.append(
@@ -314,7 +319,7 @@ def rank_interventions_endpoint(request: RankInterventionsRequest) -> RankInterv
             }
         )
 
-    return RankInterventionsResponse(method=request.method, n=int(len(df)), ranked=ranked)
+    return RankInterventionsResponse(method=request.method, n=len(df), ranked=ranked)
 
 
 def _rulebook_from_tree_result(

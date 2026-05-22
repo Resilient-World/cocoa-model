@@ -39,7 +39,9 @@ def main(argv: list[str] | None = None) -> int:
     rows = []
     for est in ("hgb", "ngboost"):
         try:
-            res = aipw_estimator(df, outcome_col="yield_delta", covariate_cols=["x1"], nuisance_estimator=est)
+            res = aipw_estimator(
+                df, outcome_col="yield_delta", covariate_cols=["x1"], nuisance_estimator=est
+            )
             rows.append((est, res.ate, res.ate_se, res.att, res.att_se))
         except Exception as exc:
             rows.append((est, float("nan"), float("nan"), float("nan"), str(exc)))
@@ -54,7 +56,9 @@ def main(argv: list[str] | None = None) -> int:
         if len(row) == 5 and isinstance(row[4], str):
             lines.append(f"| {row[0]} | error | — | — | {row[4]} |")
         else:
-            lines.append(f"| {row[0]} | {row[1]:.4f} | {row[2]:.4f} | {row[3]:.4f} | {row[4]:.4f} |")
+            lines.append(
+                f"| {row[0]} | {row[1]:.4f} | {row[2]:.4f} | {row[3]:.4f} | {row[4]:.4f} |"
+            )
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(lines), encoding="utf-8")
     print(out)

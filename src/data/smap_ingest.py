@@ -91,4 +91,3 @@ class SMAPIngest:
 
 
 __all__ = ["SMAPIngest"]
-

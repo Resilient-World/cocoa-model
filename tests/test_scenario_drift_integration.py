@@ -12,7 +12,6 @@ from api.config import APISettings
 from api.schemas import DriftAlarmPayload, DriftStatus
 from monitoring.drift_store import DriftStore
 
-
 SCENARIO_PAYLOAD = {
     "farm_location": {"lat": 6.5, "lon": -1.2},
     "farm_size_ha": 5.0,
@@ -26,6 +25,7 @@ SCENARIO_PAYLOAD = {
 
 def test_drift_status_endpoint_unknown_stratum(tmp_path: Path) -> None:
     from api.drift_monitoring import get_drift_status_for_stratum
+
     store = DriftStore(state_path=tmp_path / "drift.json")
     with pytest.raises(ValueError, match="Invalid stratum"):
         get_drift_status_for_stratum("bad", drift_store=store)
@@ -92,12 +92,16 @@ def test_concept_shift_inflates_interval_width(tmp_path: Path) -> None:
     model = _mock_cqr_model()
 
     def _no_drift(*a, **k):
-        return None, DriftStatus(
-            stratum_key="ssp245:2050:ghana",
-            log_martingale=0.0,
-            alarm_active=False,
-            diagnosis="none",
-        ), False
+        return (
+            None,
+            DriftStatus(
+                stratum_key="ssp245:2050:ghana",
+                log_martingale=0.0,
+                alarm_active=False,
+                diagnosis="none",
+            ),
+            False,
+        )
 
     with patch("api.scenario_conformal.apply_drift_monitoring", _no_drift):
         base = apply_scenario_conformal(

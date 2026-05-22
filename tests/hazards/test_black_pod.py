@@ -10,7 +10,6 @@ import xarray as xr
 from hazards import (
     BlackPodRiskModel,
     CSSVDRiskModel,
-    MiridPressureModel,
     ShadeSpecies,
     apply_biotic_losses,
 )
@@ -91,6 +90,7 @@ def test_composite_attribution_sums_to_total_loss():
 
 
 def test_cola_nitida_worse_than_unshaded_multiplier():
-    assert SHADE_BLACK_POD_MULTIPLIERS[ShadeSpecies.COLA_NITIDA] > SHADE_BLACK_POD_MULTIPLIERS[
-        ShadeSpecies.UNSHADED
-    ]
+    assert (
+        SHADE_BLACK_POD_MULTIPLIERS[ShadeSpecies.COLA_NITIDA]
+        > SHADE_BLACK_POD_MULTIPLIERS[ShadeSpecies.UNSHADED]
+    )

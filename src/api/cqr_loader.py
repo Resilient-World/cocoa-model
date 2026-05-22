@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import structlog
-
 from typing import TYPE_CHECKING
+
+import structlog
 
 from models.cqr import (
     ConformalCalibrator,

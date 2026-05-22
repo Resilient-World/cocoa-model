@@ -47,4 +47,3 @@ def test_saxton_rawls_awc_increases_with_depth() -> None:
         )
     )
     assert awc_100 > awc_30
-

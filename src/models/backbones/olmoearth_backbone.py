@@ -8,11 +8,10 @@ conv stem for CI and local dev without downloaded weights.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 OlmoEarthSize = Literal["nano", "tiny", "base", "large"]
 
@@ -150,4 +149,4 @@ class OlmoEarthBackbone(nn.Module):
         return feat.mean(dim=(-2, -1))
 
 
-__all__ = ["OlmoEarthBackbone", "HF_REPO_BY_SIZE", "EMBED_DIM_BY_SIZE"]
+__all__ = ["EMBED_DIM_BY_SIZE", "HF_REPO_BY_SIZE", "OlmoEarthBackbone"]

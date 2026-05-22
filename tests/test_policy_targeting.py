@@ -96,4 +96,3 @@ def test_targeting_from_cate() -> None:
     mask, ranked = targeting_from_cate(cate, costs, budget=150.0)
     assert mask.sum() >= 1
     assert "selected" in ranked.columns
-

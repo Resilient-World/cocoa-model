@@ -161,7 +161,14 @@ def encode_static_features(
     awc_mm: float | None = None,
 ) -> np.ndarray:
     """Map panel row to :class:`~models.yield_surrogate.YieldSurrogateModel` static vector."""
-    awc_defaults = {"GHA": 140.0, "CIV": 130.0, "CMR": 150.0, "NGA": 120.0, "ECU": 160.0, "IDN": 135.0}
+    awc_defaults = {
+        "GHA": 140.0,
+        "CIV": 130.0,
+        "CMR": 150.0,
+        "NGA": 120.0,
+        "ECU": 160.0,
+        "IDN": 135.0,
+    }
     awc = awc_mm if awc_mm is not None else awc_defaults.get(str(country_iso3), 135.0)
     static = np.zeros(10, dtype=np.float32)
     static[0] = awc

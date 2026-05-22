@@ -8,18 +8,20 @@ Python package is not imported at runtime.
 
 from __future__ import annotations
 
-import structlog
-
 import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+import structlog
 import torch
 import torch.nn as nn
 from einops import rearrange
 
-from models.backbones.agrifm_video_swin import PretrainingSwinTransformer3DEncoder, build_agrifm_encoder
+from models.backbones.agrifm_video_swin import (
+    PretrainingSwinTransformer3DEncoder,
+    build_agrifm_encoder,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -162,7 +164,9 @@ class AgriFMBackbone(nn.Module):
     def resolve_num_frames(self, temporal: int) -> int:
         """Validate and optionally pad temporal length to a multiple of ``PATCH_TEMPORAL``."""
         if temporal < MIN_FRAMES or temporal > MAX_FRAMES:
-            raise ValueError(f"Temporal length must be in [{MIN_FRAMES}, {MAX_FRAMES}], got {temporal}")
+            raise ValueError(
+                f"Temporal length must be in [{MIN_FRAMES}, {MAX_FRAMES}], got {temporal}"
+            )
         target = self._num_frames if self._num_frames is not None else temporal
         if target < MIN_FRAMES or target > MAX_FRAMES:
             raise ValueError(f"num_frames must be in [{MIN_FRAMES}, {MAX_FRAMES}], got {target}")
@@ -196,7 +200,9 @@ class AgriFMBackbone(nn.Module):
         if x.dim() != 5:
             raise ValueError(f"Expected 5D input [B,C,T,H,W], got shape {tuple(x.shape)}")
         if x.shape[1] != self.in_chans:
-            raise ValueError(f"Expected {self.in_chans} channels for {self.modality}, got {x.shape[1]}")
+            raise ValueError(
+                f"Expected {self.in_chans} channels for {self.modality}, got {x.shape[1]}"
+            )
         t_in = x.shape[2]
         target_t = self.resolve_num_frames(t_in)
         if x.shape[2] != target_t:

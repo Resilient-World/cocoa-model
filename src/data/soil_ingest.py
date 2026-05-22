@@ -11,9 +11,9 @@ Primary use:
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 import ee
 import numpy as np
@@ -70,7 +70,9 @@ def _isda_asset(property_name: str, depth_cm: tuple[int, int]) -> str:
     return ISDA_AFRICA_TEMPLATE.format(property=property_name, depth=_depth_label(depth_cm))
 
 
-def _saxton_rawls_theta1500(sand_pct: np.ndarray, clay_pct: np.ndarray, om_pct: np.ndarray) -> np.ndarray:
+def _saxton_rawls_theta1500(
+    sand_pct: np.ndarray, clay_pct: np.ndarray, om_pct: np.ndarray
+) -> np.ndarray:
     """
     Volumetric water content at 1500 kPa (wilting point), Saxton & Rawls (2006).
 
@@ -93,7 +95,9 @@ def _saxton_rawls_theta1500(sand_pct: np.ndarray, clay_pct: np.ndarray, om_pct: 
     return theta1500t + 0.14 * theta1500t - 0.02
 
 
-def _saxton_rawls_theta33(sand_pct: np.ndarray, clay_pct: np.ndarray, om_pct: np.ndarray) -> np.ndarray:
+def _saxton_rawls_theta33(
+    sand_pct: np.ndarray, clay_pct: np.ndarray, om_pct: np.ndarray
+) -> np.ndarray:
     """
     Volumetric water content at 33 kPa (field capacity), Saxton & Rawls (2006).
 
@@ -162,7 +166,9 @@ class SoilIngest:
     use_isda_gapfill: bool = True
 
     def __post_init__(self) -> None:
-        self.properties = tuple(self.properties) if self.properties is not None else DEFAULT_PROPERTIES
+        self.properties = (
+            tuple(self.properties) if self.properties is not None else DEFAULT_PROPERTIES
+        )
         self.depths_cm = tuple(self.depths_cm) if self.depths_cm is not None else DEFAULT_DEPTHS_CM
         self.chunks = self.chunks or {"latitude": 256, "longitude": 256}
         self._dataset: xr.Dataset | None = None
@@ -299,9 +305,8 @@ class SoilIngest:
 
 
 __all__ = [
-    "SoilIngest",
-    "DEFAULT_PROPERTIES",
     "DEFAULT_DEPTHS_CM",
+    "DEFAULT_PROPERTIES",
+    "SoilIngest",
     "saxton_rawls_available_water_capacity_mm",
 ]
-

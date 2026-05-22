@@ -57,7 +57,11 @@ def _next_version_dir(model_name: str, env: str) -> Path:
 
 
 def _render_model_card(metrics: dict[str, Any]) -> str:
-    template = MODEL_CARD_TEMPLATE.read_text(encoding="utf-8") if MODEL_CARD_TEMPLATE.is_file() else "# Model card\n"
+    template = (
+        MODEL_CARD_TEMPLATE.read_text(encoding="utf-8")
+        if MODEL_CARD_TEMPLATE.is_file()
+        else "# Model card\n"
+    )
     block = json.dumps(metrics, indent=2)
     return f"{template}\n\n---\n\n## Promotion metrics\n\n```json\n{block}\n```\n"
 
@@ -72,7 +76,9 @@ def write_release_bundle(
 ) -> dict[str, Any]:
     ts = datetime.now(timezone.utc).isoformat()
     manifest = {
-        "dataset_fingerprint": _file_hash(_REPO_ROOT / "data" / "processed" / "era5_2020_2024.zarr"),
+        "dataset_fingerprint": _file_hash(
+            _REPO_ROOT / "data" / "processed" / "era5_2020_2024.zarr"
+        ),
         "config_hash": _config_hash(),
         "git_sha": _git_sha(),
         "env_hash": _git_sha(),

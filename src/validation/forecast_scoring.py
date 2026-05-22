@@ -223,7 +223,9 @@ def reliability_diagram(
         widths = (preds[:, -1] - preds[:, 0]).tolist()
     extra = {
         "sharpness_per_row": widths,
-        "mean_sharpness": float(np.mean(preds[:, -1] - preds[:, 0])) if preds.shape[1] >= 2 else float("nan"),
+        "mean_sharpness": float(np.mean(preds[:, -1] - preds[:, 0]))
+        if preds.shape[1] >= 2
+        else float("nan"),
     }
     return nominal, empirical, ece, extra
 

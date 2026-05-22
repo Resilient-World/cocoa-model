@@ -9,21 +9,23 @@ import pandas as pd
 import pytest
 
 from data.cssvd_strain_atlas import lookup_strain_region
-from data.dumont_supplement import generate_synthetic_supplement, join_exposure_features, normalize_dumont_columns
+from data.dumont_supplement import (
+    generate_synthetic_supplement,
+    join_exposure_features,
+    normalize_dumont_columns,
+)
+from hazards.composite import apply_biotic_losses
 from hazards.cssvd import CSSVDRiskModel
 from hazards.cssvd_landscape import (
     HORIZON_MONTHS,
     LandscapeCSSVDModel,
-    feature_dict_from_row,
     features_to_dataframe,
     fit_synthetic_demo,
     incidence_probability_at_horizon,
 )
-from hazards.composite import apply_biotic_losses
 
 
 def _synthetic_climate():
-    import pandas as pd
     import xarray as xr
 
     n = 60

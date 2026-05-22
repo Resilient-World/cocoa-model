@@ -9,7 +9,6 @@ import pytest
 pytest.importorskip("econml")
 
 from analysis.policy_targeting import (
-    first_split_threshold,
     learn_policy_tree,
     render_policy_rules,
     root_split_feature,

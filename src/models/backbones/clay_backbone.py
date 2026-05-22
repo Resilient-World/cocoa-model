@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import torch
 import torch.nn as nn
@@ -27,7 +26,9 @@ class _StubClayEncoder(nn.Module):
 
 
 class ClayBackbone(nn.Module):
-    def __init__(self, *, freeze: bool = True, use_hf: bool = True, cache_dir: str | Path | None = None) -> None:
+    def __init__(
+        self, *, freeze: bool = True, use_hf: bool = True, cache_dir: str | Path | None = None
+    ) -> None:
         super().__init__()
         self.embed_dim = DEFAULT_EMBED_DIM
         self._hf: nn.Module | None = None
@@ -69,4 +70,4 @@ class ClayBackbone(nn.Module):
         return self.forward(parcel_inputs).mean(dim=(-2, -1))
 
 
-__all__ = ["ClayBackbone", "CLAY_HF_REPO"]
+__all__ = ["CLAY_HF_REPO", "ClayBackbone"]

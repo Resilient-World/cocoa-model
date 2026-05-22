@@ -5,7 +5,6 @@ Bipartite GAT teleconnection model: Niño 3.4, Atl3, IOD → farm yield bias (t/
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
 import torch
@@ -196,8 +195,8 @@ class TeleconnectionGNN(nn.Module):
 
 
 __all__ = [
-    "TeleconnectionGNN",
-    "TeleconnectionFeatures",
-    "build_teleconnection_graph",
     "INDEX_NODE_NAMES",
+    "TeleconnectionFeatures",
+    "TeleconnectionGNN",
+    "build_teleconnection_graph",
 ]

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-import structlog
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import structlog
 import torch
 
 log = structlog.get_logger(__name__)
@@ -65,7 +65,9 @@ def gate_crps_regression(
         model = YieldSurrogateV2.from_checkpoint(checkpoint)
         model.eval()
         with torch.no_grad():
-            climate = torch.from_numpy(np.asarray(baseline["climate"], dtype=np.float32)).unsqueeze(0)
+            climate = torch.from_numpy(np.asarray(baseline["climate"], dtype=np.float32)).unsqueeze(
+                0
+            )
             static = torch.from_numpy(np.asarray(baseline["static"], dtype=np.float32)).unsqueeze(0)
             region_id = torch.tensor([0], dtype=torch.long)
             pred = model(climate, static, region_id).cpu().numpy().ravel()
@@ -193,7 +195,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", required=True)
     parser.add_argument("--challenger-run-id", default=None)
     parser.add_argument("--checkpoint", type=Path, default=None)
-    parser.add_argument("--out", type=Path, default=_REPO_ROOT / "release_evidence" / "gate_result.json")
+    parser.add_argument(
+        "--out", type=Path, default=_REPO_ROOT / "release_evidence" / "gate_result.json"
+    )
     args = parser.parse_args(argv)
 
     gate = run_promotion_gate(

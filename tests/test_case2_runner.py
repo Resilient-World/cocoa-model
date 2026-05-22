@@ -7,9 +7,9 @@ import pandas as pd
 import pytest
 
 from models.case2_runner import (
+    REQUIRED_WEATHER_COLUMNS,
     CASE2NotInstalled,
     CASE2Runner,
-    REQUIRED_WEATHER_COLUMNS,
     _prepare_weather,
     _validate_climate,
 )

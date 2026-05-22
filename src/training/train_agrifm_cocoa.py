@@ -9,20 +9,19 @@ and MLflow experiment ``agrifm_cocoa_finetune``.
 from __future__ import annotations
 
 import argparse
-
-import structlog
 import os
 import sys
 from pathlib import Path
 
 import lightning.pytorch as pl
+import structlog
 import torch
 import torch.nn.functional as F
 from lightning.pytorch.callbacks import Callback, LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import MLFlowLogger
 from torchmetrics.classification import BinaryF1Score
 
-from models.agrifm_seg import AgriFMCocoaSegmentation, DEFAULT_AGRIFM_CHECKPOINT
+from models.agrifm_seg import DEFAULT_AGRIFM_CHECKPOINT, AgriFMCocoaSegmentation
 from training.agrifm_losses import agrifm_bce_dice_loss
 from training.cocoa_agrifm_datamodule import (
     CocoaAgriFMDataModule,
@@ -281,7 +280,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         trainer.fit(task, datamodule=datamodule)
     except FileNotFoundError as exc:
-        log.info(f"Tile data missing ({exc}); re-run with --synthetic", )
+        log.info(
+            f"Tile data missing ({exc}); re-run with --synthetic",
+        )
         return 1
 
     export_checkpoint(task, args.out, extra={"epochs": args.epochs, "patch_size": args.patch_size})

@@ -7,8 +7,9 @@ this module shares a single feature map for P(cocoa) and tonnes/ha (with CQR qua
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import NamedTuple, Sequence
+from typing import NamedTuple
 
 import torch
 import torch.nn as nn
@@ -96,9 +97,7 @@ class JointHead(nn.Module):
                 f"backbone_features must be [B, D, H, W], got {tuple(backbone_features.shape)}"
             )
         if static_features.dim() != 2:
-            raise ValueError(
-                f"static_features must be [B, S], got {tuple(static_features.shape)}"
-            )
+            raise ValueError(f"static_features must be [B, S], got {tuple(static_features.shape)}")
         if backbone_features.shape[1] != self.backbone_dim:
             raise ValueError(
                 f"Expected backbone_dim={self.backbone_dim}, got {backbone_features.shape[1]}"

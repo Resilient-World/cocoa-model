@@ -13,11 +13,9 @@ from torchgeo.datasets.utils import Sample
 from data.cocoa_dataset import (
     CLASS_NAMES,
     CLASS_OTHER,
+    DEFAULT_IMAGERY_BANDS,
     CocoaDataModule,
     CocoaDataset,
-    CocoaImagery,
-    CocoaMask,
-    DEFAULT_IMAGERY_BANDS,
 )
 from data.sentinel_composite import S2_OPTICAL_BANDS
 
@@ -37,7 +35,9 @@ class _AuxRaster(RasterDataset):
     filename_glob = "*.tif"
     filename_regex = r"^.*\.tif$"
 
-    def __init__(self, key: str, paths: Path | str, bands: Sequence[str] | None = None, **kwargs: Any) -> None:
+    def __init__(
+        self, key: str, paths: Path | str, bands: Sequence[str] | None = None, **kwargs: Any
+    ) -> None:
         self.key = key
         self.all_bands = tuple(bands) if bands is not None else ()
         super().__init__(paths=paths, bands=bands, **kwargs)

@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from registry.promotion_gate import GateResult, gate_crps_regression, gate_coverage, run_promotion_gate
+from registry.promotion_gate import (
+    GateResult,
+    gate_coverage,
+    gate_crps_regression,
+    run_promotion_gate,
+)
 
 
 def test_gate_crps_passes_with_baseline() -> None:

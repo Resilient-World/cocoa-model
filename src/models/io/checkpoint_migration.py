@@ -8,11 +8,9 @@ loaded v1 weights reproduce prior forward behaviour (f_age channel weight = 0).
 
 from __future__ import annotations
 
-import structlog
-
 from typing import Any
 
-import torch
+import structlog
 from torch import Tensor
 
 log = structlog.get_logger(__name__)

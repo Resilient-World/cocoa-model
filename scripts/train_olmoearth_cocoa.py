@@ -10,7 +10,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT / "src"))
 
-from training.train_olmoearth_cocoa import main  # noqa: E402
+from training.train_olmoearth_cocoa import main
 
 if __name__ == "__main__":
     raise SystemExit(main())

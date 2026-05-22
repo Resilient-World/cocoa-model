@@ -7,13 +7,12 @@ planted area to national production totals and compares against ICCO statistics.
 
 from __future__ import annotations
 
-import structlog
-
 import logging
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import structlog
 import torch
 
 from validation._report import ValidationResult, write_report
@@ -203,7 +202,9 @@ def run_icco_backtest(
     metrics["r2_by_country"] = {iso: m["r2"] for iso, m in per_country.items()}
 
     global_pass = _gates_pass(metrics)
-    all_countries_pass = all(country_pass.get(iso, False) for iso in COUNTRIES if iso in country_pass)
+    all_countries_pass = all(
+        country_pass.get(iso, False) for iso in COUNTRIES if iso in country_pass
+    )
     passed = global_pass and all_countries_pass
 
     gate_description = (

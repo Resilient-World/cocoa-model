@@ -16,8 +16,9 @@ def test_sample_holdout_tiles_count() -> None:
 
 
 def test_tile_metrics_binary() -> None:
-    from scripts.benchmark_backbones import tile_metrics
     import numpy as np
+
+    from scripts.benchmark_backbones import tile_metrics
 
     y_true = np.ones((8, 8), dtype=np.uint8)
     y_prob = np.ones((8, 8)) * 0.9
@@ -41,8 +42,9 @@ def test_write_benchmark_report(tmp_path: Path) -> None:
 
 
 def test_tile_mean_error() -> None:
-    from scripts.benchmark_backbones import tile_mean_error
     import numpy as np
+
+    from scripts.benchmark_backbones import tile_mean_error
 
     y_true = np.array([[0, 1], [1, 0]], dtype=np.float64)
     y_prob = np.array([[0.0, 0.5], [1.0, 0.0]], dtype=np.float64)
@@ -57,7 +59,9 @@ def test_write_aef_benchmark_report(tmp_path: Path) -> None:
         BackboneResult("Galileo-Base + seg head", 0.12, 0.7, 0.85, 0.12, 50.0, 90.0, 100),
         BackboneResult("FDP-only", 0.15, 0.8, 0.9, 0.1, 1.0, 0.0, 100),
     ]
-    out = write_aef_benchmark_report(results, tmp_path / "bench_aef.md", aef_checkpoint_present=True)
+    out = write_aef_benchmark_report(
+        results, tmp_path / "bench_aef.md", aef_checkpoint_present=True
+    )
     text = out.read_text()
     assert "AlphaEarth" in text
     assert "Mean error" in text

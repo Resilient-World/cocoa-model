@@ -7,8 +7,6 @@ Output schema is consumed by :mod:`analysis.validate_smd` and
 
 from __future__ import annotations
 
-import structlog
-
 import argparse
 import json
 import logging
@@ -18,6 +16,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+import structlog
 
 from analysis.did_comparison_harness import compare_did_methods
 from analysis.did_impact import calculate_did_att, event_study
@@ -47,9 +46,7 @@ def _synthetic_panel(n: int, seed: int) -> pd.DataFrame:
                     "period": period,
                     "treated": treated,
                     "role": "treated" if treated else "control",
-                    "yield_tpha": 1.5
-                    + 0.3 * treated * period
-                    + rng.normal(0, 0.1),
+                    "yield_tpha": 1.5 + 0.3 * treated * period + rng.normal(0, 0.1),
                     "farm_size_ha": rng.uniform(2, 8),
                     "baseline_yield": rng.uniform(1, 3),
                     "soil_quality_index": rng.uniform(0.3, 0.9),
@@ -64,9 +61,7 @@ def _panel_to_wide(panel: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     pre = panel[panel["period"] == 0].copy()
     post = panel[panel["period"] == 1].copy()
     wide = pre.merge(
-        post[["farm_id", "yield_tpha"]].rename(
-            columns={"yield_tpha": "yield_post_intervention"}
-        ),
+        post[["farm_id", "yield_tpha"]].rename(columns={"yield_tpha": "yield_post_intervention"}),
         on="farm_id",
     )
     wide = wide.rename(columns={"yield_tpha": "yield_pre_intervention"})

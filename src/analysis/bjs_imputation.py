@@ -13,7 +13,6 @@ import numpy as np
 import pandas as pd
 
 from analysis._staggered_did_common import (
-    Z_975,
     normal_ci,
     prepare_staggered_panel,
 )

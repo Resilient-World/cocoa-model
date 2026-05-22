@@ -4,11 +4,10 @@ AgriFM Video Swin backbone + versatile decoder for binary cocoa maps.
 
 from __future__ import annotations
 
-import structlog
-
 from pathlib import Path
 
 import numpy as np
+import structlog
 import torch
 import torch.nn as nn
 

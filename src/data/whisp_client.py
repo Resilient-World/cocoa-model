@@ -10,12 +10,11 @@ Reference: Open Foris Whisp; EU Regulation (EU) 2023/1115 (EUDR), as amended Oct
 
 from __future__ import annotations
 
-import structlog
-
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import httpx
+import structlog
 
 log = structlog.get_logger(__name__)
 

@@ -15,9 +15,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT / "src"))
 
-from models.conformal.online_conformal_base import pit_values
-from validation.conformal_cv import evaluate_cv_strategy, _synthetic_panel_rows
-from validation.temporal_cv import ForwardChainSplit, iter_forward_folds
+from validation.conformal_cv import _synthetic_panel_rows, evaluate_cv_strategy
+from validation.temporal_cv import iter_forward_folds
 
 logger = logging.getLogger(__name__)
 

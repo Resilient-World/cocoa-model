@@ -9,7 +9,6 @@ pre-period correction, jackknife SE (multiple treated units) or placebo SE
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -77,9 +76,9 @@ def _collapsed_form(Y: np.ndarray, N0: int, T0: int) -> np.ndarray:
     """Collapse treated rows/columns to means (R ``collapsed.form``)."""
     n, t = Y.shape
     top_left = Y[:N0, :T0]
-    top_right = Y[:N0, T0:].mean(axis=1, keepdims=True) if T0 < t else np.empty((N0, 0))
-    bottom_left = Y[N0:, :T0].mean(axis=0, keepdims=True) if N0 < n else np.empty((0, T0))
-    bottom_right = np.array([[Y[N0:, T0:].mean()]]) if (N0 < n and T0 < t) else np.empty((0, 0))
+    top_right = Y[:N0, T0:].mean(axis=1, keepdims=True) if t > T0 else np.empty((N0, 0))
+    bottom_left = Y[N0:, :T0].mean(axis=0, keepdims=True) if n > N0 else np.empty((0, T0))
+    bottom_right = np.array([[Y[N0:, T0:].mean()]]) if (n > N0 and t > T0) else np.empty((0, 0))
     return np.block([[top_left, top_right], [bottom_left, bottom_right]])
 
 

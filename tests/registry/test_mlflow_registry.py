@@ -8,8 +8,13 @@ from pathlib import Path
 import mlflow
 import pytest
 
-from registry.mlflow_registry import get_champion_version, promote_challenger, register_model, rollback
 from registry.mlflow_pyfunc import YieldSurrogatePyfunc
+from registry.mlflow_registry import (
+    get_champion_version,
+    promote_challenger,
+    register_model,
+    rollback,
+)
 
 
 @pytest.fixture()
@@ -23,6 +28,7 @@ def mlflow_tmp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def test_register_and_promote(mlflow_tmp: Path, tmp_path: Path) -> None:
     ckpt = tmp_path / "yield.pt"
     import torch
+
     from models.yield_surrogate_v2 import YieldSurrogateV2
 
     model = YieldSurrogateV2()

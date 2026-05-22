@@ -15,11 +15,10 @@ trainer that supplies ``batch_dict`` keys documented in
 
 from __future__ import annotations
 
-import structlog
-
 from pathlib import Path
 from typing import Any
 
+import structlog
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -111,7 +110,7 @@ class GalileoCocoaSegmentation(nn.Module):
         if era5.dim() == 3 and era5.shape[0] == 1:
             era5 = era5.squeeze(0)
         if era5.shape[-1] > ERA5_GALILEO_COUNT:
-            era5 = era5[..., : ERA5_GALILEO_COUNT]
+            era5 = era5[..., :ERA5_GALILEO_COUNT]
         if era5.dim() != 2:
             raise ValueError(f"era5 must reduce to [T, {ERA5_GALILEO_COUNT}]; got {era5.shape}")
         return era5
@@ -142,9 +141,7 @@ class GalileoCocoaSegmentation(nn.Module):
             else None
         )
         months_out = (
-            GalileoCocoaSegmentation._squeeze_leading_batch(months)
-            if months is not None
-            else None
+            GalileoCocoaSegmentation._squeeze_leading_batch(months) if months is not None else None
         )
         return {
             "s2": s2_out,
@@ -245,8 +242,8 @@ __all__ = [
     "ERA5_GALILEO_VARS",
     "ERA5_MONTHLY_COUNT",
     "ERA5_MONTHLY_VARS",
-    "GalileoCocoaSegmentation",
     "S1_BAND_COUNT",
     "S2_BAND_COUNT",
+    "GalileoCocoaSegmentation",
     "load_galileo_seg_checkpoint",
 ]

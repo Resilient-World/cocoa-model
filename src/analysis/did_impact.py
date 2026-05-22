@@ -13,7 +13,11 @@ from __future__ import annotations
 import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal, NamedTuple, Union
+from typing import TYPE_CHECKING, Literal, NamedTuple
+
+if TYPE_CHECKING:
+    from analysis.bjs_imputation import BJSResult
+    from analysis.csdid import ATTResult
 
 import numpy as np
 import pandas as pd
@@ -125,15 +129,19 @@ def _pair_effects(
         if pairs.empty:
             raise ValueError("No complete treated-control pairs found for DiD estimation")
         if len(pairs) != treated_delta.shape[0] or len(pairs) != control_delta.shape[0]:
-            raise ValueError(
-                "Each match_pair_id must have exactly one treated and one control row"
-            )
+            raise ValueError("Each match_pair_id must have exactly one treated and one control row")
     else:
         treated_delta = (
-            work.loc[treated_mask].groupby(match_pair_id_col)["_delta"].mean().rename("treated_delta")
+            work.loc[treated_mask]
+            .groupby(match_pair_id_col)["_delta"]
+            .mean()
+            .rename("treated_delta")
         )
         control_delta = (
-            work.loc[control_mask].groupby(match_pair_id_col)["_delta"].mean().rename("control_delta")
+            work.loc[control_mask]
+            .groupby(match_pair_id_col)["_delta"]
+            .mean()
+            .rename("control_delta")
         )
         pairs = pd.concat([treated_delta, control_delta], axis=1, join="inner").reset_index()
         if pairs.empty:
@@ -203,7 +211,9 @@ def calculate_did_att(
                 stacklevel=2,
             )
     elif "treatment_year" in matched_df.columns and unit_col in matched_df.columns:
-        if is_staggered(matched_df.rename(columns={"treatment_year": treat_time_col}), treat_time_col, unit_col):
+        if is_staggered(
+            matched_df.rename(columns={"treatment_year": treat_time_col}), treat_time_col, unit_col
+        ):
             warnings.warn(
                 "Staggered treatment timing detected: pair-level DiD is not valid. "
                 "Use did_estimator(..., method='csdid') or method='bjs'.",
@@ -270,9 +280,7 @@ def event_study(
     try:
         import statsmodels.api as sm
     except ImportError as exc:  # pragma: no cover
-        raise ImportError(
-            "event_study requires statsmodels. `pip install statsmodels`."
-        ) from exc
+        raise ImportError("event_study requires statsmodels. `pip install statsmodels`.") from exc
 
     df = panel_df.copy()
     df["event_time"] = df[time_col] - df[treatment_time_col]
@@ -418,7 +426,7 @@ def did_estimator(
     alpha: float = 0.05,
     random_state: int = 42,
     **kwargs: object,
-) -> Union[DiDResult, "ATTResult", "BJSResult"]:
+) -> DiDResult | ATTResult | BJSResult:
     """
     Route DiD estimation to pair-level, Callaway-Sant'Anna, or BJS imputation.
 
@@ -430,8 +438,8 @@ def did_estimator(
         ``bjs`` — Borusyak, Jaravel & Spiess (2024) imputation;
         ``synthdid`` — Arkhangelsky et al. (2021) Synthetic DiD.
     """
-    from analysis.bjs_imputation import BJSResult, BorusyakJaravelSpiess
-    from analysis.csdid import ATTResult, CallawaySantAnna
+    from analysis.bjs_imputation import BorusyakJaravelSpiess
+    from analysis.csdid import CallawaySantAnna
     from analysis.synthdid import SyntheticDiD
 
     if method == "synthdid":

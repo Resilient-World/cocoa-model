@@ -14,19 +14,17 @@ References
 
 from __future__ import annotations
 
-import structlog
-
 import argparse
 import logging
 import re
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
 import requests
+import structlog
 
 from data.cocoa_exposure import REGIONS, normalize_region_key
 
@@ -68,7 +66,9 @@ def _growing_year_months(region: str, year: int) -> list[tuple[int, int]]:
     if key in ("ecuador", "peru", "colombia"):
         return [(year, m) for m in range(1, 13)]
     if key == "indonesia":
-        return [(year - 1 if m >= 10 else year, m) for m in list(range(10, 13)) + list(range(1, 10))]
+        return [
+            (year - 1 if m >= 10 else year, m) for m in list(range(10, 13)) + list(range(1, 10))
+        ]
     return [(year, m) for m in range(1, 13)]
 
 

@@ -6,9 +6,9 @@ ATTRICI is GPLv3 and is never imported from this package — see
 """
 
 from counterfactual.attrici_runner import (
+    SUPPORTED_VARIABLES,
     ATTRICIRunner,
     CounterfactualClimateProvider,
-    SUPPORTED_VARIABLES,
     ZarrCounterfactualProvider,
     load_counterfactual,
 )
@@ -18,10 +18,10 @@ from counterfactual.corrdiff_downscaler import (
 )
 
 __all__ = [
+    "SUPPORTED_VARIABLES",
     "ATTRICIRunner",
     "CorrDiffCMIP6Downscaler",
     "CounterfactualClimateProvider",
-    "SUPPORTED_VARIABLES",
     "ZarrCounterfactualProvider",
     "corrdiff_cache_path",
     "load_counterfactual",

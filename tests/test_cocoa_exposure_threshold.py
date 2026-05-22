@@ -13,7 +13,7 @@ from data.cocoa_exposure import (
 
 
 def test_default_threshold_is_fdp_f1_optimal() -> None:
-    assert DEFAULT_THRESHOLD == pytest.approx(0.96)
+    assert pytest.approx(0.96) == DEFAULT_THRESHOLD
 
 
 def test_validate_threshold_accepts_default() -> None:

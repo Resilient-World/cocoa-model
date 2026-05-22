@@ -8,23 +8,22 @@ under-covering Monte Carlo dropout intervals (~40% empirical at 80% nominal).
 
 from __future__ import annotations
 
-import structlog
-
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, NamedTuple, Sequence
+from typing import Any, NamedTuple
 
 import joblib
 import numpy as np
+import structlog
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch import Tensor
 
 from models.surrogate.yield_surrogate import (
-    MCDropout,
-    MechanisticCore,
     N_CLIMATE_CHANNELS,
     N_STATIC_SITE,
+    MCDropout,
+    MechanisticCore,
     YieldSurrogateModel,
 )
 
@@ -179,15 +178,17 @@ class QuantileYieldSurrogate(nn.Module):
         q = self.forward(climate, static)
         return QuantilePrediction(q_lo=q[:, 0], q_med=q[:, 1], q_hi=q[:, 2])
 
-    def state_dict(self, *args: Any, **kwargs: Any) -> dict[str, Tensor]:  # noqa: D102
+    def state_dict(self, *args: Any, **kwargs: Any) -> dict[str, Tensor]:
         base_sd = self._base.state_dict(*args, **kwargs)
         head_sd = {f"quantile_head.{k}": v for k, v in self.quantile_head.state_dict().items()}
         return {**base_sd, **head_sd}
 
-    def load_state_dict(self, state_dict: dict[str, Any], strict: bool = True) -> None:  # noqa: D102
+    def load_state_dict(self, state_dict: dict[str, Any], strict: bool = True) -> None:
         head_keys = {k for k in state_dict if k.startswith("quantile_head.")}
         base_dict = {k: v for k, v in state_dict.items() if k not in head_keys}
-        head_dict = {k.replace("quantile_head.", "", 1): v for k, v in state_dict.items() if k in head_keys}
+        head_dict = {
+            k.replace("quantile_head.", "", 1): v for k, v in state_dict.items() if k in head_keys
+        }
         self._base.load_state_dict(base_dict, strict=False)
         if head_dict:
             self.quantile_head.load_state_dict(head_dict, strict=strict)
@@ -486,11 +487,11 @@ def load_cqr_calibrator(path: str | Path | None = None) -> ConformalCalibrator |
 
 
 __all__ = [
-    "CQRInterval",
-    "ConformalCalibrator",
     "DEFAULT_CQR_CALIBRATOR",
     "DEFAULT_CQR_CHECKPOINT",
     "DEFAULT_QUANTILES",
+    "CQRInterval",
+    "ConformalCalibrator",
     "QuantilePrediction",
     "QuantileYieldSurrogate",
     "load_cqr_calibrator",

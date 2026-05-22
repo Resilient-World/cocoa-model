@@ -14,7 +14,6 @@ from api.main import app
 from models.casej_surrogate import CASEJSurrogate
 from models.yield_surrogate import N_CLIMATE_CHANNELS
 
-
 VALID_PAYLOAD = {
     "farm_location": {"lat": 6.5, "lon": -1.2},
     "farm_size_ha": 5.0,
@@ -148,13 +147,13 @@ def test_simulate_scenario_happy_path(mock_sb_cls: MagicMock, scenario_client: T
     avoided = data["avoided_loss_tonnes"]
     assert avoided["p10"] <= avoided["mean"] <= avoided["p90"]
     price = SCENARIO_PAYLOAD["cocoa_price_usd"] * 0.72  # GHA farm-gate pass-through
-    assert data["financial_impact_usd_mean"] == pytest.approx(
-        avoided["mean"] * price, rel=1e-3
-    )
+    assert data["financial_impact_usd_mean"] == pytest.approx(avoided["mean"] * price, rel=1e-3)
     assert data["financial_impact"]["ghs"]["currency"] == "GHS"
 
 
-def test_simulate_scenario_missing_cmip6_zarr_returns_400(scenario_client: TestClient, tmp_path) -> None:
+def test_simulate_scenario_missing_cmip6_zarr_returns_400(
+    scenario_client: TestClient, tmp_path
+) -> None:
     """Paths must exist as directories before ScenarioBuilder runs."""
     missing = tmp_path / "nowhere"
     assert not missing.exists()

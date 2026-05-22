@@ -65,17 +65,11 @@ def prepare_staggered_panel(
             "match_role",
         }
         covariate_cols = [
-            c
-            for c in work.columns
-            if c not in exclude and pd.api.types.is_numeric_dtype(work[c])
+            c for c in work.columns if c not in exclude and pd.api.types.is_numeric_dtype(work[c])
         ]
     covs = list(covariate_cols)
 
-    g_series = (
-        work.groupby(unit_col)[treat_time_col]
-        .min()
-        .rename("_G")
-    )
+    g_series = work.groupby(unit_col)[treat_time_col].min().rename("_G")
     work = work.merge(g_series, on=unit_col, how="left")
     cohort = work["_G"].to_numpy(dtype=float)
     never = work.groupby(unit_col)[treat_time_col].apply(lambda s: s.isna().all())

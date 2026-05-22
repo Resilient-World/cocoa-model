@@ -6,6 +6,7 @@ import pytest
 
 from analysis.psm_matching import (
     compute_propensity_scores,
+    love_plot_data,
     match_nearest_neighbor,
     propensity_score_match,
 )
@@ -18,12 +19,7 @@ def _synthetic_farms(n: int = 200, seed: int = 42) -> pd.DataFrame:
     historical_rainfall = rng.normal(1200, 200, n)
     baseline_yield = 0.5 * farm_size_ha + 2.0 * soil_quality_index + rng.normal(0, 0.5, n)
 
-    logit = (
-        -2.0
-        + 0.4 * farm_size_ha
-        + 1.5 * soil_quality_index
-        + 0.002 * historical_rainfall
-    )
+    logit = -2.0 + 0.4 * farm_size_ha + 1.5 * soil_quality_index + 0.002 * historical_rainfall
     prob = 1.0 / (1.0 + np.exp(-logit))
     received_intervention = (rng.random(n) < prob).astype(int)
 
@@ -135,7 +131,6 @@ def test_k_nearest_matching_returns_k_controls_per_treated() -> None:
 def test_balance_report_structure_and_love_plot() -> None:
     from analysis.psm_matching import (
         default_logit_caliper,
-        love_plot_data,
         standardized_mean_differences,
     )
 
@@ -199,7 +194,6 @@ from analysis.psm_matching import (
     DEFAULT_COVARIATES,
     aipw_estimator,
     default_logit_caliper,
-    love_plot_data,
     standardized_mean_differences,
     trim_common_support,
 )

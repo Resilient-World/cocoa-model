@@ -236,10 +236,7 @@ def goodman_bacon_decomposition(
 
     df = panel_df[[unit_col, time_col, outcome_col, treat_col]].dropna().copy()
     first_treat = (
-        df.loc[df[treat_col] == 1]
-        .groupby(unit_col)[time_col]
-        .min()
-        .rename("first_treat_year")
+        df.loc[df[treat_col] == 1].groupby(unit_col)[time_col].min().rename("first_treat_year")
     )
     cohorts = first_treat.reset_index()
     never = set(df[unit_col].unique()) - set(cohorts[unit_col])

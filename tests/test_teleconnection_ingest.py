@@ -42,12 +42,16 @@ def test_get_indices_for_year_ghana_shape() -> None:
 def test_nino34_matches_noaa_2015_2024() -> None:
     """Live NOAA sstoi.indices Niño3.4 within 0.01 °C of cached parquet."""
     pytest.importorskip("requests")
-    from data.teleconnection_ingest import NINO34_URL, _fetch_text, refresh_indices
-
-    from data.teleconnection_ingest import build_indices_table
+    from data.teleconnection_ingest import (
+        NINO34_URL,
+        _fetch_text,
+        build_indices_table,
+    )
 
     live = parse_nino34_sstoi(_fetch_text(NINO34_URL))
-    path = Path(__file__).resolve().parents[1] / "data" / "external" / "_test_teleconnection.parquet"
+    path = (
+        Path(__file__).resolve().parents[1] / "data" / "external" / "_test_teleconnection.parquet"
+    )
     table = build_indices_table(nino34_df=live, atl3_df=None, iod_df=None, allow_proxy=True)
     table.to_parquet(path, index=False)
     cached = pd.read_parquet(path)

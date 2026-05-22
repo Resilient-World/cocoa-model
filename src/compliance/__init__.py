@@ -1,8 +1,8 @@
 """Regulatory compliance modules (EUDR, etc.)."""
 
 from compliance.eudr import (
-    DueDiligenceStatement,
     DeforestationResult,
+    DueDiligenceStatement,
     OperatorInfo,
     PlotGeometry,
     ProductInfo,
@@ -16,8 +16,8 @@ from compliance.eudr import (
 )
 
 __all__ = [
-    "DueDiligenceStatement",
     "DeforestationResult",
+    "DueDiligenceStatement",
     "OperatorInfo",
     "PlotGeometry",
     "ProductInfo",

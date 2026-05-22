@@ -141,8 +141,7 @@ def run(
     out_nc.parent.mkdir(parents=True, exist_ok=True)
 
     logger.info(
-        "ATTRICI detrend variable=%s (%s) solver=%s modes=%d gmt=%s "
-        "(GMT SSA window ~%d yr)",
+        "ATTRICI detrend variable=%s (%s) solver=%s modes=%d gmt=%s (GMT SSA window ~%d yr)",
         variable,
         distribution,
         backend,

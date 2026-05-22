@@ -8,13 +8,11 @@ BCE+Dice loss, hard-example mining, MLflow logging (experiment ``terramind_cocoa
 from __future__ import annotations
 
 import argparse
-
-import structlog
-import os
 import sys
 from pathlib import Path
 
 import lightning.pytorch as pl
+import structlog
 import torch
 import torch.nn.functional as F
 from lightning.pytorch.callbacks import Callback, LearningRateMonitor, ModelCheckpoint
@@ -22,7 +20,6 @@ from lightning.pytorch.loggers import MLFlowLogger
 from torchmetrics.classification import BinaryF1Score
 
 from models.terramind_seg import (
-    DEFAULT_TERRAMIND_CHECKPOINT,
     DEFAULT_TERRAMIND_TIM_CHECKPOINT,
     TerraMindCocoaSegmentation,
     TerraMindTiMCocoaSegmentation,
@@ -92,7 +89,9 @@ class TerraMindCocoaTask(pl.LightningModule):
             logits = self.forward(batch)
         target = batch["target"]
         if logits.shape[-2:] != target.shape[-2:]:
-            logits = F.interpolate(logits, size=target.shape[-2:], mode="bilinear", align_corners=False)
+            logits = F.interpolate(
+                logits, size=target.shape[-2:], mode="bilinear", align_corners=False
+            )
         loss = agrifm_bce_dice_loss(logits, target, pos_weight=self.pos_weight)
         prob = torch.sigmoid(logits)
         pred = (prob >= 0.5).long().squeeze(1)
@@ -203,7 +202,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         trainer.fit(task, datamodule=dm)
     except FileNotFoundError as exc:
-        log.info(f"Missing tiles ({exc}); use --synthetic", )
+        log.info(
+            f"Missing tiles ({exc}); use --synthetic",
+        )
         return 1
     export_checkpoint(task, out_path)
     log.info(f"Exported TerraMind checkpoint → {out_path}")

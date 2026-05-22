@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import numpy as np
 import xarray as xr
 
@@ -38,7 +36,10 @@ def emulate_era5_point(
             "tmean": (("time",), tmean.astype(np.float32)),
             "tmax": (("time",), (tmean + 2).astype(np.float32)),
             "tmin": (("time",), (tmean - 4).astype(np.float32)),
-            "precip": (("time",), np.clip(np.random.default_rng(42).gamma(2, 2, n), 0, 40).astype(np.float32)),
+            "precip": (
+                ("time",),
+                np.clip(np.random.default_rng(42).gamma(2, 2, n), 0, 40).astype(np.float32),
+            ),
             "rh_mean": (("time",), np.full(n, 75.0, dtype=np.float32)),
             "srad": (("time",), np.full(n, 15.0, dtype=np.float32)),
             "wind10m": (("time",), np.full(n, 2.0, dtype=np.float32)),

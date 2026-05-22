@@ -22,7 +22,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT / "src"))
 
-from data.dumont_supplement import (  # noqa: E402
+from data.dumont_supplement import (
     DEFAULT_SUPPLEMENT_PATH,
     DEFAULT_SYNTHETIC_PATH,
     generate_synthetic_supplement,
@@ -30,12 +30,12 @@ from data.dumont_supplement import (  # noqa: E402
     load_dumont_plots,
     normalize_dumont_columns,
 )
-from hazards.cssvd_landscape import (  # noqa: E402
+from hazards.cssvd_landscape import (
     DEFAULT_CHECKPOINT,
     HORIZON_MONTHS,
-    LandscapeCSSVDModel,
     NUMERIC_FEATURES,
     STRAIN_PREFIX,
+    LandscapeCSSVDModel,
     fit_synthetic_demo,
     incidence_probability_at_horizon,
 )
@@ -67,16 +67,22 @@ def _blocked_split(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train CSSVD landscape survival model")
     parser.add_argument("--supplement", type=Path, default=DEFAULT_SUPPLEMENT_PATH)
-    parser.add_argument("--synthetic", action="store_true", help="Use/generate synthetic supplement")
+    parser.add_argument(
+        "--synthetic", action="store_true", help="Use/generate synthetic supplement"
+    )
     parser.add_argument("--n-synthetic", type=int, default=500)
     parser.add_argument("--year", type=int, default=2023)
     parser.add_argument("--use-gee", action="store_true", help="Sample landscape features via GEE")
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT)
-    parser.add_argument("--reports", type=Path, default=_REPO_ROOT / "reports" / "cssvd_landscape_metrics.json")
+    parser.add_argument(
+        "--reports", type=Path, default=_REPO_ROOT / "reports" / "cssvd_landscape_metrics.json"
+    )
     parser.add_argument("--n-estimators", type=int, default=100)
     parser.add_argument("--n-bootstrap", type=int, default=50)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--demo-only", action="store_true", help="Fit internal synthetic demo (no CSV)")
+    parser.add_argument(
+        "--demo-only", action="store_true", help="Fit internal synthetic demo (no CSV)"
+    )
     args = parser.parse_args()
 
     if args.demo_only:

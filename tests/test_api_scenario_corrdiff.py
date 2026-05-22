@@ -24,7 +24,9 @@ def scenario_dirs(tmp_path: Path) -> tuple[Path, Path]:
     return hist, cmip
 
 
-def test_simulate_scenario_corrdiff_from_cache(scenario_dirs: tuple[Path, Path], tmp_path: Path) -> None:
+def test_simulate_scenario_corrdiff_from_cache(
+    scenario_dirs: tuple[Path, Path], tmp_path: Path
+) -> None:
     hist, cmip = scenario_dirs
     cache = corrdiff_cache_path(tmp_path, "ssp245", 2050, "ghana")
     write_synthetic_corrdiff_cache(
@@ -44,7 +46,9 @@ def test_simulate_scenario_corrdiff_from_cache(scenario_dirs: tuple[Path, Path],
     request = SimulateScenarioRequest.model_validate(
         {**SCENARIO_PAYLOAD, "downscaling_method": "corrdiff"}
     )
-    model = CASEJSurrogate(sequence_length=365, climate_features=11, static_features=13, galileo_dim=0)
+    model = CASEJSurrogate(
+        sequence_length=365, climate_features=11, static_features=13, galileo_dim=0
+    )
     resolver = StubFeatureResolver()
 
     with patch("api.simulation.predict_scenario_yield_samples") as mock_pred:
@@ -64,7 +68,9 @@ def test_simulate_scenario_corrdiff_from_cache(scenario_dirs: tuple[Path, Path],
     assert mock_pred.call_count == 4  # 2 samples × (baseline + projected)
 
 
-def test_simulate_scenario_corrdiff_cache_miss_raises(scenario_dirs: tuple[Path, Path], tmp_path: Path) -> None:
+def test_simulate_scenario_corrdiff_cache_miss_raises(
+    scenario_dirs: tuple[Path, Path], tmp_path: Path
+) -> None:
     hist, cmip = scenario_dirs
     settings = MagicMock()
     settings.corrdiff_processed_dir = tmp_path / "empty"
@@ -74,7 +80,9 @@ def test_simulate_scenario_corrdiff_cache_miss_raises(scenario_dirs: tuple[Path,
     request = SimulateScenarioRequest.model_validate(
         {**SCENARIO_PAYLOAD, "downscaling_method": "corrdiff"}
     )
-    model = CASEJSurrogate(sequence_length=365, climate_features=11, static_features=13, galileo_dim=0)
+    model = CASEJSurrogate(
+        sequence_length=365, climate_features=11, static_features=13, galileo_dim=0
+    )
 
     with pytest.raises(ValueError, match="CorrDiff cache"):
         simulate_scenario(
@@ -88,7 +96,9 @@ def test_simulate_scenario_corrdiff_cache_miss_raises(scenario_dirs: tuple[Path,
 
 
 @patch("api.simulation.ScenarioBuilder")
-def test_default_request_still_linear(mock_sb_cls: MagicMock, scenario_dirs: tuple[Path, Path]) -> None:
+def test_default_request_still_linear(
+    mock_sb_cls: MagicMock, scenario_dirs: tuple[Path, Path]
+) -> None:
     from tests.test_api_scenario import _scenario_grid_dataset
 
     hist, cmip = scenario_dirs
@@ -96,7 +106,9 @@ def test_default_request_still_linear(mock_sb_cls: MagicMock, scenario_dirs: tup
     inst.build_scenario.return_value = _scenario_grid_dataset()
 
     request = SimulateScenarioRequest.model_validate(SCENARIO_PAYLOAD)
-    model = CASEJSurrogate(sequence_length=365, climate_features=11, static_features=13, galileo_dim=0)
+    model = CASEJSurrogate(
+        sequence_length=365, climate_features=11, static_features=13, galileo_dim=0
+    )
     settings = MagicMock()
     settings.scenario_yield_backend = "casej"
     settings.yield_blend_weight = 0.0

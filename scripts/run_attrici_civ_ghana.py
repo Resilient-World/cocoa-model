@@ -25,8 +25,8 @@ if str(_REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 from data.attrici_counterfactual import (
-    ATTRICICounterfactual,
     ERA5_VARIABLES,
+    ATTRICICounterfactual,
     RegionBounds,
     TimeRange,
 )

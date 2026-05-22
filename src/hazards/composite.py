@@ -8,7 +8,6 @@ import os
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import xarray as xr
 
 from hazards.black_pod import BlackPodRiskModel, ShadeSpecies
@@ -167,7 +166,7 @@ def estimate_surviving_biotic_fraction(
 
 
 __all__ = [
+    "MIN_SURVIVING_FRACTION",
     "apply_biotic_losses",
     "estimate_surviving_biotic_fraction",
-    "MIN_SURVIVING_FRACTION",
 ]

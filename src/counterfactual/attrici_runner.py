@@ -11,12 +11,13 @@ for integration tests; it is not a required runtime dependency of this package.
 
 from __future__ import annotations
 
-import structlog
-
 import logging
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, Sequence
+from typing import TYPE_CHECKING, Protocol
+
+import structlog
 
 if TYPE_CHECKING:
     import xarray as xr
@@ -187,8 +188,7 @@ class ATTRICIRunner:
     ) -> None:
         if era5_var not in factual.data_vars:
             raise KeyError(
-                f"Variable {era5_var!r} not in factual Zarr "
-                f"(available: {list(factual.data_vars)})"
+                f"Variable {era5_var!r} not in factual Zarr (available: {list(factual.data_vars)})"
             )
         slice_ds = factual[[era5_var]]
         slice_ds.to_netcdf(tmp_nc)
@@ -359,7 +359,6 @@ class ZarrCounterfactualProvider:
 def main(argv: list[str] | None = None) -> int:
     """CLI: ATTRICI counterfactual detrend for factual ERA5 Zarr."""
     import argparse
-    import sys
     import tempfile
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")

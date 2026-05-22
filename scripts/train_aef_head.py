@@ -29,12 +29,12 @@ if str(_REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 from data.alphaearth_embeddings import AEF_BAND_NAMES, AEF_EMBEDDING_DIM
-from models.aef_cocoa_head import AEFCocoaHead, DEFAULT_AEF_CHECKPOINT
+from models.aef_cocoa_head import DEFAULT_AEF_CHECKPOINT, AEFCocoaHead
 from validation.kalischek_benchmark import (
     DEFAULT_KALISCHEK_ASSET,
+    REGIONS,
     GeeKalischekReference,
     HeuristicKalischekReference,
-    REGIONS,
     _sample_grid,
 )
 
@@ -109,10 +109,7 @@ def _sample_training_data(
         fc = ingest.sample_points(ee.FeatureCollection(features))
         rows = fc.getInfo()["features"]
         embeddings = np.array(
-            [
-                [float(f["properties"].get(b, 0.0)) for b in AEF_BAND_NAMES]
-                for f in rows
-            ],
+            [[float(f["properties"].get(b, 0.0)) for b in AEF_BAND_NAMES] for f in rows],
             dtype=np.float32,
         )
         labels = ref.sample_reference(lats, lons).astype(np.float32)
@@ -187,9 +184,7 @@ def train_head(
         with torch.no_grad():
             val_prob = model.predict_proba(x_val.to(device)).cpu().numpy()
         val_acc = float(np.mean((val_prob >= 0.5) == (y_val.numpy() >= 0.5)))
-        val_bce = float(
-            model.bce_loss(x_val.to(device), y_val.to(device)).item()
-        )
+        val_bce = float(model.bce_loss(x_val.to(device), y_val.to(device)).item())
         mlflow.log_metric("val_accuracy", val_acc)
         mlflow.log_metric("val_bce", val_bce)
 

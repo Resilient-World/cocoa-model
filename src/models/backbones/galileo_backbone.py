@@ -10,17 +10,17 @@ repository layout at runtime (optional ``galileo`` pip package supplies
 
 from __future__ import annotations
 
-import structlog
-
 from pathlib import Path
 from typing import Any
 
+import structlog
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from huggingface_hub import snapshot_download
 
 from data.utils import cocoa_batch_to_galileo_input
+
 from .vendor.single_file_galileo import Encoder as GalileoEncoder
 
 log = structlog.get_logger(__name__)
@@ -91,7 +91,7 @@ class GalileoCocoaBackbone(nn.Module):
         Apply Galileo pretraining min–max normalization in :func:`data.utils.cocoa_batch_to_galileo_input`.
     cache_dir:
         Optional Hugging Face hub cache directory.
-  """
+    """
 
     def __init__(
         self,
@@ -119,7 +119,9 @@ class GalileoCocoaBackbone(nn.Module):
     @property
     def embedding_size(self) -> int:
         if self._embedding_size is None:
-            raise RuntimeError("Call forward() once to load weights before accessing embedding_size")
+            raise RuntimeError(
+                "Call forward() once to load weights before accessing embedding_size"
+            )
         return self._embedding_size
 
     @property

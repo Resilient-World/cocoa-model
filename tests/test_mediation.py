@@ -7,7 +7,6 @@ from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
-import pytest
 from sklearn.linear_model import LinearRegression, LogisticRegression
 
 from analysis.mediation import mediation_analysis
@@ -68,6 +67,7 @@ def test_simulate_intervention_mediation_field(tmp_path) -> None:
     from unittest.mock import MagicMock, patch
 
     import torch
+
     from api.config import APISettings
     from api.schemas import FarmLocation, InterventionType, SimulateInterventionRequest
     from api.simulation import simulate_intervention

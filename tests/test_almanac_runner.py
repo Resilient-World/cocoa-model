@@ -10,9 +10,9 @@ import pandas as pd
 import pytest
 
 from models.almanac_runner import (
+    REQUIRED_WEATHER_COLUMNS,
     ALMANACNotInstalled,
     ALMANACRunner,
-    REQUIRED_WEATHER_COLUMNS,
     _parse_dssat_table,
     _write_mgt,
     _write_sol,
@@ -58,9 +58,7 @@ def test_wth_sol_mgt_roundtrip(tmp_path: Path) -> None:
 def test_parse_dssat_table_pln_style(tmp_path: Path) -> None:
     sample = tmp_path / "TEST.PLN"
     sample.write_text(
-        "*PLANT OUTPUT\n\n@DATE LAI SW1 SW2\n"
-        "10001 2.1 0.25 0.30\n"
-        "10002 2.3 0.24 0.29\n",
+        "*PLANT OUTPUT\n\n@DATE LAI SW1 SW2\n10001 2.1 0.25 0.30\n10002 2.3 0.24 0.29\n",
         encoding="ascii",
     )
     df = _parse_dssat_table(sample)

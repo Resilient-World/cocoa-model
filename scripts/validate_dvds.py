@@ -114,13 +114,10 @@ def zhao_bootstrap_bounds(
     sign1[sign1 == 0] = 1
     sign0 = np.sign(y - q0_m)
     sign0[sign0 == 0] = 1
-    upper_if = (
-        z * q1_p / e_hat
-        + (y - q1_p) * z * (1.0 + (1.0 - e_hat) / e_hat * (lam ** sign1))
-    )
-    lower_if = (
-        (1.0 - z) * y
-        - ((1.0 - z) * q0_m / (1.0 - e_hat) + (y - q0_m) * (1.0 - z) * (e_hat / (1.0 - e_hat)) * (lam ** (-sign0)))
+    upper_if = z * q1_p / e_hat + (y - q1_p) * z * (1.0 + (1.0 - e_hat) / e_hat * (lam**sign1))
+    lower_if = (1.0 - z) * y - (
+        (1.0 - z) * q0_m / (1.0 - e_hat)
+        + (y - q0_m) * (1.0 - z) * (e_hat / (1.0 - e_hat)) * (lam ** (-sign0))
     )
     ate_upper = float(upper_if.mean() - lower_if.mean())
 
@@ -130,13 +127,12 @@ def zhao_bootstrap_bounds(
     sign1m[sign1m == 0] = 1
     sign0p = np.sign(y - q0_p)
     sign0p[sign0p == 0] = 1
-    upper_if_m = (
-        z * q1_m / e_hat
-        + (y - q1_m) * z * (1.0 + (1.0 - e_hat) / e_hat * (lam ** (-sign1m)))
+    upper_if_m = z * q1_m / e_hat + (y - q1_m) * z * (
+        1.0 + (1.0 - e_hat) / e_hat * (lam ** (-sign1m))
     )
-    lower_if_p = (
-        (1.0 - z) * y
-        - ((1.0 - z) * q0_p / (1.0 - e_hat) + (y - q0_p) * (1.0 - z) * (e_hat / (1.0 - e_hat)) * (lam ** sign0p))
+    lower_if_p = (1.0 - z) * y - (
+        (1.0 - z) * q0_p / (1.0 - e_hat)
+        + (y - q0_p) * (1.0 - z) * (e_hat / (1.0 - e_hat)) * (lam**sign0p)
     )
     ate_lower = float(upper_if_m.mean() - lower_if_p.mean())
 
@@ -202,7 +198,9 @@ def run_binary_dgp_study(
 
 def run_farm_panel_study(seed: int = 7) -> dict[str, object]:
     true_att = 0.35
-    panel = join_biotic(join_climate(load_synthetic_panel(n_farms=800, true_att=true_att, seed=seed)))
+    panel = join_biotic(
+        join_climate(load_synthetic_panel(n_farms=800, true_att=true_att, seed=seed))
+    )
     snap = farm_level_snapshot(panel, treatment_year=4)
     snap["yield_delta"] = snap["yield_post_intervention"] - snap["yield_pre_intervention"]
     covs = [c for c in PSM_COVARIATE_COLS if c in snap.columns]
@@ -262,7 +260,9 @@ def write_report(path: Path, binary: dict, farm: dict) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Validate DVDS sensitivity estimators")
     parser.add_argument("--n", type=int, default=1000, help="Sample size per replication")
-    parser.add_argument("--reps", type=int, default=50, help="Monte Carlo replications (use 200+ for full gate)")
+    parser.add_argument(
+        "--reps", type=int, default=50, help="Monte Carlo replications (use 200+ for full gate)"
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()

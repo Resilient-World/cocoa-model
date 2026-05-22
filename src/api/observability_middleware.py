@@ -46,9 +46,7 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         finally:
             elapsed = time.perf_counter() - start
             if endpoint.startswith("/simulate"):
-                prom_metrics.observe_inference_latency(
-                    endpoint, str(model_version), elapsed
-                )
+                prom_metrics.observe_inference_latency(endpoint, str(model_version), elapsed)
             if status_code >= 500:
                 prom_metrics.inc_simulation_error(f"http_{status_code}", endpoint)
             structlog.contextvars.clear_contextvars()

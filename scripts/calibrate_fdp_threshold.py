@@ -29,13 +29,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT / "src"))
 
-from data.cocoa_exposure import (  # noqa: E402
+from data.cocoa_exposure import (
     DEFAULT_THRESHOLD,
     FDP_COCOA_COLLECTION,
     FDP_MODEL_CARD_URL,
     PROBABILITY_BAND,
 )
-from validation.kalischek_benchmark import (  # noqa: E402
+from validation.kalischek_benchmark import (
     DEFAULT_KALISCHEK_ASSET,
     REGIONS,
 )
@@ -68,11 +68,7 @@ def threshold_sweep_metrics(
         tn = float(np.sum(~yt & ~yp))
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
         recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-        f1 = (
-            2 * precision * recall / (precision + recall)
-            if (precision + recall) > 0
-            else 0.0
-        )
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
         specificity = tn / n_neg if n_neg > 0 else 0.0
         sensitivity = recall
         youden_j = sensitivity + specificity - 1.0
@@ -253,8 +249,8 @@ def write_report(
         "",
         "## Best thresholds",
         "",
-        f"| Criterion | Threshold | Precision | Recall | F1 | Youden J |",
-        f"|-----------|-----------|-----------|--------|-----|----------|",
+        "| Criterion | Threshold | Precision | Recall | F1 | Youden J |",
+        "|-----------|-----------|-----------|--------|-----|----------|",
         f"| Max F1 | {best_f1['threshold']:.2f} | {best_f1['precision']:.3f} | "
         f"{best_f1['recall']:.3f} | {best_f1['f1']:.3f} | {best_f1['youden_j']:.3f} |",
         f"| Max Youden J | {best_youden['threshold']:.2f} | {best_youden['precision']:.3f} | "
@@ -288,7 +284,13 @@ def plot_pr_curve(metrics: pd.DataFrame, out_path: Path) -> None:
     fig, ax = plt.subplots(figsize=(6, 5))
     ax.plot(metrics["recall"], metrics["precision"], marker=".", markersize=3, label="FDP sweep")
     best = metrics.loc[metrics["f1"].idxmax()]
-    ax.scatter([best["recall"]], [best["precision"]], color="crimson", zorder=5, label=f"max F1 @ {best['threshold']:.2f}")
+    ax.scatter(
+        [best["recall"]],
+        [best["precision"]],
+        color="crimson",
+        zorder=5,
+        label=f"max F1 @ {best['threshold']:.2f}",
+    )
     ref = metrics.loc[(metrics["threshold"] - DEFAULT_THRESHOLD).abs().idxmin()]
     ax.scatter(
         [ref["recall"]],

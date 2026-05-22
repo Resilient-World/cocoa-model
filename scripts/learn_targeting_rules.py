@@ -52,7 +52,9 @@ def main() -> int:
     parser.add_argument("--intervention-cost", type=float, default=0.0)
     parser.add_argument("--treatment-label", default="treat_with_shade_trees")
     parser.add_argument("--random-state", type=int, default=42)
-    parser.add_argument("--refit-bootstrap", action="store_true", help="Reserved; fixed-policy bootstrap only")
+    parser.add_argument(
+        "--refit-bootstrap", action="store_true", help="Reserved; fixed-policy bootstrap only"
+    )
     args = parser.parse_args()
     del args.refit_bootstrap
 

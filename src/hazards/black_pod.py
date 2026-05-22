@@ -128,7 +128,7 @@ class BlackPodRiskModel:
 
 
 __all__ = [
+    "SHADE_BLACK_POD_MULTIPLIERS",
     "BlackPodRiskModel",
     "ShadeSpecies",
-    "SHADE_BLACK_POD_MULTIPLIERS",
 ]

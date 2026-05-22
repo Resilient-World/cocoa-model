@@ -15,7 +15,7 @@ from torch import Tensor
 
 from models.conformal.aci import DEFAULT_SCENARIO_HORIZONS, AdaptiveConformalInference, MultiStepACI
 from models.conformal.conformal_pid import ConformalPID
-from models.conformal.cqr import CQRInterval, ConformalCalibrator, QuantileYieldSurrogate
+from models.conformal.cqr import ConformalCalibrator, CQRInterval, QuantileYieldSurrogate
 from models.conformal.eci import ECICutoff, ECIIntegral, ErrorQuantifiedConformalInference
 from models.conformal.online_conformal_base import conformal_quantile
 
@@ -34,7 +34,13 @@ def _build_updater(
     method: OnlineMethod,
     alpha: float,
     **kwargs: Any,
-) -> AdaptiveConformalInference | ConformalPID | ErrorQuantifiedConformalInference | ECICutoff | ECIIntegral:
+) -> (
+    AdaptiveConformalInference
+    | ConformalPID
+    | ErrorQuantifiedConformalInference
+    | ECICutoff
+    | ECIIntegral
+):
     if method == "aci":
         return AdaptiveConformalInference(
             alpha,
@@ -183,7 +189,9 @@ class HorizonOnlineCalibrator:
                 np.array([q_hi]),
             )[0]
         )
-        covered = observed_y >= q_lo - self.multistep.threshold(horizon) and observed_y <= q_hi + self.multistep.threshold(horizon)
+        covered = observed_y >= q_lo - self.multistep.threshold(
+            horizon
+        ) and observed_y <= q_hi + self.multistep.threshold(horizon)
         thresholds = self.multistep.update(
             np.array([score]),
             np.array([covered]),

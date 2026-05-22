@@ -4,12 +4,11 @@ YieldSurrogateV2 with teleconnection GNN bias (ENSO / Atl3 / IOD).
 
 from __future__ import annotations
 
-import structlog
-
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import structlog
 import torch
 from torch import Tensor, nn
 
@@ -128,9 +127,7 @@ class YieldSurrogateV2Teleconnection(nn.Module):
         lat: float | Tensor = 6.0,
         lon: float | Tensor = -2.0,
     ) -> tuple[Tensor, MechanisticTraces]:
-        y_base, traces = self.surrogate.forward_with_traces(
-            climate, static, region_id, doy=doy
-        )
+        y_base, traces = self.surrogate.forward_with_traces(climate, static, region_id, doy=doy)
         if teleconnection is None:
             return y_base, traces
         delta = self._teleconnection_delta(

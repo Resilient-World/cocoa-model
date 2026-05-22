@@ -222,10 +222,10 @@ def evaluate_with_baselines(
 
 
 __all__ = [
+    "ISO3_TO_REGION",
     "BaselineForecast",
     "ClimatologyBaseline",
     "FDPMeanBaseline",
-    "ISO3_TO_REGION",
     "PersistenceBaseline",
     "StratumKey",
     "evaluate_with_baselines",

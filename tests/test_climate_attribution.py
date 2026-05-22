@@ -13,11 +13,11 @@ from analysis.climate_attribution import (
     _fao_et0_numpy,
     climate_attributable_loss,
     decompose_avoided_loss,
-    extract_daily_climate_11ch,
     extract_daily_climate_4ch,
+    extract_daily_climate_11ch,
 )
 from data.attrici_fast_detrend import _fao_et0_array
-from models.yield_surrogate import CLIMATE_CHANNEL_NAMES, CLIMATE_IDX, N_CLIMATE_CHANNELS
+from models.yield_surrogate import CLIMATE_IDX, N_CLIMATE_CHANNELS
 
 EXPECTED_COLUMNS = {
     "farm_id",

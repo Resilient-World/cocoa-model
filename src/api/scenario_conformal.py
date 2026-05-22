@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import structlog
-
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+import structlog
 import torch
 from torch import Tensor
 
@@ -154,12 +153,8 @@ def _apply_scenario_conformal_inner(
         if cqr_calibrator is None:
             log.warning("split_cqr requested but calibrator missing; skipping conformal CI")
             return None
-        base_iv = cqr_calibrator.predict_interval(
-            cqr_model, (climate_baseline, static_cf)
-        )
-        fact_iv = cqr_calibrator.predict_interval(
-            cqr_model, (climate_projected, static_factual)
-        )
+        base_iv = cqr_calibrator.predict_interval(cqr_model, (climate_baseline, static_cf))
+        fact_iv = cqr_calibrator.predict_interval(cqr_model, (climate_projected, static_factual))
         ci_lower, ci_upper = _avoided_loss_bounds(
             base_iv.lower,
             base_iv.upper,

@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from analysis.tcav import CONCEPT_IDS, TCAVResult, tcav_scores
+from analysis.tcav import CONCEPT_IDS, tcav_scores
 from api.config import APISettings
 
 router = APIRouter(prefix="", tags=["interpret"])
@@ -51,7 +49,6 @@ def interpret_endpoint(
 ) -> InterpretResponse:
     if not getattr(request.app.state.settings, "interpret_enabled", False):
         raise HTTPException(status_code=503, detail="INTERPRET_ENABLED=false")
-    import torch
 
     model = request.app.state.yield_model
     resolver = request.app.state.feature_resolver

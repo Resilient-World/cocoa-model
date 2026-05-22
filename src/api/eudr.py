@@ -7,14 +7,13 @@ FDP/Hansen cross-check, and traceability to source datasets.
 
 from __future__ import annotations
 
-import structlog
-
 import asyncio
 import uuid
 from datetime import date
 from typing import Any, Literal
 
 import httpx
+import structlog
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -34,7 +33,6 @@ from data.whisp_client import (
     WHISP_DOCS_URL,
     WHISP_PORTAL_URL,
     EudrRiskClass,
-    MockWhispClient,
     WhispClient,
     WhispPlotResult,
 )
@@ -43,9 +41,7 @@ log = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="", tags=["eudr"])
 
-HANSEN_CATALOG_URL = (
-    "https://developers.google.com/earth-engine/datasets/catalog/UMD_hansen_global_forest_change_2023_v1_11"
-)
+HANSEN_CATALOG_URL = "https://developers.google.com/earth-engine/datasets/catalog/UMD_hansen_global_forest_change_2023_v1_11"
 JRC_GFC_CATALOG_URL = "https://data.jrc.ec.europa.eu/dataset/0a5f33b0-8b1c-4b1c-9c3b-0e0e0e0e0e0e"
 EUDR_REGULATION_URL = "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32023R1115"
 EUDR_OCT_2025_NOTE = (
@@ -66,7 +62,9 @@ class EudrDueDiligenceRequest(BaseModel):
         max_length=3,
         description="Producer country (ISO3); inferred from polygon centroid if omitted",
     )
-    area_ha: float | None = Field(default=None, gt=0.0, description="Plot area (ha); estimated if omitted")
+    area_ha: float | None = Field(
+        default=None, gt=0.0, description="Plot area (ha); estimated if omitted"
+    )
     use_gee_fdp_screening: bool = Field(
         default=True,
         description="Cross-check Whisp with Hansen/JRC GEE screening (FDP-aligned Art. 3)",

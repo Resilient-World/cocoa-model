@@ -50,8 +50,12 @@ def _mae(obs: np.ndarray, pred: np.ndarray) -> float:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--era5-zarr", type=Path, default=_REPO_ROOT / "data/processed/era5_2020_2024.zarr")
-    parser.add_argument("--cmip6-zarr", type=Path, default=_REPO_ROOT / "data/processed/cmip6_ensemble.zarr")
+    parser.add_argument(
+        "--era5-zarr", type=Path, default=_REPO_ROOT / "data/processed/era5_2020_2024.zarr"
+    )
+    parser.add_argument(
+        "--cmip6-zarr", type=Path, default=_REPO_ROOT / "data/processed/cmip6_ensemble.zarr"
+    )
     parser.add_argument("--processed-dir", type=Path, default=_REPO_ROOT / "data/processed")
     parser.add_argument("--scenario", default="ssp245")
     parser.add_argument("--region", default="ghana")
@@ -94,7 +98,9 @@ def main() -> int:
     cache = corrdiff_cache_path(args.processed_dir, args.scenario, horizon, region)
     if not cache.is_dir():
         if args.quick:
-            write_synthetic_corrdiff_cache(cache, scenario=args.scenario, horizon=horizon, region=region)
+            write_synthetic_corrdiff_cache(
+                cache, scenario=args.scenario, horizon=horizon, region=region
+            )
         else:
             downscaler = CorrDiffCMIP6Downscaler(
                 experiment_id=args.scenario,  # type: ignore[arg-type]

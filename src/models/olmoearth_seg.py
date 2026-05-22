@@ -23,7 +23,9 @@ class OlmoEarthCocoaSegmentation(nn.Module):
     ) -> None:
         super().__init__()
         self.model_size = model_size
-        self.backbone = OlmoEarthBackbone(model_size=model_size, freeze=freeze_backbone, use_hf=use_hf)
+        self.backbone = OlmoEarthBackbone(
+            model_size=model_size, freeze=freeze_backbone, use_hf=use_hf
+        )
         dim = EMBED_DIM_BY_SIZE[model_size]
         self.head = OlmoEarthCocoaSegHead(embed_dim=dim, out_size=out_size)
 
@@ -37,7 +39,14 @@ class OlmoEarthCocoaSegmentation(nn.Module):
         location: torch.Tensor,
         months: torch.Tensor,
     ) -> dict[str, torch.Tensor]:
-        return {"s2": s2, "s1": s1, "era5": era5, "dem": dem, "location": location, "months": months}
+        return {
+            "s2": s2,
+            "s1": s1,
+            "era5": era5,
+            "dem": dem,
+            "location": location,
+            "months": months,
+        }
 
     def forward(self, batch_dict: dict[str, torch.Tensor | None]) -> torch.Tensor:
         feats = self.backbone(batch_dict)

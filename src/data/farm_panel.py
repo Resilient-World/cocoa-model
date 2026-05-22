@@ -8,7 +8,7 @@ ERA5 climate aggregates and biotic loss fractions from :mod:`hazards`.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -147,9 +147,7 @@ def load_synthetic_panel(
             )
 
     panel = pd.DataFrame(rows)
-    panel["ever_treated"] = panel["farm_id"].map(
-        dict(zip(farm_ids, ever_treated, strict=True))
-    )
+    panel["ever_treated"] = panel["farm_id"].map(dict(zip(farm_ids, ever_treated, strict=True)))
     return panel
 
 
@@ -307,7 +305,9 @@ def farm_level_snapshot(
     split_year = years[treatment_year]
 
     meta = panel_df.groupby("farm_id", as_index=False).first()
-    ever = panel_df.groupby("farm_id")["received_intervention"].max().rename("received_intervention")
+    ever = (
+        panel_df.groupby("farm_id")["received_intervention"].max().rename("received_intervention")
+    )
     pre = (
         panel_df.loc[panel_df["year"] < split_year]
         .groupby("farm_id")["yield_tonnes_per_ha"]
