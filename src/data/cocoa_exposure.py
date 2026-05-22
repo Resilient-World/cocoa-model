@@ -28,6 +28,7 @@ lazy Xarray/Zarr materialization (Xee).
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -35,6 +36,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import ee
 import numpy as np
 import structlog
+import torch
 import xarray as xr
 
 # Registers the ``ee`` Xarray backend (Xee).
@@ -68,6 +70,7 @@ ExposureBackend = Literal[
     "ensemble_v3",
     "ensemble_v4",
     "clay_v15",
+    "active_learning",
 ]
 
 # Default ensemble v1 blend: AEF, Galileo, FDP (sums to 1.0)
@@ -318,6 +321,7 @@ class CocoaExposureIngest:
         self._terramind_model = None
         self._terramind_tim_model = None
         self._olmoearth_model = None
+        self._active_learning_model = None
 
     def _collection(self) -> ee.ImageCollection:
         start, end = _year_date_range(self.year)
@@ -387,8 +391,6 @@ class CocoaExposureIngest:
         Uses a minimal synthetic 64×64 patch when full Sentinel stacks are not
         wired at the point API (production should pass real tile batches).
         """
-        import torch
-
         model = self._load_galileo_model()
         h = w = 64
         t = 4
@@ -449,8 +451,6 @@ class CocoaExposureIngest:
         return vec / (np.linalg.norm(vec) + 1e-8)
 
     def _aef_probability_at_point(self, lat: float, lon: float) -> float:
-        import torch
-
         head = self._load_aef_head()
         emb = self._aef_embedding_at_point(lat, lon)
         if emb is None:
@@ -478,8 +478,6 @@ class CocoaExposureIngest:
 
     def _agrifm_probability_at_point(self, lat: float, lon: float) -> float:
         """Point P(cocoa) from AgriFM Video Swin segmentation (synthetic tile at API)."""
-        import torch
-
         model = self._load_agrifm_model()
         h = w = 64
         t = 8
@@ -520,8 +518,6 @@ class CocoaExposureIngest:
     def _terramind_tile_probability(
         self, lat: float, lon: float, *, use_tim: bool = False
     ) -> float:
-        import torch
-
         from data.utils import cocoa_batch_to_terramind_input
 
         model = self._load_terramind_model(use_tim=use_tim)
@@ -597,8 +593,6 @@ class CocoaExposureIngest:
         return self._olmoearth_model
 
     def _olmoearth_probability_at_point(self, lat: float, lon: float) -> float:
-        import torch
-
         from models.olmoearth_seg import OlmoEarthCocoaSegmentation
 
         model = self._load_olmoearth_model()
@@ -675,6 +669,45 @@ class CocoaExposureIngest:
         blended = sum(w * p for w, p in parts) / max(weight_sum, 1e-9)
         return float(np.clip(blended, 0.0, 1.0))
 
+    def _active_learning_checkpoint(self, lat: float, lon: float) -> Path:
+        region_key = self.region or region_for_point(lat, lon) or "global"
+        return _REPO_ROOT / "models" / f"bssal_{region_key}.pt"
+
+    def _load_active_learning_model(self, lat: float, lon: float) -> Any:
+        if self._active_learning_model is not None:
+            return self._active_learning_model
+        from training.active_learner import load_bayesian_head_checkpoint
+
+        path = self._active_learning_checkpoint(lat, lon)
+        if path.is_file():
+            self._active_learning_model = load_bayesian_head_checkpoint(path, device="cpu")
+        else:
+            log.warning("BSSAL checkpoint missing at %s; using deterministic location prior", path)
+            self._active_learning_model = None
+        return self._active_learning_model
+
+    def _active_learning_probability_at_point(self, lat: float, lon: float) -> float:
+        if os.environ.get("ACTIVE_LEARNING_ENABLED", "").lower() not in ("1", "true", "yes"):
+            raise NotImplementedError(
+                "active_learning exposure is disabled; set ACTIVE_LEARNING_ENABLED=true"
+            )
+        model = self._load_active_learning_model(lat, lon)
+        features = np.asarray(
+            [
+                lon,
+                lat,
+                np.sin(np.deg2rad(lat)),
+                np.cos(np.deg2rad(lon)),
+                _cocoa_belt_probability(lat, lon),
+            ],
+            dtype=np.float32,
+        )
+        if model is None:
+            return float(np.clip(0.15 + 0.75 * features[-1], 0.0, 1.0))
+        with torch.no_grad():
+            mean, _ = model.predict_proba(torch.from_numpy(features).unsqueeze(0), mc_samples=25)
+        return float(np.clip(mean.squeeze().item(), 0.0, 1.0))
+
     def sample_point(
         self,
         lat: float,
@@ -711,8 +744,6 @@ class CocoaExposureIngest:
             return self._ensemble_v4_blend(lat, lon, scale_m=scale_m)
 
         if self.backend == "clay_v15":
-            import os
-
             if os.environ.get("CLAY_EXPOSURE_ENABLED", "").lower() not in ("1", "true", "yes"):
                 raise NotImplementedError(
                     "clay_v15 exposure is benchmark-only until CLAY_EXPOSURE_ENABLED=true"
@@ -724,6 +755,9 @@ class CocoaExposureIngest:
 
         if self.backend == "ensemble_v2":
             return self._ensemble_v2_blend(lat, lon, scale_m=scale_m)
+
+        if self.backend == "active_learning":
+            return self._active_learning_probability_at_point(lat, lon)
 
         # ensemble v1: 0.5 AEF + 0.3 Galileo + 0.2 FDP
         w_aef, w_gal, w_fdp = self.ensemble_weights
