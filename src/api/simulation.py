@@ -27,6 +27,7 @@ from api.schemas import (
     SimulateClimateAttributionResponse,
     SimulateInterventionRequest,
     SimulateInterventionResponse,
+    ScenarioSourceAttribution,
     SimulateScenarioRequest,
     SimulateScenarioResponse,
     YieldUncertaintyBand,
@@ -994,6 +995,7 @@ def simulate_scenario(
     window = (f"{horizon}-01-01", f"{horizon}-12-31")
     downscaling = request.downscaling_method
     corrdiff_n: int | None = None
+    source_attributions: list[ScenarioSourceAttribution] = []
 
     static_base = feature_resolver.resolve_static_with_galileo(lat, lon, year)
     static_cf = _encode_static(
@@ -1030,6 +1032,28 @@ def simulate_scenario(
 
         ds_ace = emulate_era5_ace2(lat=lat, lon=lon, start=window[0], end=window[1])
         climate_ensemble = [climate_tensor_from_dataset_point(ds_ace, lat, lon, horizon)]
+    elif downscaling == "aurora":
+        if settings is None or not getattr(settings, "aurora_enabled", False):
+            raise ValueError("aurora downscaling requires AURORA_ENABLED=true")
+        from counterfactual.aurora_runner import (
+            AuroraScenarioRunner,
+            build_aurora_source_attribution,
+            check_aurora_commercial_gate,
+        )
+
+        deploy_env = getattr(settings, "otel_deployment_environment", "local")
+        check_aurora_commercial_gate(
+            commercial_ok=bool(getattr(settings, "aurora_commercial_ok", False)),
+            deployment_environment=str(deploy_env),
+        )
+        runner = AuroraScenarioRunner.from_settings(settings)
+        region = resolve_region(lat, lon)
+        ds_aur = runner.forecast_farm_point(lat, lon, region, window, horizon)
+        climate_ensemble = [climate_tensor_from_dataset_point(ds_aur, lat, lon, horizon)]
+        source_attributions = [
+            ScenarioSourceAttribution.model_validate(entry)
+            for entry in build_aurora_source_attribution(runner)
+        ]
     elif downscaling == "corrdiff":
         processed_dir = (
             settings.corrdiff_processed_dir if settings is not None else historical_zarr_path.parent
@@ -1238,4 +1262,5 @@ def simulate_scenario(
         drift_alarm=drift_alarm,
         drift_status=drift_status,
         eudr_status=eudr_status,
+        source_attributions=source_attributions,
     )

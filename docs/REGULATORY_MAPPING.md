@@ -187,7 +187,15 @@ curl -X POST http://localhost:8000/compliance/dds -H "Content-Type: application/
 
 # Farm scenario (O18–O23)
 curl -X POST http://localhost:8000/simulate-intervention -H "Content-Type: application/json" -d @fixtures/simulate_request.json
+
+# SSP horizon scenario with optional Aurora downscaling (research license; commercial gate)
+# AURORA_ENABLED=true AURORA_MOCK=1 curl -X POST http://localhost:8000/simulate-scenario \
+#   -H "Content-Type: application/json" -d '{"downscaling_method":"aurora", ...}'
 ```
+
+**Aurora 1.5 (opt-in):** Maps to O18–O21 physical-risk scenario yields when `downscaling_method=aurora`. Document
+research-only default license and `AURORA_COMMERCIAL_OK` for production in [LICENSES.md](LICENSES.md) and
+[MODEL_CARD.md](MODEL_CARD.md). Online conformal strata use suffix `:aurora` (separate from `:corrdiff`).
 
 ---
 

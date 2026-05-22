@@ -243,6 +243,8 @@ def simulate_scenario_endpoint(request: SimulateScenarioRequest) -> SimulateScen
         msg = str(exc)
         if "CorrDiff cache" in msg or "CorrDiff requires" in msg or "CorrDiffCMIP6" in msg:
             raise HTTPException(status_code=503, detail=msg) from exc
+        if "AURORA_COMMERCIAL_OK" in msg:
+            raise HTTPException(status_code=422, detail=msg) from exc
         raise HTTPException(status_code=400, detail=msg) from exc
 
 

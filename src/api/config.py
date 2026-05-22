@@ -257,6 +257,27 @@ class APISettings(BaseSettings):
     neuralgcm_enabled: bool = Field(default=False, validation_alias="NEURALGCM_ENABLED")
     ace2_era5_enabled: bool = Field(default=False, validation_alias="ACE2_ERA5_ENABLED")
 
+    aurora_enabled: bool = Field(default=False, validation_alias="AURORA_ENABLED")
+    aurora_model_size: Literal["small", "medium"] = Field(
+        default="small",
+        validation_alias="AURORA_MODEL_SIZE",
+        description="small → AuroraSmallPretrained; medium → AuroraPretrained",
+    )
+    aurora_commercial_ok: bool = Field(
+        default=False,
+        validation_alias="AURORA_COMMERCIAL_OK",
+        description="Required for production/commercial Aurora scenario runs; see docs/LICENSES.md",
+    )
+    aurora_mock: bool = Field(
+        default=False,
+        validation_alias="AURORA_MOCK",
+        description="Deterministic stub forecasts (CI / laptop without GPU weights)",
+    )
+    aurora_cache_dir: Path = Field(
+        default=_REPO_ROOT / "data" / "processed" / "aurora_scenario",
+        validation_alias="AURORA_CACHE_DIR",
+    )
+
     process_bma_enabled: bool = Field(default=False, validation_alias="PROCESS_BMA_ENABLED")
     ensemble_process_method: str = Field(
         default="mean",

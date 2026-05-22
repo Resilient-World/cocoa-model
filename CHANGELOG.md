@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Aurora 1.5 (Bodnar et al., Nature 2025) added as opt-in scenario backend; LoRA per-region adapters supported via `models/aurora_lora_<region>.safetensors`.
+- `downscaling_method=aurora` on `POST /simulate-scenario` with `source_attributions` (`aurora_model_version`, `aurora_lora_id`); optional extra `[aurora]` (`microsoft-aurora`, `peft`).
+- `scripts/validate_aurora_scenario.py` and `reports/scenario/aurora_vs_neuralgcm_vs_corrdiff.md` benchmark template.
+
 ### Changed
 
 - Mypy strict typing enabled for api.config, api.schemas, analysis._report, models.cqr (ratchet initialized; remaining modules tracked in docs/TYPING_PLAYBOOK.md).

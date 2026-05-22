@@ -355,7 +355,7 @@ class ConformalConfidenceInterval(BaseModel):
 
 ScenarioSSP = Literal["ssp245", "ssp585"]
 ScenarioHorizonYear = Literal[2030, 2050, 2080]
-DownscalingMethod = Literal["linear_delta", "corrdiff", "neuralgcm", "ace2_era5"]
+DownscalingMethod = Literal["linear_delta", "corrdiff", "neuralgcm", "ace2_era5", "aurora"]
 
 ProcessEnsembleMethod = Literal["mean", "bma", "best"]
 
@@ -394,7 +394,10 @@ class SimulateScenarioRequest(BaseModel):
     )
     downscaling_method: DownscalingMethod = Field(
         default="linear_delta",
-        description="linear_delta, corrdiff, neuralgcm, or ace2_era5 (latter two require env flags)",
+        description=(
+            "linear_delta, corrdiff, neuralgcm, ace2_era5, or aurora "
+            "(latter three require env flags; aurora also needs AURORA_COMMERCIAL_OK in production)"
+        ),
     )
     ensemble_process_method: ProcessEnsembleMethod = Field(
         default="mean",
@@ -465,6 +468,23 @@ class SimulateClimateAttributionResponse(BaseModel):
     financial_impact: FinancialImpactResponse
 
 
+class ScenarioSourceAttribution(BaseModel):
+    """Provenance entry for scenario simulation (models, data, regulations)."""
+
+    id: str
+    role: str
+    citation: str | None = None
+    asset: str | None = None
+    aurora_model_version: str | None = Field(
+        default=None,
+        description="Aurora checkpoint id when downscaling_method=aurora",
+    )
+    aurora_lora_id: str | None = Field(
+        default=None,
+        description="Per-region LoRA adapter id (base or region key)",
+    )
+
+
 class SimulateScenarioResponse(BaseModel):
     """Response from POST /simulate-scenario."""
 
@@ -515,6 +535,10 @@ class SimulateScenarioResponse(BaseModel):
     corrdiff_samples_used: int | None = Field(
         default=None,
         description="Number of CorrDiff ensemble members when downscaling_method=corrdiff",
+    )
+    source_attributions: list[ScenarioSourceAttribution] = Field(
+        default_factory=list,
+        description="Model and data provenance (includes Aurora fields when applicable)",
     )
 
 

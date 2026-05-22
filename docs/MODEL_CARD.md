@@ -337,8 +337,18 @@ Latest comparison reports: [`reports/backbones/olmoearth_vs_v3_*.md`](../reports
 | `corrdiff` | Opt-in | `CORRDIFF_AVAILABLE`, precomputed cache |
 | `neuralgcm` | Opt-in | `NEURALGCM_ENABLED=true` |
 | `ace2_era5` | Opt-in | `ACE2_ERA5_ENABLED=true` |
+| `aurora` | Opt-in | `AURORA_ENABLED=true`, `pip install -e '.[aurora]'`; production requires `AURORA_COMMERCIAL_OK=true` |
 
 See [`neuralgcm_evaluation.md`](neuralgcm_evaluation.md) for QBO/SAM limitations and horizon guidance.
+
+#### Microsoft Aurora 1.5 (Bodnar et al., Nature 2025)
+
+- **Role:** Short-lead earth-system rollout from ERA5 initial conditions; optional encoder latent via `AuroraBackboneAdapter` for YieldSurrogateV2 / CSSVD retraining.
+- **Model sizes:** `AURORA_MODEL_SIZE=small` (laptop dev, `AuroraSmallPretrained`) or `medium` (`AuroraPretrained`).
+- **LoRA:** Per-region adapters at `models/aurora_lora_<region>.safetensors` (PEFT on attention `qkv`/`proj`, r=16, α=32).
+- **License:** Research use by default; commercial contact **AIWeatherClimate@microsoft.com** — see [LICENSES.md](LICENSES.md).
+- **Limitations:** No strict guarantees; biases from training data; SSP horizon years still require CMIP6 or CorrDiff for multi-decadal forcing — Aurora supplies ERA5-initialized daily trajectories mapped into the scenario window.
+- **Validation:** [`reports/scenario/aurora_vs_neuralgcm_vs_corrdiff.md`](../reports/scenario/aurora_vs_neuralgcm_vs_corrdiff.md) from `scripts/validate_aurora_scenario.py` (MLflow experiment `aurora_validation`).
 
 ### Causal nuisances (AIPW / DML)
 
