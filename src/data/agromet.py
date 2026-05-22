@@ -8,6 +8,7 @@ ERA5 and CMIP6 ingest can compute consistent derived variables.
 from __future__ import annotations
 
 import math
+from typing import cast
 
 import ee
 import numpy as np
@@ -40,7 +41,10 @@ def vpd_kpa(tmean_c: float, rh_pct: float) -> float:
 
 def magnus_es_kpa(temp_c: ee.Image) -> ee.Image:
     """Saturation vapor pressure (kPa) from temperature (°C)."""
-    return ee.Image(MAGNUS_A).multiply(temp_c.multiply(MAGNUS_B).divide(temp_c.add(MAGNUS_C)).exp())
+    return cast(
+        ee.Image,
+        ee.Image(MAGNUS_A).multiply(temp_c.multiply(MAGNUS_B).divide(temp_c.add(MAGNUS_C)).exp()),
+    )
 
 
 def fao_et0_daily(

@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from pyproj import Transformer
-from sklearn.ensemble import RandomForestClassifier  # type: ignore[import-untyped]
+from sklearn.ensemble import RandomForestClassifier
 
 EPS = 1e-12
 
@@ -55,7 +55,7 @@ def project_lonlat_to_utm(coords: np.ndarray, *, epsg: int | None = None) -> np.
     if arr.ndim != 2 or arr.shape[1] != 2:
         raise ValueError(f"coords must be [n, 2] lon/lat, got {arr.shape}")
     if len(arr) == 0:
-        return arr.copy()
+        return cast(np.ndarray, arr.copy())
     target_epsg = epsg or utm_epsg_for_lonlat(float(arr[:, 0].mean()), float(arr[:, 1].mean()))
     transformer = Transformer.from_crs("EPSG:4326", f"EPSG:{target_epsg}", always_xy=True)
     x, y = transformer.transform(arr[:, 0], arr[:, 1])

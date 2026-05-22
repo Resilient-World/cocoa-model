@@ -9,6 +9,7 @@ from pathlib import Path
 import mlflow
 import numpy as np
 import optuna
+import structlog
 import torch
 from torch.utils.data import DataLoader
 
@@ -22,6 +23,8 @@ from models.yield_surrogate_v2 import YieldSurrogateV2
 from registry.promotion_gate import crps_1d
 from scripts.train_yield_surrogate import load_lhs_table
 from scripts.train_yield_surrogate_v2 import YieldSurrogateV2Dataset, evaluate
+
+log = structlog.get_logger(__name__)
 
 
 def _ensure_synthetic_data(case2: Path, almanac: Path, era5_dir: Path) -> None:
@@ -129,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--study-name", default="yield_hpo")
     args = parser.parse_args(argv)
     study = run_study(n_trials=args.n_trials, study_name=args.study_name)
-    print(f"Best CRPS: {study.best_value:.4f} params={study.best_params}")
+    log.info("best_trial", best_value=study.best_value, best_params=study.best_params)
     return 0
 
 

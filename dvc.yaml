@@ -72,7 +72,6 @@ stages:
       --synthetic
       --epochs ${train.epochs}
       --checkpoint models/aef_cocoa_head.pt
-    wdir: .dvc/tmp
     deps:
       - scripts/train_aef_head.py
       - src/models/aef_cocoa_head.py
@@ -87,7 +86,6 @@ stages:
       --quick
       --out models/galileo_cocoa_seg.pt
       --metrics-out reports/train/galileo_seg_metrics.json
-    wdir: .dvc/tmp
     deps:
       - src/training/train_galileo_cocoa.py
       - src/models/galileo_seg.py
@@ -104,7 +102,6 @@ stages:
       --max-tiles 100
       --quick
       --out models/agrifm_cocoa_seg.pt
-    wdir: .dvc/tmp
     deps:
       - scripts/train_agrifm_cocoa.py
       - src/training/train_agrifm_cocoa.py
@@ -120,7 +117,6 @@ stages:
       --max-tiles 100
       --quick
       --out models/terramind_cocoa_seg.pt
-    wdir: .dvc/tmp
     deps:
       - scripts/train_terramind_cocoa.py
       - src/training/train_terramind_cocoa.py
@@ -150,7 +146,6 @@ stages:
       --epochs ${train.epochs}
       --era5-dir data/era5
       --metrics-out reports/train/yield_v2_metrics.json
-    wdir: .dvc/tmp
     deps:
       - scripts/train_yield_surrogate_v2.py
       - ${era5.out}
@@ -223,9 +218,6 @@ stages:
     outs:
       - reports/validation/summary.md
       - reports/validation/calibration_latest.json
-    metrics:
-      - reports/validation/summary.md:
-          cache: false
 
   stage_eval_e2e:
     cmd: >

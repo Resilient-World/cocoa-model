@@ -8,10 +8,13 @@ from pathlib import Path
 
 import mlflow
 import optuna
+import structlog
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT / "src"))
+
+log = structlog.get_logger(__name__)
 
 
 def run_study(*, n_trials: int = 30, study_name: str = "agrifm_hpo") -> optuna.Study:
@@ -37,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--study-name", default="agrifm_hpo")
     args = parser.parse_args(argv)
     study = run_study(n_trials=args.n_trials, study_name=args.study_name)
-    print(f"Best: {study.best_value:.4f} params={study.best_params}")
+    log.info("best_trial", best_value=study.best_value, best_params=study.best_params)
     return 0
 
 

@@ -6,7 +6,11 @@ import argparse
 import json
 from pathlib import Path
 
+import structlog
+
 from registry.mlflow_registry import promote_challenger
+
+log = structlog.get_logger(__name__)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -21,7 +25,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.gate_result.is_file():
         gate = json.loads(args.gate_result.read_text(encoding="utf-8"))
     bundle = promote_challenger(args.model, gate_result=gate, env=args.env)
-    print(json.dumps(bundle, indent=2))
+    log.info("promoted_challenger", bundle=json.dumps(bundle, indent=2))
     return 0
 
 
