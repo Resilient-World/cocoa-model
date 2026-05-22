@@ -16,9 +16,15 @@ import xarray as xr
 # Registers the ``ee`` Xarray backend (Xee).
 import xee  # noqa: F401
 
+from data.agromet import FAO_ALBEDO as FAO_ALBEDO
+from data.agromet import FAO_GAMMA as FAO_GAMMA
 from data.agromet import (
     KELVIN_OFFSET,
 )
+from data.agromet import MAGNUS_A as MAGNUS_A
+from data.agromet import MAGNUS_B as MAGNUS_B
+from data.agromet import MAGNUS_C as MAGNUS_C
+from data.agromet import WIND10_TO_WIND2_FACTOR as WIND10_TO_WIND2_FACTOR
 from data.agromet import (
     fao_et0_daily as _fao_et0_daily,
 )

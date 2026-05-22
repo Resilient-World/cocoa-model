@@ -12,6 +12,7 @@ See ``NOTICE.md`` for commercial-use notes.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import ee
 import numpy as np
@@ -69,11 +70,14 @@ class AlphaEarthIngest:
 
     def _collection(self) -> ee.ImageCollection:
         start, end = _year_date_range(self.year)
-        return (
-            ee.ImageCollection(AEF_ANNUAL_COLLECTION)
-            .filterDate(start, end)
-            .filterBounds(self.aoi)
-            .select(list(AEF_BAND_NAMES))
+        return cast(
+            ee.ImageCollection,
+            (
+                ee.ImageCollection(AEF_ANNUAL_COLLECTION)
+                .filterDate(start, end)
+                .filterBounds(self.aoi)
+                .select(list(AEF_BAND_NAMES))
+            ),
         )
 
     def embedding_image(self) -> ee.Image:

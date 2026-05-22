@@ -6,6 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
+import structlog
 import torch
 from torch import nn
 
@@ -14,6 +15,8 @@ if str(_REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 from models.olmoearth_seg import OlmoEarthCocoaSegmentation
+
+log = structlog.get_logger(__name__)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -45,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
         opt.step()
     args.out.parent.mkdir(parents=True, exist_ok=True)
     torch.save(model.state_dict(), args.out)
-    print(f"Wrote {args.out}")
+    log.info("wrote_checkpoint", path=str(args.out))
     return 0
 
 

@@ -8,12 +8,15 @@ from pathlib import Path
 
 import mlflow
 import optuna
+import structlog
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 from validation.kalischek_benchmark import run_kalischek_benchmark
+
+log = structlog.get_logger(__name__)
 
 
 def run_study(
@@ -59,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
         study_name=args.study_name,
         checkpoint=args.checkpoint,
     )
-    print(f"Best objective: {study.best_value:.4f} params={study.best_params}")
+    log.info("best_trial", best_value=study.best_value, best_params=study.best_params)
     return 0
 
 

@@ -8,9 +8,9 @@ under-covering Monte Carlo dropout intervals (~40% empirical at 80% nominal).
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Mapping, NamedTuple
+from typing import Any, NamedTuple
 
 import joblib  # type: ignore[import-untyped]
 import numpy as np

@@ -15,6 +15,7 @@ This module provides:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 
 import ee
 import numpy as np
@@ -68,8 +69,11 @@ class GEDIIngest:
             def _join(img: ee.Image) -> ee.Image:
                 millis = img.date().millis()
                 agbd_img = l4a.filter(ee.Filter.eq("system:time_start", millis)).first()
-                return ee.Image.cat([img, ee.Image(agbd_img)]).copyProperties(
-                    img, ["system:time_start"]
+                return cast(
+                    ee.Image,
+                    ee.Image.cat([img, ee.Image(agbd_img)]).copyProperties(
+                        img, ["system:time_start"]
+                    ),
                 )
 
             ic = l2a.map(_join)

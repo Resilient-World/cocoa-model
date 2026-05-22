@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import cast
 
 import ee
 import numpy as np
@@ -61,7 +62,7 @@ RAW_VARS: tuple[str, ...] = ("tas", "tasmax", "tasmin", "pr", "hurs", "rsds", "s
 
 
 def _to_celsius(img: ee.Image, band: str, name: str) -> ee.Image:
-    return img.select(band).subtract(KELVIN_OFFSET).rename(name)
+    return cast(ee.Image, img.select(band).subtract(KELVIN_OFFSET).rename(name))
 
 
 def _pr_to_mm_day(pr: ee.Image) -> ee.Image:
@@ -119,28 +120,31 @@ def _build_daily_ic(
         sm_root = ee.Image.constant(0.28).rename("sm_root")
 
         raw = img.select(list(variables))
-        return (
-            ee.Image.cat(
-                [
-                    raw,
-                    tmax,
-                    tmin,
-                    tmean,
-                    rh,
-                    vpd,
-                    precip,
-                    et0,
-                    cwd,
-                    sm_root,
-                    wind10m,
-                    srad,
-                ]
-            )
-            .copyProperties(img, ["system:time_start"])
-            .clip(aoi)
+        return cast(
+            ee.Image,
+            (
+                ee.Image.cat(
+                    [
+                        raw,
+                        tmax,
+                        tmin,
+                        tmean,
+                        rh,
+                        vpd,
+                        precip,
+                        et0,
+                        cwd,
+                        sm_root,
+                        wind10m,
+                        srad,
+                    ]
+                )
+                .copyProperties(img, ["system:time_start"])
+                .clip(aoi)
+            ),
         )
 
-    return ic.map(_enrich)
+    return cast(ee.ImageCollection, ic.map(_enrich))
 
 
 @dataclass

@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- BSSAL active learning + FixMatch SSL added for cocoa exposure label expansion in sparse-label regions (Xu et al. 2024 ISPRS-J; Kaijage et al. 2024 Sensors; Huang et al. 2025 arXiv:2511.18058).
 - Aurora 1.5 (Bodnar et al., Nature 2025) added as opt-in scenario backend; LoRA per-region adapters supported via `models/aurora_lora_<region>.safetensors`.
 - `downscaling_method=aurora` on `POST /simulate-scenario` with `source_attributions` (`aurora_model_version`, `aurora_lora_id`); optional extra `[aurora]` (`microsoft-aurora`, `peft`).
 - `scripts/validate_aurora_scenario.py` and `reports/scenario/aurora_vs_neuralgcm_vs_corrdiff.md` benchmark template.
