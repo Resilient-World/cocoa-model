@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import structlog
-
 from typing import TYPE_CHECKING, Any
 
+import structlog
 from torch import Tensor
 
 from api.online_conformal_store import OnlineConformalStore, stratum_key
@@ -145,8 +144,9 @@ def _apply_drift_monitoring_impl(
     status_dict = drift_store.get_drift_status(key, coverage_running_avg=coverage_avg)
     drift_status = DriftStatus.model_validate(status_dict)
 
-    from api import metrics as prom_metrics
     import math
+
+    from api import metrics as prom_metrics
 
     region = _region_from_request(request, settings)
     wealth = math.exp(min(wctm.log_martingale, 50.0))

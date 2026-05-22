@@ -13,10 +13,8 @@ import numpy as np
 import pandas as pd
 
 from analysis._staggered_did_common import (
-    Z_975,
     cluster_se_from_influence,
     control_mask_at_t,
-    dr_att_influence,
     fit_dr_nuisances,
     multiplier_bootstrap_ci,
     normal_ci,
@@ -106,9 +104,14 @@ class CallawaySantAnna:
 
         if float(t) < float(g):
             res = ATTGTResult(
-                g=g, t=t, att=float("nan"), se=float("nan"),
-                ci_low=float("nan"), ci_high=float("nan"),
-                n_treated=0, n_control=0,
+                g=g,
+                t=t,
+                att=float("nan"),
+                se=float("nan"),
+                ci_low=float("nan"),
+                ci_high=float("nan"),
+                n_treated=0,
+                n_control=0,
             )
             self._att_gt_cache[key] = res
             return res
@@ -120,9 +123,14 @@ class CallawaySantAnna:
         n_c = int(control_m.sum())
         if n_t == 0 or n_c == 0:
             res = ATTGTResult(
-                g=g, t=t, att=float("nan"), se=float("nan"),
-                ci_low=float("nan"), ci_high=float("nan"),
-                n_treated=n_t, n_control=n_c,
+                g=g,
+                t=t,
+                att=float("nan"),
+                se=float("nan"),
+                ci_low=float("nan"),
+                ci_high=float("nan"),
+                n_treated=n_t,
+                n_control=n_c,
             )
             self._att_gt_cache[key] = res
             return res
@@ -142,21 +150,26 @@ class CallawaySantAnna:
         att_or = float(np.mean(Y[D == 1] - mu0[D == 1]))
         w_t = D / e
         w_c = (1 - D) / (1 - e)
-        att_ipw = float(
-            (w_t * Y).sum() / w_t.sum() - (w_c * Y).sum() / w_c.sum()
-        )
+        att_ipw = float((w_t * Y).sum() / w_t.sum() - (w_c * Y).sum() / w_c.sum())
         att = 0.5 * (att_or + att_ipw)
         psi_unit: dict[str | int, float] = {}
         for u, yi, m0i, di in zip(units, Y, mu0, D):
             if di == 1:
                 psi_unit[u] = float(yi - m0i - att)
-        se_cl = cluster_se_from_influence(
-            np.array(list(psi_unit.values())),
-            np.array(list(psi_unit.keys())),
-        ) if psi_unit else float("nan")
+        se_cl = (
+            cluster_se_from_influence(
+                np.array(list(psi_unit.values())),
+                np.array(list(psi_unit.keys())),
+            )
+            if psi_unit
+            else float("nan")
+        )
 
         se_boot, lo, hi = multiplier_bootstrap_ci(
-            att, psi_unit, n_boot=self.n_boot, alpha=self.alpha,
+            att,
+            psi_unit,
+            n_boot=self.n_boot,
+            alpha=self.alpha,
             random_state=self.random_state,
         )
         se = se_boot if not np.isnan(se_boot) else se_cl
@@ -164,9 +177,15 @@ class CallawaySantAnna:
             lo, hi = normal_ci(att, se, self.alpha)
 
         res = ATTGTResult(
-            g=g, t=t, att=float(att), se=float(se),
-            ci_low=float(lo), ci_high=float(hi),
-            n_treated=n_t, n_control=n_c, influence=psi_unit,
+            g=g,
+            t=t,
+            att=float(att),
+            se=float(se),
+            ci_low=float(lo),
+            ci_high=float(hi),
+            n_treated=n_t,
+            n_control=n_c,
+            influence=psi_unit,
         )
         self._att_gt_cache[key] = res
         return res
@@ -182,10 +201,7 @@ class CallawaySantAnna:
 
     def simple_att(self) -> ATTResult:
         """Weighted average of post-treatment ATT(g,t) (equal weight per cell)."""
-        cells = [
-            r for r in self.all_att_gt()
-            if not np.isnan(r.att) and r.n_treated > 0
-        ]
+        cells = [r for r in self.all_att_gt() if not np.isnan(r.att) and r.n_treated > 0]
         if not cells:
             return ATTResult(float("nan"), float("nan"), float("nan"), float("nan"), n_cells=0)
 
@@ -201,7 +217,10 @@ class CallawaySantAnna:
                 unit_psi[u] = unit_psi.get(u, 0.0) + w * p
 
         se, lo, hi = multiplier_bootstrap_ci(
-            att, unit_psi, n_boot=self.n_boot, alpha=self.alpha,
+            att,
+            unit_psi,
+            n_boot=self.n_boot,
+            alpha=self.alpha,
             random_state=self.random_state + 1,
         )
         return ATTResult(att=att, se=se, ci_low=lo, ci_high=hi, n_cells=len(cells))
@@ -209,9 +228,7 @@ class CallawaySantAnna:
     def group_att(self, g: int) -> dict[int, float]:
         """Cohort-specific ATT path over calendar times."""
         return {
-            int(t): self.att_gt(g, int(t)).att
-            for t in self.panel.times
-            if float(t) >= float(g)
+            int(t): self.att_gt(g, int(t)).att for t in self.panel.times if float(t) >= float(g)
         }
 
     def calendar_att(self, t: int) -> dict[int, float]:
@@ -262,20 +279,29 @@ class CallawaySantAnna:
         att_arr = np.array(att_vec)
         psi_matrix = np.array(psi_mat).T
         se_arr, lo_arr, hi_arr = simultaneous_bootstrap_bands(
-            att_arr, psi_matrix, n_boot=self.n_boot, alpha=self.alpha,
+            att_arr,
+            psi_matrix,
+            n_boot=self.n_boot,
+            alpha=self.alpha,
             random_state=self.random_state + 2,
         )
         for i, e in enumerate(event_times):
-            rows.append({
-                "event_time": e,
-                "att": att_arr[i],
-                "se": se_arr[i],
-                "ci_low": lo_arr[i],
-                "ci_high": hi_arr[i],
-            })
+            rows.append(
+                {
+                    "event_time": e,
+                    "att": att_arr[i],
+                    "se": se_arr[i],
+                    "ci_low": lo_arr[i],
+                    "ci_high": hi_arr[i],
+                }
+            )
         df = pd.DataFrame(rows)
         pre = df[df["event_time"] < 0]
-        pretrend_ok = bool((pre["ci_low"].abs().max() < 1e6 and (pre["att"].abs() < 0.5).all())) if len(pre) else None
+        pretrend_ok = (
+            bool(pre["ci_low"].abs().max() < 1e6 and (pre["att"].abs() < 0.5).all())
+            if len(pre)
+            else None
+        )
         return CSEventStudyResult(leads_lags=df, pretrend_ok=pretrend_ok)
 
 

@@ -5,15 +5,16 @@ from __future__ import annotations
 import shutil
 import subprocess
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
 
 from counterfactual.attrici_runner import (
-    ATTRICIRunner,
-    SUPPORTED_VARIABLES,
     _ERA5_TO_ATTRICI,
+    SUPPORTED_VARIABLES,
+    ATTRICIRunner,
     load_counterfactual,
 )
 
@@ -51,9 +52,9 @@ def test_run_invokes_attrici_cli_with_expected_flags(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     gmt = tmp_path / "gmt.nc"
-    xr.Dataset({"tas": ("time", [0.1, 0.2])}, coords={"time": pd.date_range("2020", periods=2)}).to_netcdf(
-        gmt
-    )
+    xr.Dataset(
+        {"tas": ("time", [0.1, 0.2])}, coords={"time": pd.date_range("2020", periods=2)}
+    ).to_netcdf(gmt)
 
     factual_zarr = tmp_path / "factual.zarr"
     output_zarr = tmp_path / "counterfactual.zarr"

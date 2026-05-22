@@ -9,8 +9,6 @@ RCASE2 is distributed via WUR eDepot — see :exc:`CASE2NotInstalled` for instal
 
 from __future__ import annotations
 
-import structlog
-
 import os
 import warnings
 from dataclasses import dataclass, field
@@ -19,6 +17,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+import structlog
 
 log = structlog.get_logger(__name__)
 
@@ -105,10 +104,10 @@ class CASE2Runner:
             os.environ["R_HOME"] = r_home
 
         try:
-            import rpy2.robjects as ro  # noqa: PLC0415
-            from rpy2.robjects import pandas2ri  # noqa: PLC0415
-            from rpy2.robjects.conversion import localconverter  # noqa: PLC0415
-            from rpy2.robjects.packages import importr  # noqa: PLC0415
+            import rpy2.robjects as ro
+            from rpy2.robjects import pandas2ri
+            from rpy2.robjects.conversion import localconverter
+            from rpy2.robjects.packages import importr
         except ImportError as exc:
             raise CASE2NotInstalled(
                 f"Python package rpy2 is not installed ({exc}).\n{INSTALL_MESSAGE}"
@@ -182,9 +181,7 @@ class CASE2Runner:
                 f"{n_years} years (~{min_days} days, Asante et al. 2022)."
             )
 
-        with self._localconverter(
-            self._ro.default_converter + self._pandas2ri.converter
-        ):
+        with self._localconverter(self._ro.default_converter + self._pandas2ri.converter):
             r_weather = self._ro.conversion.py2rpy(weather_df)
             r_result = self._simulate_fn(
                 weather=r_weather,
@@ -252,7 +249,9 @@ class CASE2Runner:
         ``rh_mean`` (+ ``tmean`` for vapor pressure derivation).
         """
         out = pd.DataFrame(index=df.index)
-        out["date"] = pd.to_datetime(df.index if isinstance(df.index, pd.DatetimeIndex) else df["time"])
+        out["date"] = pd.to_datetime(
+            df.index if isinstance(df.index, pd.DatetimeIndex) else df["time"]
+        )
         out["tmin_c"] = df["tmin"].astype(float)
         out["tmax_c"] = df["tmax"].astype(float)
         out["precip_mm"] = df["precip"].astype(float)

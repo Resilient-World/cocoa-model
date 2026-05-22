@@ -10,12 +10,12 @@ import torch.nn.functional as F
 
 from models.checkpoint_migration import is_v1_static_checkpoint, migrate_v1_static_to_v2
 from models.yield_surrogate import (
+    N_STATIC_SITE,
+    STATIC_FEATURE_NAMES,
     CocoaPINNLoss,
     DeepEnsemble,
     MCDropout,
-    N_STATIC_SITE,
     PhysicsInformedYieldLoss,
-    STATIC_FEATURE_NAMES,
     YieldSurrogateModel,
     cohort_phase_from_age,
     pack_tree_age_static,

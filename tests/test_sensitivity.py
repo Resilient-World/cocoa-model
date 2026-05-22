@@ -31,9 +31,7 @@ def _matched_panel(seed: int = 0) -> pd.DataFrame:
         }
     )
     df["yield_post_intervention"] = (
-        df["yield_pre_intervention"]
-        + 0.2 * df["received_intervention"]
-        + rng.normal(0, 0.1, n)
+        df["yield_pre_intervention"] + 0.2 * df["received_intervention"] + rng.normal(0, 0.1, n)
     )
     return propensity_score_match(df)
 
@@ -48,7 +46,9 @@ def test_rosenbaum_bounds_monotone_in_gamma() -> None:
 def test_rosenbaum_bounds_outcome_col() -> None:
     matched = _matched_panel()
     matched = matched.copy()
-    matched["pair_yield_change"] = matched["yield_post_intervention"] - matched["yield_pre_intervention"]
+    matched["pair_yield_change"] = (
+        matched["yield_post_intervention"] - matched["yield_pre_intervention"]
+    )
     bounds = rosenbaum_bounds(matched, "pair_yield_change", gamma_grid=[1.0, 2.0])
     assert len(bounds) == 2
     assert (bounds["p_value_upper"] >= 0).all()

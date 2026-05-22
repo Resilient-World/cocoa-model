@@ -23,7 +23,11 @@ for _p in (_REPO_ROOT, _REPO_ROOT / "src"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from data.teleconnection_ingest import get_indices_for_year, load_indices_table, region_key_from_latlon
+from data.teleconnection_ingest import (
+    get_indices_for_year,
+    load_indices_table,
+    region_key_from_latlon,
+)
 from models.yield_surrogate import CocoaPINNLoss
 from models.yield_surrogate_v2 import YieldSurrogateV2
 from models.yield_surrogate_v2_teleconnection import (
@@ -257,14 +261,22 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=_REPO_ROOT / "data" / "external" / "teleconnection_indices.parquet",
     )
-    p.add_argument("--case2-parquet", type=Path, default=_REPO_ROOT / "data" / "simulations" / "case2_lhs.parquet")
+    p.add_argument(
+        "--case2-parquet",
+        type=Path,
+        default=_REPO_ROOT / "data" / "simulations" / "case2_lhs.parquet",
+    )
     p.add_argument(
         "--almanac-parquet",
         type=Path,
         default=_REPO_ROOT / "data" / "simulations" / "almanac_lhs.parquet",
     )
     p.add_argument("--era5-dir", type=Path, default=_REPO_ROOT / "data" / "era5")
-    p.add_argument("--output", type=Path, default=_REPO_ROOT / "models" / "yield_surrogate_v2_teleconnection.pt")
+    p.add_argument(
+        "--output",
+        type=Path,
+        default=_REPO_ROOT / "models" / "yield_surrogate_v2_teleconnection.pt",
+    )
     p.add_argument("--epochs", type=int, default=30)
     p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--lr", type=float, default=1e-4)

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from models.agrifm_backbone import AgriFMBackbone, MIN_FRAMES, MAX_FRAMES
+from models.agrifm_backbone import MAX_FRAMES, MIN_FRAMES, AgriFMBackbone
 from models.agrifm_cocoa_head import AgriFMCocoaSegHead
 from models.agrifm_seg import AgriFMCocoaSegmentation
 
@@ -76,7 +76,9 @@ def test_checkpoint_loading_mocked(tmp_path: Path) -> None:
     ckpt_path = tmp_path / "mock_agrifm.pt"
     torch.save(state, ckpt_path)
     loaded = AgriFMBackbone(checkpoint_path=ckpt_path, modality="S2", freeze=False)
-    assert loaded.encoder.patch_embed.proj.weight.shape == model.encoder.patch_embed.proj.weight.shape
+    assert (
+        loaded.encoder.patch_embed.proj.weight.shape == model.encoder.patch_embed.proj.weight.shape
+    )
 
 
 def test_cocoa_head_output_shape() -> None:

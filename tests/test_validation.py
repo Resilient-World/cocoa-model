@@ -10,10 +10,10 @@ import pytest
 from validation.cocoa_barometer_check import run_barometer_check
 from validation.giews_drought_validation import run_giews_validation
 from validation.icco_yield_backtest import regression_metrics, run_icco_backtest
-from validation.kalischek_benchmark import segmentation_metrics
 from validation.kalischek_benchmark import (
     HeuristicKalischekReference,
     run_kalischek_benchmark,
+    segmentation_metrics,
     spatial_holdout_mask,
 )
 from validation.run_validate import run_all

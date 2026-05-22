@@ -7,8 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from models.aci import AdaptiveConformalInference, MultiStepACI, default_multistep_aci
-from models.cqr import ConformalCalibrator
+from models.aci import AdaptiveConformalInference, default_multistep_aci
 from tests.conformal_online_helpers import (
     distribution_shift_scores,
     run_online_coverage,
@@ -76,7 +75,5 @@ def test_wu_table2_coverage_band(fixture_name: str) -> None:
     data = np.load(path)
     scores = data["scores"]
     aci = AdaptiveConformalInference(alpha=ALPHA, eta=0.03, q_init=0.0)
-    cov, _, _, _ = run_online_coverage(
-        aci, scores, alpha=ALPHA, burn_in=200, warm_start=200
-    )
+    cov, _, _, _ = run_online_coverage(aci, scores, alpha=ALPHA, burn_in=200, warm_start=200)
     assert NOMINAL - WU_TOL <= cov <= NOMINAL + WU_TOL

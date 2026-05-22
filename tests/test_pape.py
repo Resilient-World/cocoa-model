@@ -9,7 +9,6 @@ from models.pape import (
     STAGE_NAMES,
     PhenologyAwarePositionalEncoding,
     crop_stage_one_hot,
-    load_phenology_config,
     region_to_id,
 )
 

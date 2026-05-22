@@ -4,17 +4,16 @@ TerraMind cocoa segmentation wrappers (standard + TiM).
 
 from __future__ import annotations
 
-import structlog
-
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import structlog
 import torch
 import torch.nn as nn
 
 from data.utils import cocoa_batch_to_terramind_input
-from models.backbones.terramind_backbone import TerraMindBackbone, load_terramind_backbone
+from models.backbones.terramind_backbone import load_terramind_backbone
 from models.backbones.terramind_cocoa_head import TerraMindCocoaUPerNetHead
 from models.backbones.terramind_tim import TerraMindTiM
 
@@ -41,7 +40,9 @@ class TerraMindCocoaSegmentation(nn.Module):
             variant=variant, freeze=freeze_backbone, pretrained=pretrained_backbone
         )
         embed_dim = getattr(self.backbone.encoder, "embed_dim", 256)
-        self.head = TerraMindCocoaUPerNetHead(embed_dim=embed_dim, decoder_channels=decoder_channels)
+        self.head = TerraMindCocoaUPerNetHead(
+            embed_dim=embed_dim, decoder_channels=decoder_channels
+        )
 
     def set_backbone_freeze(self, freeze: bool) -> None:
         self.backbone.set_freeze(freeze)

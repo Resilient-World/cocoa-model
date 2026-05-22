@@ -48,9 +48,7 @@ def write_stub_reports(report_dir: Path) -> tuple[Path, Path]:
     ]
     for region in REGIONS_SIX:
         v3 = v3_f1[region]
-        lines.append(
-            f"| {region} | ensemble_v3 | 0.650 | {v3:.3f} | 120.0 | 0.0 | — |"
-        )
+        lines.append(f"| {region} | ensemble_v3 | 0.650 | {v3:.3f} | 120.0 | 0.0 | — |")
         for size in SIZES:
             f1 = v3 + (0.03 if size == "base" else rng.uniform(-0.01, 0.02))
             lines.append(
@@ -92,6 +90,7 @@ def run_olmoearth_vs_v3(
     agrifm_ckpt: Path,
     terramind_ckpt: Path,
 ) -> Path:
+    bb = _load_benchmark_backbones()
     rows: list[dict[str, object]] = []
     for region in bb.BENCHMARK_REGIONS_SIX:
         lats, lons, labels = bb.sample_holdout_tiles(n_tiles, seed=seed, region=region)
@@ -179,6 +178,7 @@ def run_comparison(
     aef_ckpt: Path,
     agrifm_ckpt: Path,
 ) -> Path:
+    bb = _load_benchmark_backbones()
     lats, lons, labels = bb.sample_holdout_tiles(n_tiles, seed=seed, region=None)
     predictors: list[bb.TilePredictor] = [
         bb.ClayPredictor(),
@@ -186,7 +186,9 @@ def run_comparison(
         bb.AgriFMPredictor(agrifm_ckpt),
         bb.GalileoSegPredictor(galileo_ckpt),
     ]
-    results = [bb.evaluate_predictor(p, lats, lons, labels, max_latency_tiles=30) for p in predictors]
+    results = [
+        bb.evaluate_predictor(p, lats, lons, labels, max_latency_tiles=30) for p in predictors
+    ]
     out = report_dir / f"comparison_{date.today().isoformat()}.md"
     lines = [
         f"# Backbone comparison ({date.today().isoformat()})",

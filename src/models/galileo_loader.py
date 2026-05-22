@@ -1,4 +1,5 @@
 """Backward-compatible shim; implementation in models.io.galileo_loader."""
+
 import importlib as _importlib
 
 _mod = _importlib.import_module("models.io.galileo_loader")

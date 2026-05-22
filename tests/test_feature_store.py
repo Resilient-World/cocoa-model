@@ -44,7 +44,10 @@ def test_feature_store_to_pinn_tensors_synthetic_join(tmp_path: Path) -> None:
         {
             "canopy_height_p95": (("latitude", "longitude"), np.array([[12.0]], dtype=np.float32)),
         },
-        coords={"latitude": np.array([6.0], dtype=np.float32), "longitude": np.array([-1.2], dtype=np.float32)},
+        coords={
+            "latitude": np.array([6.0], dtype=np.float32),
+            "longitude": np.array([-1.2], dtype=np.float32),
+        },
     ).to_zarr(gedi, mode="w", consolidated=True)
 
     soil = tmp_path / "soil.zarr"
@@ -52,7 +55,10 @@ def test_feature_store_to_pinn_tensors_synthetic_join(tmp_path: Path) -> None:
         {
             "awc_mm": (("latitude", "longitude"), np.array([[160.0]], dtype=np.float32)),
         },
-        coords={"latitude": np.array([6.0], dtype=np.float32), "longitude": np.array([-1.2], dtype=np.float32)},
+        coords={
+            "latitude": np.array([6.0], dtype=np.float32),
+            "longitude": np.array([-1.2], dtype=np.float32),
+        },
     ).to_zarr(soil, mode="w", consolidated=True)
 
     store = FeatureStore(
@@ -68,4 +74,3 @@ def test_feature_store_to_pinn_tensors_synthetic_join(tmp_path: Path) -> None:
     assert static.shape == (2, 2)
     assert float(static[0, 0].item()) == 160.0
     assert float(static[0, 1].item()) == 12.0
-

@@ -65,10 +65,12 @@ CI runs `python scripts/check_no_prints.py` to forbid bare `print()` under `src/
 
 ```bash
 pip install -e ".[dev]"
-make typecheck   # mypy src/ — strict with third-party and torch-module overrides
+pre-commit install
+make typecheck-strict   # mypy --strict on strict_enabled modules (ratchet gate)
+make typecheck          # mypy src/ with gradual per-module overrides
 ```
 
-Configuration: `[tool.mypy]` in `pyproject.toml`. Service layers (`api`, `analysis`, `monitoring`, `common`) are checked strictly; heavy torch subpackages use `ignore_errors` overrides until fully annotated.
+Configuration: `[tool.mypy]` and `[tool.cocoa.typing]` in `pyproject.toml`. Sprint 1 strict-enabled modules: `api.config`, `api.schemas`, `analysis._report`, `models.conformal.cqr`. Remaining packages use ranked `gradual_modules` with `disable_error_code` until promoted. See [`docs/TYPING_PLAYBOOK.md`](TYPING_PLAYBOOK.md).
 
 ## Docstrings
 

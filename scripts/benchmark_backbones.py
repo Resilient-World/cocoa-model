@@ -24,7 +24,7 @@ import time
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol
 
 import numpy as np
 import torch
@@ -35,8 +35,8 @@ if str(_REPO_ROOT / "src") not in sys.path:
 
 from data.cocoa_exposure import REGIONS as COCOA_REGIONS
 from validation.kalischek_benchmark import (
-    HeuristicKalischekReference,
     REGIONS,
+    HeuristicKalischekReference,
     spatial_holdout_mask,
 )
 
@@ -120,11 +120,7 @@ def tile_metrics(y_true: np.ndarray, y_prob: np.ndarray, *, threshold: float) ->
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
     iou = tp / (tp + fp + fn) if (tp + fp + fn) > 0 else 0.0
-    f1 = (
-        2 * precision * recall / (precision + recall)
-        if (precision + recall) > 0
-        else 0.0
-    )
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
     b_iou = 0.0
     if yt.any() or yp.any():
         bt, bp = _mask_boundary(yt), _mask_boundary(yp)
@@ -187,7 +183,9 @@ class GalileoSegPredictor:
 
         self._has_checkpoint = checkpoint.is_file()
         if self._has_checkpoint:
-            self.model = load_galileo_seg_checkpoint(checkpoint, device="cpu", model_size=model_size)
+            self.model = load_galileo_seg_checkpoint(
+                checkpoint, device="cpu", model_size=model_size
+            )
         else:
             logger.warning("Galileo checkpoint missing; benchmarking uninitialized weights")
             self.model = GalileoCocoaSegmentation(model_size=model_size, freeze_backbone=True)
@@ -328,7 +326,10 @@ class TerraMindTiMPredictor:
     name = "TerraMind 1.0-base (TiM)"
 
     def __init__(self, checkpoint: Path, *, out_size: int = TILE_SIZE) -> None:
-        from models.terramind_seg import TerraMindTiMCocoaSegmentation, load_terramind_seg_checkpoint
+        from models.terramind_seg import (
+            TerraMindTiMCocoaSegmentation,
+            load_terramind_seg_checkpoint,
+        )
 
         self._has_checkpoint = checkpoint.is_file()
         if self._has_checkpoint:
@@ -435,7 +436,12 @@ class EnsembleV3Predictor:
 
     @property
     def params_millions(self) -> float:
-        return self._aef.params_millions + self._gal.params_millions + self._agrifm.params_millions + self._tm.params_millions
+        return (
+            self._aef.params_millions
+            + self._gal.params_millions
+            + self._agrifm.params_millions
+            + self._tm.params_millions
+        )
 
     @torch.no_grad()
     def predict_tile(self, batch_dict: dict[str, torch.Tensor]) -> np.ndarray:
@@ -535,9 +541,9 @@ def sample_holdout_tiles(
         lat_min, lat_max, lon_min, lon_max = REGIONS[keys[0]]
         la = float(rng.uniform(lat_min, lat_max))
         lo = float(rng.uniform(lon_min, lon_max))
-        if not spatial_holdout_mask(np.array([la]), np.array([lo]), fraction=holdout_fraction, seed=seed)[
-            0
-        ]:
+        if not spatial_holdout_mask(
+            np.array([la]), np.array([lo]), fraction=holdout_fraction, seed=seed
+        )[0]:
             continue
         p = ref.sample_reference(np.array([la]), np.array([lo]))[0]
         labels.append((rng.random((TILE_SIZE, TILE_SIZE)) < p).astype(np.uint8))
@@ -581,7 +587,7 @@ def evaluate_predictor(
 
     pm = params_millions
     if pm is None and hasattr(predictor, "params_millions"):
-        pm = float(getattr(predictor, "params_millions"))
+        pm = float(predictor.params_millions)
 
     return BackboneResult(
         name=predictor.name,
@@ -624,8 +630,7 @@ def write_benchmark_report(
         f"**Production backbone: {winner.name}** "
         "(fine-tuned Galileo-Base; FDP 2025a as weak prior).",
         "",
-        f"Held-out metric leader (untrained run): **{by_miou.name}** "
-        f"(mIoU={by_miou.miou:.3f}).",
+        f"Held-out metric leader (untrained run): **{by_miou.name}** (mIoU={by_miou.miou:.3f}).",
         "",
         "| Backbone | mIoU | F1 | Boundary IoU | Latency (ms/tile) | Params (M) |",
         "|----------|------|-----|--------------|-------------------|------------|",
@@ -901,11 +906,7 @@ class EnsembleV2Predictor:
 
     @property
     def params_millions(self) -> float:
-        return (
-            self._aef.params_millions
-            + self._gal.params_millions
-            + self._agrifm.params_millions
-        )
+        return self._aef.params_millions + self._gal.params_millions + self._agrifm.params_millions
 
     @torch.no_grad()
     def predict_tile(self, batch_dict: dict[str, torch.Tensor]) -> np.ndarray:

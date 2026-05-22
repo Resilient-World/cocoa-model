@@ -1,4 +1,5 @@
 """Backward-compatible shim; implementation in models.surrogate.yield_surrogate_v2_teleconnection."""
+
 import importlib as _importlib
 
 _mod = _importlib.import_module("models.surrogate.yield_surrogate_v2_teleconnection")

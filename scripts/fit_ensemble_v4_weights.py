@@ -16,15 +16,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT / "src"))
 
-from data.ensemble_weights import (  # noqa: E402
+from data.ensemble_weights import (
     DEFAULT_ENSEMBLE_V4_WEIGHTS_PATH,
     V4_BACKEND_KEYS,
     save_ensemble_weights_yaml,
-    validate_weights_sum,
 )
-from scripts import benchmark_backbones as bb  # noqa: E402
-from scripts.fit_ensemble_v3_weights import (  # noqa: E402
-    _blend_maps,
+from scripts import benchmark_backbones as bb
+from scripts.fit_ensemble_v3_weights import (
     _f1_for_blend,
     _predictor_probs,
     _tile_mean_labels,
@@ -41,7 +39,9 @@ def _blend_maps_v4(prob_maps: dict[str, np.ndarray], weights: dict[str, float]) 
     for key, w in weights.items():
         blended += w * prob_maps[key]
     return np.clip(blended, 0.0, 1.0)
-from validation.kalischek_benchmark import HeuristicKalischekReference  # noqa: E402
+
+
+from validation.kalischek_benchmark import HeuristicKalischekReference
 
 logger = logging.getLogger(__name__)
 PROMOTION_REGIONS = bb.BENCHMARK_REGIONS_SIX
@@ -78,10 +78,16 @@ def main(argv: list[str] | None = None) -> int:
     }
     v3 = None
     regions_pass = 0
-    doc: dict[str, object] = {"schema_version": 1, "fitted_date": date.today().isoformat(), "regions": {}}
+    doc: dict[str, object] = {
+        "schema_version": 1,
+        "fitted_date": date.today().isoformat(),
+        "regions": {},
+    }
 
     for region_key in PROMOTION_REGIONS:
-        lats, lons, labels = bb.sample_holdout_tiles(args.n_tiles, seed=args.seed, region=region_key)
+        lats, lons, labels = bb.sample_holdout_tiles(
+            args.n_tiles, seed=args.seed, region=region_key
+        )
         probs = _predictor_probs(predictors, lats, lons, seed=args.seed)
         matrix = _tile_mean_probs_v4(probs)
         targets = _tile_mean_labels(labels)
@@ -99,11 +105,19 @@ def main(argv: list[str] | None = None) -> int:
                 terramind_checkpoint=bb.DEFAULT_TERRAMIND_CKPT,
             )
         v3_res = bb.evaluate_predictor(v3, lats, lons, labels, max_latency_tiles=10)
-        oe_only = bb.evaluate_predictor(predictors["olmoearth"], lats, lons, labels, max_latency_tiles=10)
+        oe_only = bb.evaluate_predictor(
+            predictors["olmoearth"], lats, lons, labels, max_latency_tiles=10
+        )
         if oe_only.f1 - v3_res.f1 > PROMOTION_MARGIN:
             regions_pass += 1
-        doc["regions"][region_key] = {"weights": weights, "f1": round(f1_v4, 4), "f1_v3": round(v3_res.f1, 4)}
-        logger.info("%s: v4 F1=%.3f v3=%.3f olmoearth=%.3f", region_key, f1_v4, v3_res.f1, oe_only.f1)
+        doc["regions"][region_key] = {
+            "weights": weights,
+            "f1": round(f1_v4, 4),
+            "f1_v3": round(v3_res.f1, 4),
+        }
+        logger.info(
+            "%s: v4 F1=%.3f v3=%.3f olmoearth=%.3f", region_key, f1_v4, v3_res.f1, oe_only.f1
+        )
 
     doc["promotion"] = {"regions_pass": regions_pass, "required": PROMOTION_MIN_REGIONS}
     save_ensemble_weights_yaml(doc, args.out)

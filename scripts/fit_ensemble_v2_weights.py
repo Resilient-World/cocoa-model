@@ -22,14 +22,14 @@ if str(_REPO_ROOT) not in sys.path:
 if str(_REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT / "src"))
 
-from data.cocoa_exposure import REGIONS  # noqa: E402
-from data.ensemble_weights import (  # noqa: E402
+from data.cocoa_exposure import REGIONS
+from data.ensemble_weights import (
     BACKEND_KEYS,
     DEFAULT_ENSEMBLE_WEIGHTS_PATH,
     save_ensemble_weights_yaml,
     validate_weights_sum,
 )
-from scripts.benchmark_backbones import (  # noqa: E402
+from scripts.benchmark_backbones import (
     DEFAULT_AEF_CKPT,
     DEFAULT_AGRIFM_CKPT,
     DEFAULT_GALILEO_CKPT,

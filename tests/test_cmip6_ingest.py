@@ -25,7 +25,10 @@ def _toy_hist() -> xr.Dataset:
             "tmax": (("time", "latitude", "longitude"), 31 + rng.normal(0, 0.3, shape)),
             "tmin": (("time", "latitude", "longitude"), 22 + rng.normal(0, 0.3, shape)),
             "rh_mean": (("time", "latitude", "longitude"), 80 + rng.normal(0, 2.0, shape)),
-            "precip": (("time", "latitude", "longitude"), np.maximum(0, rng.gamma(0.6, 3.0, shape))),
+            "precip": (
+                ("time", "latitude", "longitude"),
+                np.maximum(0, rng.gamma(0.6, 3.0, shape)),
+            ),
             "srad": (("time", "latitude", "longitude"), 18 + rng.normal(0, 1.0, shape)),
             "wind10m": (("time", "latitude", "longitude"), 2 + rng.normal(0, 0.2, shape)),
             "sm_root": (("time", "latitude", "longitude"), 0.28 + rng.normal(0, 0.01, shape)),
@@ -116,4 +119,3 @@ def test_cmip6_ingest_tiny_aoi_real_gee() -> None:
     ds = ingest.build_ensemble()
     assert {"tmean", "precip", "vpd_mean", "et0", "cwd"} <= set(ds.data_vars)
     assert ds.sizes["time"] == 5
-

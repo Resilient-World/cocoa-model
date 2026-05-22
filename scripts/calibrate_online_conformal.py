@@ -137,7 +137,9 @@ def calibrate_stratum(
         else:
             climate = _synthetic_climate_tensor(rng)
             # CMIP6 ensemble spread proxy
-            climate = climate + torch.tensor(rng.normal(0, 0.05, climate.shape), dtype=torch.float32)
+            climate = climate + torch.tensor(
+                rng.normal(0, 0.05, climate.shape), dtype=torch.float32
+            )
 
         static = _encode_static_simple(mean_y + rng.normal(0, 0.08))
         cqr_model.eval()
@@ -172,10 +174,16 @@ def calibrate_stratum(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Bootstrap online conformal initial state")
-    parser.add_argument("--out", type=Path, default=_REPO_ROOT / "data/processed/conformal_initial_state.json")
+    parser.add_argument(
+        "--out", type=Path, default=_REPO_ROOT / "data/processed/conformal_initial_state.json"
+    )
     parser.add_argument("--cqr-checkpoint", type=Path, default=_REPO_ROOT / "models/cqr_yield.pt")
-    parser.add_argument("--era5-zarr", type=Path, default=_REPO_ROOT / "data/processed/era5_2020_2024.zarr")
-    parser.add_argument("--cmip6-zarr", type=Path, default=_REPO_ROOT / "data/processed/cmip6_ensemble.zarr")
+    parser.add_argument(
+        "--era5-zarr", type=Path, default=_REPO_ROOT / "data/processed/era5_2020_2024.zarr"
+    )
+    parser.add_argument(
+        "--cmip6-zarr", type=Path, default=_REPO_ROOT / "data/processed/cmip6_ensemble.zarr"
+    )
     parser.add_argument("--n-calls", type=int, default=1000)
     parser.add_argument("--quick", action="store_true", help="100 calls per stratum")
     parser.add_argument("--alpha", type=float, default=0.1)

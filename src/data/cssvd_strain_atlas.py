@@ -6,12 +6,11 @@ Simplified polygons for point lookup; replace with full atlas vectors when avail
 
 from __future__ import annotations
 
-import structlog
-
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+import structlog
 from shapely.geometry import Point, shape
 from shapely.strtree import STRtree
 

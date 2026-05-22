@@ -9,11 +9,10 @@ Lange 2019).
 
 from __future__ import annotations
 
-import structlog
-
 from dataclasses import dataclass, field
 
 import numpy as np
+import structlog
 import xarray as xr
 
 from data.era5_ingest import (
@@ -148,17 +147,13 @@ class DeltaDownscaler:
         for isimip_var, era5_var in ISIMIP_TO_ERA5.items():
             if era5_var not in out:
                 continue
-            if (
-                self._delta_additive is not None
-                and isimip_var in self._delta_additive
-            ):
+            if self._delta_additive is not None and isimip_var in self._delta_additive:
                 delta_9 = _interp_monthly_to_grid(
                     self._delta_additive[isimip_var], out, lat_name, lon_name
                 )
                 out[era5_var] = _apply_monthly_additive(out[era5_var], delta_9)
             elif (
-                self._ratio_multiplicative is not None
-                and isimip_var in self._ratio_multiplicative
+                self._ratio_multiplicative is not None and isimip_var in self._ratio_multiplicative
             ):
                 ratio_9 = _interp_monthly_to_grid(
                     self._ratio_multiplicative[isimip_var], out, lat_name, lon_name

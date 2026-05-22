@@ -36,10 +36,15 @@ def test_cache_key_deterministic(tmp_path: Path) -> None:
     k1 = model.cache_key(["tmax", "precip"], region=region, time_range=tr)
     k2 = model.cache_key(["precip", "tmax"], region=region, time_range=tr)
     assert k1 == k2
-    assert model.cached_zarr_path(["tmax", "precip"], region=region, time_range=tr).name == f"cf_{k1}.zarr"
+    assert (
+        model.cached_zarr_path(["tmax", "precip"], region=region, time_range=tr).name
+        == f"cf_{k1}.zarr"
+    )
 
 
-def test_build_uses_cache_without_subprocess(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_uses_cache_without_subprocess(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     factual = tmp_path / "era5.zarr"
     gmt = tmp_path / "gmt.nc"
     xr.Dataset({"tas": ("time", [0.1])}, coords={"time": [0]}).to_netcdf(gmt)
@@ -58,7 +63,9 @@ def test_build_uses_cache_without_subprocess(tmp_path: Path, monkeypatch: pytest
     mock_run.assert_not_called()
 
 
-def test_build_invokes_runner_when_uncached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_invokes_runner_when_uncached(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     factual = tmp_path / "era5.zarr"
     gmt = tmp_path / "gmt.nc"
     xr.Dataset({"tas": ("time", [0.1])}, coords={"time": [0]}).to_netcdf(gmt)

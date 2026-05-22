@@ -64,8 +64,7 @@ def _require_matplotlib():
         import matplotlib.pyplot as plt
     except ImportError as exc:  # pragma: no cover
         raise ImportError(
-            "generate_causal_report requires matplotlib. "
-            "Install with: pip install -e '.[dev]'"
+            "generate_causal_report requires matplotlib. Install with: pip install -e '.[dev]'"
         ) from exc
     return plt
 
@@ -101,12 +100,8 @@ def build_report_context(
     )
     work_trim = trim_common_support(work)
     caliper = default_logit_caliper(work_trim["propensity_score"].to_numpy())
-    matched = match_nearest_neighbor(
-        work_trim, k=1, caliper=caliper, caliper_scale="logit"
-    )
-    balance = standardized_mean_differences(
-        snapshot, matched, covariate_cols=covariates
-    )
+    matched = match_nearest_neighbor(work_trim, k=1, caliper=caliper, caliper_scale="logit")
+    balance = standardized_mean_differences(snapshot, matched, covariate_cols=covariates)
     matched_did = attach_pre_post_to_matched(matched, snapshot)
 
     aipw = aipw_estimator(
@@ -119,7 +114,9 @@ def build_report_context(
     did = calculate_did_att(matched_did, random_state=random_state)
     rosenbaum = rosenbaum_bounds(matched_did, outcome_col=None)
     gamma_star = rosenbaum_gamma_at_alpha(rosenbaum, alpha=0.05)
-    ev = e_value(aipw.att, aipw.att_se, outcome_sd=float(snapshot["yield_tonnes_per_ha"].std(ddof=1)))
+    ev = e_value(
+        aipw.att, aipw.att_se, outcome_sd=float(snapshot["yield_tonnes_per_ha"].std(ddof=1))
+    )
 
     nco = None
     if "soil_quality_index" in snapshot.columns:
@@ -245,7 +242,9 @@ def write_causal_report_pdf(ctx: dict, out_path: Path) -> Path:
     ]
     nco = ctx.get("nco")
     if nco is not None:
-        lines.append(f"NCO ({nco.nco_col}): p={nco.p_value:.3f} ({'PASS' if nco.falsification_pass else 'FAIL'})")
+        lines.append(
+            f"NCO ({nco.nco_col}): p={nco.p_value:.3f} ({'PASS' if nco.falsification_pass else 'FAIL'})"
+        )
     pb = ctx["placebo"]
     lines.append(f"Placebo pre-trends OK: {pb.joint_pretrend_ok}")
     ax_ev.text(0.05, 0.95, "\n".join(lines), va="top", fontsize=9, family="monospace")
@@ -288,7 +287,9 @@ def write_causal_report_pdf(ctx: dict, out_path: Path) -> Path:
             else "Event study"
         )
     else:
-        ax_es.text(0.5, 0.5, "Event study unavailable\n(install statsmodels)", ha="center", va="center")
+        ax_es.text(
+            0.5, 0.5, "Event study unavailable\n(install statsmodels)", ha="center", va="center"
+        )
         ax_es.set_title("Event study")
     ax_es.axhline(0, color="gray", lw=0.6)
     ax_es.set_xlabel("Event time (periods relative to treatment)")

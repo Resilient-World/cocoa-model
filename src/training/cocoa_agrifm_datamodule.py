@@ -12,7 +12,7 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 from torchgeo.datasets.utils import Sample
 
-from data.cocoa_dataset import CLASS_OTHER, CocoaDataModule, DEFAULT_IMAGERY_BANDS
+from data.cocoa_dataset import CLASS_OTHER, DEFAULT_IMAGERY_BANDS, CocoaDataModule
 from data.sentinel_composite import S2_OPTICAL_BANDS
 from training.hard_example_mining import IndexHardMiningSampler
 
@@ -129,7 +129,9 @@ class SyntheticAgriFMDataset(Dataset[dict[str, torch.Tensor]]):
 
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
         img = self._images[idx]
-        frames = torch.stack([img + torch.randn_like(img) * 0.02 for _ in range(self.num_frames)], dim=1)
+        frames = torch.stack(
+            [img + torch.randn_like(img) * 0.02 for _ in range(self.num_frames)], dim=1
+        )
         return {"agrifm": frames, "target": self._labels[idx]}
 
 

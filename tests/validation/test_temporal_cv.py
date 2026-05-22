@@ -5,7 +5,11 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from validation.temporal_cv import ForwardChainSplit, SeasonAwareSplit, assign_season, iter_forward_folds
+from validation.temporal_cv import (
+    SeasonAwareSplit,
+    assign_season,
+    iter_forward_folds,
+)
 
 
 def test_forward_chain_no_leakage() -> None:

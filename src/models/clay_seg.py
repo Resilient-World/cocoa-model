@@ -7,12 +7,18 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 
-from models.backbones.clay_backbone import ClayBackbone, DEFAULT_EMBED_DIM
+from models.backbones.clay_backbone import DEFAULT_EMBED_DIM, ClayBackbone
 from models.backbones.clay_cocoa_head import ClayCocoaSegHead
 
 
 class ClayCocoaSegmentation(nn.Module):
-    def __init__(self, *, freeze_backbone: bool = True, out_size: tuple[int, int] = (64, 64), use_hf: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        freeze_backbone: bool = True,
+        out_size: tuple[int, int] = (64, 64),
+        use_hf: bool = True,
+    ) -> None:
         super().__init__()
         self.backbone = ClayBackbone(freeze=freeze_backbone, use_hf=use_hf)
         self.head = ClayCocoaSegHead(embed_dim=DEFAULT_EMBED_DIM, out_size=out_size)

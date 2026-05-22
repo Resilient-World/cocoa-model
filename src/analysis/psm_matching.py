@@ -112,7 +112,9 @@ def compute_propensity_scores(
     random_state: int = 42,
 ) -> pd.Series:
     cols = list(
-        covariate_cols if covariate_cols is not None else _default_covariate_cols(df, treatment_col, id_col)
+        covariate_cols
+        if covariate_cols is not None
+        else _default_covariate_cols(df, treatment_col, id_col)
     )
     _validate_psm_inputs(df, treatment_col, cols)
     model = Pipeline(
@@ -322,7 +324,9 @@ def _fit_outcome_model(
         from ngboost import NGBRegressor
         from ngboost.distns import Normal
 
-        model = NGBRegressor(Dist=Normal, n_estimators=200, learning_rate=0.05, random_state=random_state)
+        model = NGBRegressor(
+            Dist=Normal, n_estimators=200, learning_rate=0.05, random_state=random_state
+        )
         model.fit(X, y)
         return model
     model = HistGradientBoostingRegressor(
@@ -400,7 +404,9 @@ def aipw_estimator(
     even with ML nuisances.
     """
     cols = list(
-        covariate_cols if covariate_cols is not None else _default_covariate_cols(df, treatment_col, id_col)
+        covariate_cols
+        if covariate_cols is not None
+        else _default_covariate_cols(df, treatment_col, id_col)
     )
     _validate_psm_inputs(df, treatment_col, cols)
     if outcome_col not in df.columns:

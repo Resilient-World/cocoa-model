@@ -22,14 +22,14 @@ if str(_REPO_ROOT) not in sys.path:
 if str(_REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT / "src"))
 
-from data.cocoa_exposure import REGIONS  # noqa: E402
-from data.ensemble_weights import (  # noqa: E402
+from data.cocoa_exposure import REGIONS
+from data.ensemble_weights import (
     DEFAULT_ENSEMBLE_V3_WEIGHTS_PATH,
     V3_BACKEND_KEYS,
     save_ensemble_weights_yaml,
     validate_weights_sum,
 )
-from scripts.benchmark_backbones import (  # noqa: E402
+from scripts.benchmark_backbones import (
     DEFAULT_AEF_CKPT,
     DEFAULT_AGRIFM_CKPT,
     DEFAULT_GALILEO_CKPT,
@@ -42,7 +42,7 @@ from scripts.benchmark_backbones import (  # noqa: E402
     sample_holdout_tiles,
     tile_metrics,
 )
-from validation.kalischek_benchmark import HeuristicKalischekReference  # noqa: E402
+from validation.kalischek_benchmark import HeuristicKalischekReference
 
 logger = logging.getLogger(__name__)
 PREDICTION_THRESHOLD = 0.5

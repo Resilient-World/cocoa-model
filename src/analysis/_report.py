@@ -6,15 +6,20 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-import pandas as pd
+import pandas as pd  # type: ignore[import-untyped]
 
 from analysis.did_impact import DiDResult
 from analysis.psm_matching import AIPWResult, BalanceReport
 from analysis.sensitivity import EValueResult
 
 
+def _float_fmt(value: float) -> str:
+    return f"{value:.4f}"
+
+
 def _df_html(df: pd.DataFrame, max_rows: int = 50) -> str:
-    return df.head(max_rows).to_html(index=False, float_format=lambda x: f"{x:.4f}")
+    html = df.head(max_rows).to_html(index=False, float_format=_float_fmt)
+    return str(html)
 
 
 def att_report_html(
@@ -53,20 +58,20 @@ def att_report_html(
 <body>
   <h1>Cocoa farm panel — ATT causal report</h1>
   <p>Generated {date.today().isoformat()}</p>
-  <p>Overall gate: <span class="{'pass' if status == 'PASS' else 'fail'}">{status}</span></p>
+  <p>Overall gate: <span class="{"pass" if status == "PASS" else "fail"}">{status}</span></p>
 
   <h2>Panel summary</h2>
   <table>
     <tr><th>Metric</th><th>Value</th></tr>
-    <tr><td>Farms</td><td>{panel_summary.get('n_farms', '—')}</td></tr>
-    <tr><td>Farm-years</td><td>{panel_summary.get('n_rows', '—')}</td></tr>
-    <tr><td>Treated farms</td><td>{panel_summary.get('n_treated_farms', '—')}</td></tr>
+    <tr><td>Farms</td><td>{panel_summary.get("n_farms", "—")}</td></tr>
+    <tr><td>Farm-years</td><td>{panel_summary.get("n_rows", "—")}</td></tr>
+    <tr><td>Treated farms</td><td>{panel_summary.get("n_treated_farms", "—")}</td></tr>
     {true_row}
   </table>
 
   <h2>Balance (PSM)</h2>
   <p>Max |SMD| matched: {balance.max_smd_matched:.4f}
-     (threshold 0.10) — {'OK' if balance.balance_ok else 'FAIL'}</p>
+     (threshold 0.10) — {"OK" if balance.balance_ok else "FAIL"}</p>
   {_df_html(balance.smd)}
 
   <h2>AIPW / DML (cross-fit)</h2>
@@ -81,13 +86,13 @@ def att_report_html(
   <h2>DiD (matched pairs, bootstrap)</h2>
   <table>
     <tr><th>ATT</th><th>SE</th><th>95% CI</th><th>Pairs</th></tr>
-    <tr><td>{did.att:.4f}</td><td>{did.se if did.se is not None else float('nan'):.4f}</td>
+    <tr><td>{did.att:.4f}</td><td>{did.se if did.se is not None else float("nan"):.4f}</td>
         <td>[{did.ci_low}, {did.ci_high}]</td><td>{did.n_pairs}</td></tr>
   </table>
 
   <h2>Cross-check</h2>
   <p>|AIPW ATT − DiD ATT| = {att_agreement_delta:.4f};
-     within 1 SE: {'yes' if att_agreement_ok else 'no'}</p>
+     within 1 SE: {"yes" if att_agreement_ok else "no"}</p>
 
   <h2>Sensitivity</h2>
   <p>E-value (point): {evalue.point_e_value:.2f}; E-value (CI bound): {evalue.ci_e_value:.2f}</p>

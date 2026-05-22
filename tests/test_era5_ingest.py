@@ -81,7 +81,10 @@ def test_heat_days_count_matches_threshold() -> None:
     ds = _toy_dataset()
     ds["tmax"] = ds["tmax"] * 0 + 33
     out = compute_derived_features(ds)
-    assert float(out["heat_days_above_32c"].sum()) == ds.sizes["time"] * ds.sizes["lat"] * ds.sizes["lon"]
+    assert (
+        float(out["heat_days_above_32c"].sum())
+        == ds.sizes["time"] * ds.sizes["lat"] * ds.sizes["lon"]
+    )
 
 
 @pytest.mark.integration

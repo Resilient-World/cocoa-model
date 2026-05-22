@@ -15,7 +15,11 @@ def _find_prints(path: Path) -> list[tuple[int, str]]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     hits: list[tuple[int, str]] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "print":
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "print"
+        ):
             hits.append((node.lineno, "print()"))
     return hits
 

@@ -149,8 +149,6 @@ def test_event_study_runs() -> None:
 # Synthetic-truth tests: estimator must recover known τ within 2 SEs.
 # ---------------------------------------------------------------------------
 
-import numpy as np  # noqa: E402  (already imported above; safe to keep)
-
 
 def _simulate_matched_panel(
     n_pairs: int = 500,
@@ -219,12 +217,14 @@ def test_did_estimator_csdid_routes() -> None:
     for u in range(30):
         g = float((u % 3) + 1)
         for t in range(4):
-            rows.append({
-                "farm_id": f"u{u}",
-                "period": t,
-                "treatment_period": g,
-                "yield": 2.0 + 1.5 * (t >= g) + 0.01 * u,
-            })
+            rows.append(
+                {
+                    "farm_id": f"u{u}",
+                    "period": t,
+                    "treatment_period": g,
+                    "yield": 2.0 + 1.5 * (t >= g) + 0.01 * u,
+                }
+            )
     panel = pd.DataFrame(rows)
     res = did_estimator(panel, method="csdid", n_boot=50, random_state=0)
     assert res.method == "csdid_simple_att"
@@ -253,22 +253,26 @@ def test_did_estimator_synthdid_smoke() -> None:
 def test_staggered_deprecation_warning() -> None:
     rows = []
     for u, g in enumerate([1, 2, 3, 4]):
-        rows.append({
-            "farm_id": f"f{u}",
-            "match_pair_id": u,
-            "match_role": "treated",
-            "yield_pre_intervention": 1.0,
-            "yield_post_intervention": 2.0,
-            "treatment_period": float(g),
-        })
-        rows.append({
-            "farm_id": f"c{u}",
-            "match_pair_id": u,
-            "match_role": "control",
-            "yield_pre_intervention": 1.0,
-            "yield_post_intervention": 1.1,
-            "treatment_period": np.nan,
-        })
+        rows.append(
+            {
+                "farm_id": f"f{u}",
+                "match_pair_id": u,
+                "match_role": "treated",
+                "yield_pre_intervention": 1.0,
+                "yield_post_intervention": 2.0,
+                "treatment_period": float(g),
+            }
+        )
+        rows.append(
+            {
+                "farm_id": f"c{u}",
+                "match_pair_id": u,
+                "match_role": "control",
+                "yield_pre_intervention": 1.0,
+                "yield_post_intervention": 1.1,
+                "treatment_period": np.nan,
+            }
+        )
     wide = pd.DataFrame(rows)
     with pytest.warns(DeprecationWarning, match="Staggered"):
         calculate_did_att(wide, unit_col="farm_id", treat_time_col="treatment_period")

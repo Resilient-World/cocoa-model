@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import lightning.pytorch as pl
 import numpy as np
 import torch
@@ -54,8 +52,12 @@ class CocoaTerraMindDataModule(CocoaDataModule):
         t = max(3, min(8, s2.shape[1] if s2.dim() == 5 else 1))
         if s2.dim() == 4:
             s2 = s2.unsqueeze(1).expand(-1, t, -1, -1, -1)
-        s1 = torch.zeros(s2.shape[0], t, s2.shape[2], s2.shape[3], 2, device=s2.device, dtype=s2.dtype)
-        dem = torch.zeros(s2.shape[0], s2.shape[2], s2.shape[3], 2, device=s2.device, dtype=s2.dtype)
+        s1 = torch.zeros(
+            s2.shape[0], t, s2.shape[2], s2.shape[3], 2, device=s2.device, dtype=s2.dtype
+        )
+        dem = torch.zeros(
+            s2.shape[0], s2.shape[2], s2.shape[3], 2, device=s2.device, dtype=s2.dtype
+        )
         td_batch = {"s2": s2, "s1": s1, "srtm": dem}
         batch["terramind"] = cocoa_batch_to_terramind_input(td_batch)
         mask = batch.get("mask")
@@ -109,7 +111,9 @@ class SyntheticTerraMindDataModule(pl.LightningDataModule):
 
     def val_dataloader(self) -> DataLoader:
         assert self.val_dataset is not None
-        return DataLoader(self.val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=0)
+        return DataLoader(
+            self.val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=0
+        )
 
     def update_hard_weights(self, per_sample_losses: np.ndarray) -> None:
         if self.hard_sampler is not None:

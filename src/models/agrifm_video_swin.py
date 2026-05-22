@@ -1,4 +1,5 @@
 """Backward-compatible shim; implementation in models.backbones.agrifm_video_swin."""
+
 import importlib as _importlib
 
 _mod = _importlib.import_module("models.backbones.agrifm_video_swin")

@@ -12,8 +12,8 @@ from api import telemetry
 
 
 def test_trace_span_noop_when_disabled() -> None:
-    telemetry._enabled = False  # noqa: SLF001
-    telemetry._tracer = None  # noqa: SLF001
+    telemetry._enabled = False
+    telemetry._tracer = None
     with telemetry.trace_span("test.span", foo="bar"):
         pass
 
@@ -28,5 +28,5 @@ def test_configure_tracing_returns_tracer(monkeypatch: pytest.MonkeyPatch) -> No
     )
     assert tracer is not None
     assert telemetry.is_enabled()
-    telemetry._enabled = False  # noqa: SLF001
-    telemetry._tracer = None  # noqa: SLF001
+    telemetry._enabled = False
+    telemetry._tracer = None

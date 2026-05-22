@@ -11,8 +11,6 @@ annual summaries from ``*.OSR``.
 
 from __future__ import annotations
 
-import structlog
-
 import os
 import re
 import shutil
@@ -25,6 +23,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+import structlog
 
 log = structlog.get_logger(__name__)
 
@@ -197,7 +196,9 @@ class ALMANACRunner:
     def weather_from_era5_frame(df: pd.DataFrame) -> pd.DataFrame:
         """Map ERA5-Land ingest columns to ALMANAC weather columns."""
         out = pd.DataFrame()
-        out["date"] = pd.to_datetime(df.index if isinstance(df.index, pd.DatetimeIndex) else df["time"])
+        out["date"] = pd.to_datetime(
+            df.index if isinstance(df.index, pd.DatetimeIndex) else df["time"]
+        )
         out["tmin_c"] = df["tmin"].astype(float)
         out["tmax_c"] = df["tmax"].astype(float)
         out["precip_mm"] = df["precip"].astype(float)
@@ -430,7 +431,9 @@ def _parse_pln(path: Path) -> dict[str, np.ndarray]:
 
     lai = df[lai_col].to_numpy(dtype=np.float64)
 
-    sw_cols = [c for c in df.columns if re.match(r"SW\d*", c.upper()) or c.upper() in _PLN_SW_ALIASES]
+    sw_cols = [
+        c for c in df.columns if re.match(r"SW\d*", c.upper()) or c.upper() in _PLN_SW_ALIASES
+    ]
     if not sw_cols:
         sw_cols = [c for c in df.columns if c.upper().startswith("SW") and c.upper() != "SW"]
     if sw_cols:
@@ -453,9 +456,7 @@ def _parse_osr(path: Path) -> dict[str, np.ndarray]:
         df = df.sort_values(y_col)
 
     yield_arr = df[yield_col].to_numpy(dtype=np.float64) if yield_col else np.full(len(df), np.nan)
-    biomass_arr = (
-        df[biomass_col].to_numpy(dtype=np.float64) if biomass_col else yield_arr.copy()
-    )
+    biomass_arr = df[biomass_col].to_numpy(dtype=np.float64) if biomass_col else yield_arr.copy()
     return {"yield": yield_arr, "biomass": biomass_arr}
 
 

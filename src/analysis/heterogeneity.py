@@ -52,7 +52,7 @@ class CATEResult:
 
 def _check_binary_treatment(t: pd.Series) -> None:
     vals = set(pd.unique(t.dropna()))
-    if not vals.issubset({0, 1, False, True}):
+    if not vals.issubset({0, 1}):
         raise ValueError("treatment must be binary 0/1")
 
 
@@ -145,14 +145,14 @@ class _BaseCATEEstimator:
         treatment_col: str,
         outcome_col: str,
         covariate_cols: list[str],
-    ) -> "_BaseCATEEstimator":
+    ) -> _BaseCATEEstimator:
         y, t, x = self._extract_arrays(df, treatment_col, outcome_col, covariate_cols)
         self.covariate_cols_ = list(covariate_cols)
         self.X_train_ = x
         self._estimator.fit(y, t, X=x)
         return self
 
-    def fit_arrays(self, x: np.ndarray, y: np.ndarray, t: np.ndarray) -> "_BaseCATEEstimator":
+    def fit_arrays(self, x: np.ndarray, y: np.ndarray, t: np.ndarray) -> _BaseCATEEstimator:
         """Numpy API for backward compatibility."""
         work = pd.DataFrame(x, columns=[f"x{i}" for i in range(x.shape[1])])
         work["__y"] = y
@@ -260,7 +260,11 @@ def _fit_dispatch(
         if not isinstance(arg2, str) or not isinstance(arg3, str) or not isinstance(arg4, list):
             raise TypeError("fit(df, treatment_col, outcome_col, covariate_cols) expected")
         return est.fit(arg1, arg2, arg3, arg4)
-    if isinstance(arg1, np.ndarray) and isinstance(arg2, np.ndarray) and isinstance(arg3, np.ndarray):
+    if (
+        isinstance(arg1, np.ndarray)
+        and isinstance(arg2, np.ndarray)
+        and isinstance(arg3, np.ndarray)
+    ):
         return est.fit_arrays(arg1, arg2, arg3)
     raise TypeError("fit requires (df, treatment_col, outcome_col, covariate_cols) or (x, y, t)")
 
@@ -296,7 +300,7 @@ class CausalForest(_BaseCATEEstimator):
         arg2: str | np.ndarray,
         arg3: str | np.ndarray,
         arg4: list[str] | None = None,
-    ) -> "CausalForest":
+    ) -> CausalForest:
         if isinstance(arg1, np.ndarray):
             return _fit_dispatch(self, arg1, arg2, arg3)  # type: ignore[arg-type]
         if arg4 is None:
@@ -337,7 +341,7 @@ class RLearnerCATE(_BaseCATEEstimator):
         arg2: str | np.ndarray,
         arg3: str | np.ndarray,
         arg4: list[str] | None = None,
-    ) -> "RLearnerCATE":
+    ) -> RLearnerCATE:
         if isinstance(arg1, np.ndarray):
             return _fit_dispatch(self, arg1, arg2, arg3)  # type: ignore[arg-type]
         if arg4 is None:
@@ -408,11 +412,11 @@ def estimate_cate(
 
 __all__ = [
     "CATEResult",
-    "EffectResult",
     "CausalForest",
-    "RLearnerCATE",
+    "EffectResult",
+    "Method",
     "RLearner",
+    "RLearnerCATE",
     "default_nuisance_models",
     "estimate_cate",
-    "Method",
 ]

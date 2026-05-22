@@ -3,9 +3,10 @@ import itertools
 import json
 import math
 from collections import OrderedDict
+from collections import OrderedDict as OrderedDictType
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
-from typing import OrderedDict as OrderedDictType
+from typing import Any
 
 import numpy as np
 import torch
@@ -68,7 +69,7 @@ SPACE_BANDS = SRTM_BANDS + DW_BANDS + WC_BANDS
 STATIC_BANDS = LANDSCAN_BANDS + LOCATION_BANDS + STATIC_DW_BANDS + STATIC_WC_BANDS
 
 
-SPACE_TIME_BANDS_GROUPS_IDX: OrderedDictType[str, List[int]] = OrderedDict(
+SPACE_TIME_BANDS_GROUPS_IDX: OrderedDictType[str, list[int]] = OrderedDict(
     {
         "S1": [SPACE_TIME_BANDS.index(b) for b in S1_BANDS],
         "S2_RGB": [SPACE_TIME_BANDS.index(b) for b in ["B2", "B3", "B4"]],
@@ -80,7 +81,7 @@ SPACE_TIME_BANDS_GROUPS_IDX: OrderedDictType[str, List[int]] = OrderedDict(
     }
 )
 
-TIME_BAND_GROUPS_IDX: OrderedDictType[str, List[int]] = OrderedDict(
+TIME_BAND_GROUPS_IDX: OrderedDictType[str, list[int]] = OrderedDict(
     {
         "ERA5": [TIME_BANDS.index(b) for b in ERA5_BANDS],
         "TC": [TIME_BANDS.index(b) for b in TC_BANDS],
@@ -88,7 +89,7 @@ TIME_BAND_GROUPS_IDX: OrderedDictType[str, List[int]] = OrderedDict(
     }
 )
 
-SPACE_BAND_GROUPS_IDX: OrderedDictType[str, List[int]] = OrderedDict(
+SPACE_BAND_GROUPS_IDX: OrderedDictType[str, list[int]] = OrderedDict(
     {
         "SRTM": [SPACE_BANDS.index(b) for b in SRTM_BANDS],
         "DW": [SPACE_BANDS.index(b) for b in DW_BANDS],
@@ -96,7 +97,7 @@ SPACE_BAND_GROUPS_IDX: OrderedDictType[str, List[int]] = OrderedDict(
     }
 )
 
-STATIC_BAND_GROUPS_IDX: OrderedDictType[str, List[int]] = OrderedDict(
+STATIC_BAND_GROUPS_IDX: OrderedDictType[str, list[int]] = OrderedDict(
     {
         "LS": [STATIC_BANDS.index(b) for b in LANDSCAN_BANDS],
         "location": [STATIC_BANDS.index(b) for b in LOCATION_BANDS],
@@ -204,7 +205,7 @@ def adjust_learning_rate(
 
 # thanks to https://github.com/bwconrad/flexivit/ for this nice implementation
 # of the FlexiPatchEmbed module
-def to_2tuple(x: Any) -> Tuple:
+def to_2tuple(x: Any) -> tuple:
     if isinstance(x, collections.abc.Iterable) and not isinstance(x, str):
         return tuple(x)
     return tuple(itertools.repeat(x, 2))
@@ -213,10 +214,10 @@ def to_2tuple(x: Any) -> Tuple:
 class FlexiPatchEmbed(nn.Module):
     def __init__(
         self,
-        patch_size: Union[int, Tuple[int, int]],
+        patch_size: int | tuple[int, int],
         in_chans: int = 3,
         embed_dim: int = 128,
-        norm_layer: Optional[nn.Module] = None,
+        norm_layer: nn.Module | None = None,
         bias: bool = True,
         patch_size_seq: Sequence[int] = (1, 2, 3, 4, 5, 6),
         interpolation: str = "bicubic",
@@ -266,7 +267,7 @@ class FlexiPatchEmbed(nn.Module):
             pinvs[tuple_ps] = self._calculate_pinv(self.patch_size, tuple_ps)
         return pinvs
 
-    def _resize(self, x: Tensor, shape: Tuple[int, int]) -> Tensor:
+    def _resize(self, x: Tensor, shape: tuple[int, int]) -> Tensor:
         x_resized = F.interpolate(
             x[None, None, ...],
             shape,
@@ -275,7 +276,7 @@ class FlexiPatchEmbed(nn.Module):
         )
         return x_resized[0, 0, ...]
 
-    def _calculate_pinv(self, old_shape: Tuple[int, int], new_shape: Tuple[int, int]) -> Tensor:
+    def _calculate_pinv(self, old_shape: tuple[int, int], new_shape: tuple[int, int]) -> Tensor:
         mat = []
         for i in range(np.prod(old_shape)):
             basis_vec = torch.zeros(old_shape)
@@ -284,7 +285,7 @@ class FlexiPatchEmbed(nn.Module):
         resize_matrix = torch.stack(mat)
         return torch.linalg.pinv(resize_matrix)
 
-    def resize_patch_embed(self, patch_embed: Tensor, new_patch_size: Tuple[int, int]):
+    def resize_patch_embed(self, patch_embed: Tensor, new_patch_size: tuple[int, int]):
         """Resize patch_embed to target resolution via pseudo-inverse resizing"""
         # Return original kernel if no resize is necessary
         if self.patch_size == new_patch_size:
@@ -308,8 +309,8 @@ class FlexiPatchEmbed(nn.Module):
     def forward(
         self,
         x: Tensor,
-        patch_size: Optional[Union[int, Tuple[int, int]]] = None,
-    ) -> Union[Tensor, Tuple[Tensor, Tuple[int, int]]]:
+        patch_size: int | tuple[int, int] | None = None,
+    ) -> Tensor | tuple[Tensor, tuple[int, int]]:
         # x has input shape [b, h, w, (t), c]
         batch_size = x.shape[0]
         has_time_dimension = False
@@ -479,7 +480,7 @@ class DropPath(nn.Module):
     """Drop paths (Stochastic Depth) per sample  (when applied in main path of residual blocks)."""
 
     def __init__(self, drop_prob=None):
-        super(DropPath, self).__init__()
+        super().__init__()
         self.drop_prob = drop_prob
 
     def forward(self, x):
@@ -1097,9 +1098,9 @@ class Encoder(GalileoBase):
         st_m: torch.Tensor,
         months: torch.Tensor,
         patch_size: int,
-        input_resolution_m: Optional[int] = BASE_GSD,
-        exit_after: Optional[int] = None,
-        token_exit_cfg: Optional[Dict] = None,
+        input_resolution_m: int | None = BASE_GSD,
+        exit_after: int | None = None,
+        token_exit_cfg: dict | None = None,
         add_layernorm_on_exit: bool = True,
     ):
         (
@@ -1111,9 +1112,7 @@ class Encoder(GalileoBase):
             sp_m,
             t_m,
             st_m,
-        ) = self.apply_linear_projection(
-            s_t_x, sp_x, t_x, st_x, s_t_m, sp_m, t_m, st_m, patch_size
-        )
+        ) = self.apply_linear_projection(s_t_x, sp_x, t_x, st_x, s_t_m, sp_m, t_m, st_m, patch_size)
 
         if (exit_after is None) or (exit_after > 0):
             s_t_x, sp_x, t_x, st_x, s_t_m, sp_m, t_m, st_m = self.apply_attn(
@@ -1153,9 +1152,7 @@ class Encoder(GalileoBase):
     def load_from_folder(cls, folder: Path, device: torch.device):
         if not (folder / CONFIG_FILENAME).exists():
             all_files_in_folder = [f.name for f in folder.glob("*")]
-            raise ValueError(
-                f"Expected {CONFIG_FILENAME} in {folder}, found {all_files_in_folder}"
-            )
+            raise ValueError(f"Expected {CONFIG_FILENAME} in {folder}, found {all_files_in_folder}")
         if not (folder / ENCODER_FILENAME).exists():
             all_files_in_folder = [f.name for f in folder.glob("*")]
             raise ValueError(
@@ -1190,7 +1187,7 @@ class Decoder(GalileoBase):
         max_sequence_length=24,
         max_patch_size: int = 8,
         learnable_channel_embeddings: bool = False,
-        output_embedding_size: Optional[int] = None,
+        output_embedding_size: int | None = None,
     ):
         super().__init__(
             decoder_embedding_size,
@@ -1322,8 +1319,8 @@ class Decoder(GalileoBase):
         t_m: torch.Tensor,
         st_m: torch.Tensor,
         months: torch.Tensor,
-        patch_size: Optional[int] = None,
-        input_resolution_m: Optional[int] = BASE_GSD,
+        patch_size: int | None = None,
+        input_resolution_m: int | None = BASE_GSD,
     ):
         s_t_x = self.encoder_to_decoder_embed(self.input_norm(s_t_x))
         sp_x = self.encoder_to_decoder_embed(self.input_norm(sp_x))
@@ -1379,9 +1376,7 @@ class Decoder(GalileoBase):
                 output_st.append(self.to_output_embed(self.norm(st_x[:, idx])))
             else:
                 output_st.append(
-                    torch.zeros(
-                        b, self.output_embedding_size, dtype=st_x.dtype, device=st_x.device
-                    )
+                    torch.zeros(b, self.output_embedding_size, dtype=st_x.dtype, device=st_x.device)
                 )
 
         return (

@@ -7,13 +7,14 @@ g-computation with HistGradientBoosting nuisances (consistent with heterogeneity
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 import pandas as pd
 from sklearn.base import clone
-from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
+from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.model_selection import KFold
 
 from analysis.heterogeneity import default_nuisance_models
@@ -39,7 +40,7 @@ class MediationResult:
 
 def _check_binary_treatment(series: pd.Series) -> None:
     vals = set(pd.unique(series.dropna()))
-    if not vals.issubset({0, 1, False, True}):
+    if not vals.issubset({0, 1}):
         raise ValueError("treatment_col must be binary 0/1")
 
 
@@ -118,8 +119,12 @@ def _gcomp_effects_single_mediator(
             xm_te_0 = np.column_stack([x_te, np.zeros((len(te), 1))])
             xm_te_1 = np.column_stack([x_te, np.ones((len(te), 1))])
             xy_tr = np.column_stack([x_tr, t[tr], m[tr]])
-            xy_te_0 = lambda mvec: np.column_stack([x_te, np.zeros((len(te), 1)), mvec.reshape(-1, 1)])
-            xy_te_1 = lambda mvec: np.column_stack([x_te, np.ones((len(te), 1)), mvec.reshape(-1, 1)])
+            xy_te_0 = lambda mvec: np.column_stack(
+                [x_te, np.zeros((len(te), 1)), mvec.reshape(-1, 1)]
+            )
+            xy_te_1 = lambda mvec: np.column_stack(
+                [x_te, np.ones((len(te), 1)), mvec.reshape(-1, 1)]
+            )
         else:
             xm_tr = t[tr].reshape(-1, 1)
             xm_te_0 = np.zeros((len(te), 1))
@@ -367,7 +372,7 @@ def build_intervention_mediation_frame(
 
 __all__ = [
     "MediationResult",
+    "build_intervention_mediation_frame",
     "mediation_analysis",
     "multi_mediator_decomposition",
-    "build_intervention_mediation_frame",
 ]

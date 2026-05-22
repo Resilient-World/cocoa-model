@@ -2,19 +2,20 @@
 
 from __future__ import annotations
 
-import structlog
-
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
+import structlog
 import torch
 import xarray as xr
 from torch import Tensor
 
-from api.financial import calculate_financial_impact, financial_impact_to_schema
+from analysis.climate_attribution import extract_daily_climate_11ch
 from api.feature_resolver import climate_tensor_from_dataset_point
+from api.financial import calculate_financial_impact, financial_impact_to_schema
+from api.scenario_conformal import apply_scenario_conformal, resolve_region
 from api.schemas import (
     AvoidedLossInterval,
     AvoidedLossUncertaintyBand,
@@ -40,13 +41,15 @@ from counterfactual.corrdiff_downscaler import (
 )
 from hazards import apply_biotic_losses
 from hazards.black_pod import ShadeSpecies
-from analysis.climate_attribution import extract_daily_climate_11ch
 from models.casej_process import co2_ppm_for_ssp
 from models.casej_surrogate import CASEJSurrogate
-from api.scenario_conformal import apply_scenario_conformal, resolve_region
 from models.cqr import ConformalCalibrator, QuantileYieldSurrogate
 from models.yield_surrogate import CLIMATE_IDX, YieldSurrogateModel
-from models.yield_surrogate_v2 import YieldSurrogateV2, region_id_from_country_code, region_id_from_latlon
+from models.yield_surrogate_v2 import (
+    YieldSurrogateV2,
+    region_id_from_country_code,
+    region_id_from_latlon,
+)
 from models.yield_surrogate_v2_teleconnection import YieldSurrogateV2Teleconnection
 
 if TYPE_CHECKING:
@@ -125,9 +128,9 @@ def _apply_intervention_climate(
         )
 
     if "vpd_mult" in deltas:
-        out[..., CLIMATE_IDX["vpd"]] = (
-            out[..., CLIMATE_IDX["vpd"]] * deltas["vpd_mult"]
-        ).clamp(min=0.05)
+        out[..., CLIMATE_IDX["vpd"]] = (out[..., CLIMATE_IDX["vpd"]] * deltas["vpd_mult"]).clamp(
+            min=0.05
+        )
 
     if "sm_root" in deltas:
         out[..., CLIMATE_IDX["sm_root"]] = (
@@ -143,8 +146,7 @@ def _climate_tensor_to_dataset(climate: Tensor, year: int) -> xr.Dataset:
     n_days = arr.shape[0]
     time = pd.date_range(f"{year}-01-01", periods=n_days, freq="D")
     data_vars = {
-        name: ("time", arr[:, idx].astype(np.float32))
-        for name, idx in CLIMATE_IDX.items()
+        name: ("time", arr[:, idx].astype(np.float32)) for name, idx in CLIMATE_IDX.items()
     }
     return xr.Dataset(data_vars, coords={"time": time})
 
@@ -228,7 +230,9 @@ def _apply_process_bma_to_means(
 
     from models.process.bma import combine_predictions
 
-    weights_path = getattr(settings, "process_bma_weights_path", Path("config/process_bma_weights.json"))
+    weights_path = getattr(
+        settings, "process_bma_weights_path", Path("config/process_bma_weights.json")
+    )
 
     def _casej_mean(climate: Tensor, static: Tensor) -> float | None:
         if not isinstance(model, CASEJSurrogate):
@@ -252,12 +256,16 @@ def _apply_process_bma_to_means(
                 teleconnection=teleconnection,
                 lat=lat,
                 lon=lon,
-            ).mean().item()
+            )
+            .mean()
+            .item()
         )
 
     ds_b = _climate_tensor_to_dataset(climate_baseline, year)
     ds_p = _climate_tensor_to_dataset(climate_projected, year)
-    casej_b = _casej_mean(climate_baseline, static_cf) or _surrogate_mean(climate_baseline, static_cf)
+    casej_b = _casej_mean(climate_baseline, static_cf) or _surrogate_mean(
+        climate_baseline, static_cf
+    )
     casej_p = _casej_mean(climate_projected, static_factual) or _surrogate_mean(
         climate_projected, static_factual
     )
@@ -552,7 +560,9 @@ def _simulate_cqr(
     fact_iv = calibrator.predict_interval(cqr_model, (climate_factual, static_factual))
 
     baseline_yield = _blend_yield(base_iv.median * biotic_cf, current_yield, yield_blend_weight)
-    projected_yield = _blend_yield(fact_iv.median * biotic_factual, current_yield, yield_blend_weight)
+    projected_yield = _blend_yield(
+        fact_iv.median * biotic_factual, current_yield, yield_blend_weight
+    )
 
     ci_lower = max(
         0.0,
@@ -617,7 +627,9 @@ def simulate_intervention(
     climate_base = feature_resolver.resolve_climate(lat, lon, year)
     static_base = feature_resolver.resolve_static_with_galileo(lat, lon, year)
 
-    static_cf = _encode_static(static_base, current_yield=request.current_yield, intervention_type=None)
+    static_cf = _encode_static(
+        static_base, current_yield=request.current_yield, intervention_type=None
+    )
     static_factual = _encode_static(
         static_base,
         current_yield=request.current_yield,
@@ -626,11 +638,7 @@ def simulate_intervention(
     climate_cf = climate_base
     climate_factual = _apply_intervention_climate(climate_base, request.intervention_type)
 
-    use_cqr = (
-        uq_method == "cqr"
-        and cqr_model is not None
-        and cqr_calibrator is not None
-    )
+    use_cqr = uq_method == "cqr" and cqr_model is not None and cqr_calibrator is not None
 
     samples_cf: Tensor | None = None
     samples_factual: Tensor | None = None
@@ -666,9 +674,7 @@ def simulate_intervention(
 
     ds_cf = _climate_tensor_to_dataset(climate_cf, year)
     ds_factual = _climate_tensor_to_dataset(climate_factual, year)
-    biotic_static_cf = _biotic_static_features(
-        None, lat=lat, lon=lon, year=year, settings=settings
-    )
+    biotic_static_cf = _biotic_static_features(None, lat=lat, lon=lon, year=year, settings=settings)
     biotic_static_factual = _biotic_static_features(
         request.intervention_type, lat=lat, lon=lon, year=year, settings=settings
     )
@@ -892,8 +898,16 @@ def simulate_climate_attribution(
         lon=lon,
     )
 
-    y_f = float(_blend_mc_numpy(samples_f.detach().cpu().numpy(), request.current_yield, yield_blend_weight).mean())
-    y_cf = float(_blend_mc_numpy(samples_cf.detach().cpu().numpy(), request.current_yield, yield_blend_weight).mean())
+    y_f = float(
+        _blend_mc_numpy(
+            samples_f.detach().cpu().numpy(), request.current_yield, yield_blend_weight
+        ).mean()
+    )
+    y_cf = float(
+        _blend_mc_numpy(
+            samples_cf.detach().cpu().numpy(), request.current_yield, yield_blend_weight
+        ).mean()
+    )
     attributed_per_ha = max(0.0, y_cf - y_f)
 
     intervention = simulate_intervention(
@@ -1018,9 +1032,7 @@ def simulate_scenario(
         climate_ensemble = [climate_tensor_from_dataset_point(ds_ace, lat, lon, horizon)]
     elif downscaling == "corrdiff":
         processed_dir = (
-            settings.corrdiff_processed_dir
-            if settings is not None
-            else historical_zarr_path.parent
+            settings.corrdiff_processed_dir if settings is not None else historical_zarr_path.parent
         )
         region = resolve_region(lat, lon)
         cache = corrdiff_cache_path(processed_dir, request.scenario, horizon, region)
@@ -1037,12 +1049,12 @@ def simulate_scenario(
                     historical_zarr_path=historical_zarr_path,
                     cmip6_zarr_path=cmip6_zarr_path,
                 )
-                downscaler.downscale_horizon_year(
-                    horizon, list(DEFAULT_OUTPUT_VARIABLES)
-                )
+                downscaler.downscale_horizon_year(horizon, list(DEFAULT_OUTPUT_VARIABLES))
                 downscaler.to_zarr(cache)
             else:
-                raise ValueError(corrdiff_cache_missing_message(cache, request.scenario, horizon, region))
+                raise ValueError(
+                    corrdiff_cache_missing_message(cache, request.scenario, horizon, region)
+                )
         try:
             climate_ensemble = load_corrdiff_scenario_ensemble(
                 cache_path=cache, lat=lat, lon=lon, year=horizon
@@ -1142,8 +1154,14 @@ def simulate_scenario(
     if abs(p_mean) > 1e-9 and p_mean_bma != p_mean:
         projected_blended = projected_blended * (p_mean_bma / p_mean)
         p_mean = p_mean_bma
-    b_p10, b_p90 = float(np.percentile(baseline_blended, 10)), float(np.percentile(baseline_blended, 90))
-    p_p10, p_p90 = float(np.percentile(projected_blended, 10)), float(np.percentile(projected_blended, 90))
+    b_p10, b_p90 = (
+        float(np.percentile(baseline_blended, 10)),
+        float(np.percentile(baseline_blended, 90)),
+    )
+    p_p10, p_p90 = (
+        float(np.percentile(projected_blended, 10)),
+        float(np.percentile(projected_blended, 90)),
+    )
 
     avoided_arr = np.maximum(projected_blended - baseline_blended, 0.0) * request.farm_size_ha
     a_mean, a_p10, a_p90 = _mean_p10_p90(avoided_arr)
@@ -1151,9 +1169,7 @@ def simulate_scenario(
 
     ds_cf = _climate_tensor_to_dataset(climate_baseline, year)
     ds_factual = _climate_tensor_to_dataset(climate_projected, year)
-    biotic_static_cf = _biotic_static_features(
-        None, lat=lat, lon=lon, year=year, settings=settings
-    )
+    biotic_static_cf = _biotic_static_features(None, lat=lat, lon=lon, year=year, settings=settings)
     biotic_static_factual = _biotic_static_features(
         request.intervention_type, lat=lat, lon=lon, year=year, settings=settings
     )

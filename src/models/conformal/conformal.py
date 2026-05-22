@@ -13,8 +13,6 @@ quantiles per Kalischek (2023) West African cocoa agroecological zone.
 
 from __future__ import annotations
 
-import structlog
-
 import argparse
 import json
 import logging
@@ -25,6 +23,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+import structlog
 import torch
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
@@ -69,9 +68,7 @@ class ConformalInterval:
 
     def __post_init__(self) -> None:
         if not self.coverage_guarantee:
-            self.coverage_guarantee = COVERAGE_GUARANTEE_SPLIT.format(
-                coverage=self.coverage_target
-            )
+            self.coverage_guarantee = COVERAGE_GUARANTEE_SPLIT.format(coverage=self.coverage_target)
 
 
 @dataclass
@@ -109,9 +106,9 @@ def conformal_quantile(scores: np.ndarray, alpha: float) -> float:
 
 def assign_kalischek_zone(lat: float, lon: float) -> str:
     """
-  Assign a Kalischek (2023) West African cocoa agroecological zone from coordinates.
+    Assign a Kalischek (2023) West African cocoa agroecological zone from coordinates.
 
-    Heuristic latitudinal bands within the cocoa belt (~4–11°N, 12°W–5°E).
+      Heuristic latitudinal bands within the cocoa belt (~4–11°N, 12°W–5°E).
     """
     if not (-12.0 <= lon <= 5.0 and 4.0 <= lat <= 11.0):
         return "Forest-Savanna Transition"
@@ -174,7 +171,11 @@ class CalibrationParquetDataset(Dataset):
             climate = torch.as_tensor(row["climate"], dtype=torch.float32)
             static = torch.as_tensor(row["static"], dtype=torch.float32)
 
-        zone = row["agroecological_zone"] if "agroecological_zone" in self.df.columns else assign_kalischek_zone(lat, lon)
+        zone = (
+            row["agroecological_zone"]
+            if "agroecological_zone" in self.df.columns
+            else assign_kalischek_zone(lat, lon)
+        )
 
         return {
             "climate": climate,
@@ -475,9 +476,7 @@ class MondrianConformalYield:
             upper=point + half_width,
             coverage_target=self.coverage_target,
             method=f"mondrian_conformal:{resolved_zone}",
-            coverage_guarantee=COVERAGE_GUARANTEE_MONDRIAN.format(
-                coverage=self.coverage_target
-            ),
+            coverage_guarantee=COVERAGE_GUARANTEE_MONDRIAN.format(coverage=self.coverage_target),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -611,7 +610,9 @@ def main(argv: list[str] | None = None) -> int:
     cal.add_argument("--checkpoint", type=Path, default=Path("models/yield.pt"))
     cal.add_argument("--calib", type=Path, default=Path("data/processed/calib.parquet"))
     cal.add_argument("--out", type=Path, default=Path("models/conformal.json"))
-    cal.add_argument("--alpha", type=float, default=0.1, help="Miscoverage rate (default 0.1 → 90%% CI)")
+    cal.add_argument(
+        "--alpha", type=float, default=0.1, help="Miscoverage rate (default 0.1 → 90%% CI)"
+    )
     cal.add_argument("--batch-size", type=int, default=32)
     cal.add_argument("--num-samples", type=int, default=DEFAULT_NUM_MC_SAMPLES)
     cal.add_argument("--device", type=str, default="cpu")

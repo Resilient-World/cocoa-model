@@ -13,14 +13,16 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT / "src"))
 
-from models.olmoearth_seg import OlmoEarthCocoaSegmentation  # noqa: E402
+from models.olmoearth_seg import OlmoEarthCocoaSegmentation
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-size", default="base", choices=["nano", "tiny", "base", "large"])
     parser.add_argument("--epochs", type=int, default=1)
-    parser.add_argument("--out", type=Path, default=_REPO_ROOT / "models" / "olmoearth_cocoa_seg_base.pt")
+    parser.add_argument(
+        "--out", type=Path, default=_REPO_ROOT / "models" / "olmoearth_cocoa_seg_base.pt"
+    )
     parser.add_argument("--device", default="cpu")
     args = parser.parse_args(argv)
     model = OlmoEarthCocoaSegmentation(model_size=args.model_size, use_hf=False).to(args.device)

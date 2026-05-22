@@ -28,6 +28,7 @@ def mock_whisp() -> MockWhispClient:
 
 def test_run_end_to_end_demo_mock_gee(tmp_path, mock_whisp: MockWhispClient) -> None:
     import asyncio
+
     from api.config import APISettings
 
     settings = APISettings(
@@ -81,7 +82,12 @@ def test_run_end_to_end_demo_mock_gee(tmp_path, mock_whisp: MockWhispClient) -> 
             ],
             path_table=[],
         )
-        mock_policy.return_value = {"policy_value": 0.1, "n_rules_shown": 1, "rules": ["IF x THEN treat"], "covariates": []}
+        mock_policy.return_value = {
+            "policy_value": 0.1,
+            "n_rules_shown": 1,
+            "rules": ["IF x THEN treat"],
+            "covariates": [],
+        }
         from tests.test_api_simulate import StubFeatureResolver
 
         stub = StubFeatureResolver()
@@ -102,7 +108,9 @@ def test_run_end_to_end_demo_mock_gee(tmp_path, mock_whisp: MockWhispClient) -> 
     assert payload["intervention_avoided_loss_t_per_ha"] >= 0.0
     assert payload["total_avoided_loss_usd"]["level"] == 0.9
     assert payload["total_avoided_loss_usd"]["ci_low"] <= payload["total_avoided_loss_usd"]["point"]
-    assert payload["total_avoided_loss_usd"]["ci_high"] >= payload["total_avoided_loss_usd"]["point"]
+    assert (
+        payload["total_avoided_loss_usd"]["ci_high"] >= payload["total_avoided_loss_usd"]["point"]
+    )
     assert payload["cocoa_exposure_probability"] == pytest.approx(0.72)
     assert payload["eudr_status"]["risk_class"] == "standard"
     assert payload["eudr_status"]["deforestation_post_2020"] is False
@@ -111,7 +119,15 @@ def test_run_end_to_end_demo_mock_gee(tmp_path, mock_whisp: MockWhispClient) -> 
     assert "policy_targeting" in payload
 
     ids = {a["id"] for a in payload["source_attributions"]}
-    assert {"whisp", "fdp_cocoa_2025a", "era5_land", "cmip6", "attrici", "casej_surrogate", "mediation"} <= ids
+    assert {
+        "whisp",
+        "fdp_cocoa_2025a",
+        "era5_land",
+        "cmip6",
+        "attrici",
+        "casej_surrogate",
+        "mediation",
+    } <= ids
 
     assert "scenario_ssp585_2050" in payload
     assert payload["scenario_ssp585_2050"]["avoided_loss_tonnes"]["mean"] >= 0.0
@@ -125,7 +141,13 @@ def test_demo_main_writes_json(tmp_path) -> None:
     stub = {
         "climate_attributed_loss_t_per_ha": 0.1,
         "intervention_avoided_loss_t_per_ha": 0.2,
-        "total_avoided_loss_usd": {"point": 100.0, "ci_low": 50.0, "ci_high": 150.0, "level": 0.9, "method": "mcd"},
+        "total_avoided_loss_usd": {
+            "point": 100.0,
+            "ci_low": 50.0,
+            "ci_high": 150.0,
+            "level": 0.9,
+            "method": "mcd",
+        },
         "eudr_status": {},
         "source_attributions": [],
     }

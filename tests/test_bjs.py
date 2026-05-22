@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from analysis._staggered_did_common import estimate_twfe, prepare_staggered_panel
 from analysis.bjs_imputation import BorusyakJaravelSpiess
@@ -27,12 +26,14 @@ def _three_cohort_panel(*, seed: int = 0, att: float = TRUE_ATT) -> pd.DataFrame
             y0 = alpha + rng.normal(0, 0.05)
             treat = float(t >= g)
             y = y0 + att * treat
-            rows.append({
-                "farm_id": f"u{u}",
-                "period": t,
-                "treatment_period": g,
-                "yield": y,
-            })
+            rows.append(
+                {
+                    "farm_id": f"u{u}",
+                    "period": t,
+                    "treatment_period": g,
+                    "yield": y,
+                }
+            )
     return pd.DataFrame(rows)
 
 
@@ -56,12 +57,14 @@ def test_twfe_biased_vs_true_att() -> None:
         for t in range(5):
             y0 = alpha + 0.05 * t + rng.normal(0, 0.02)
             eff = effects[g] if t >= g else 0.0
-            rows.append({
-                "farm_id": f"u{u}",
-                "period": t,
-                "treatment_period": g,
-                "yield": y0 + eff,
-            })
+            rows.append(
+                {
+                    "farm_id": f"u{u}",
+                    "period": t,
+                    "treatment_period": g,
+                    "yield": y0 + eff,
+                }
+            )
     panel = pd.DataFrame(rows)
     prep = prepare_staggered_panel(panel)
     twfe = estimate_twfe(prep)
@@ -85,12 +88,14 @@ def test_negative_weight_dgp_cs_bjs_positive() -> None:
                 true_eff = 2.0
             elif u >= 20 and t >= 4:
                 true_eff = 0.5
-            rows.append({
-                "farm_id": f"f{u}",
-                "period": t,
-                "treatment_period": g,
-                "yield": y0 + true_eff,
-            })
+            rows.append(
+                {
+                    "farm_id": f"f{u}",
+                    "period": t,
+                    "treatment_period": g,
+                    "yield": y0 + true_eff,
+                }
+            )
     panel = pd.DataFrame(rows)
     prep = prepare_staggered_panel(panel)
     twfe = estimate_twfe(prep)

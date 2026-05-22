@@ -67,7 +67,6 @@ class CSSVDRiskModel:
 
         When ``conservative=True``, uses the upper bound of the 90% incidence PI.
         """
-        from hazards.cssvd_landscape import IncidencePrediction
 
         model = landscape_model or self.landscape_model
         if model is None:

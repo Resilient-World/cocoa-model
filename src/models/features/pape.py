@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import torch
@@ -184,7 +183,11 @@ class PhenologyAwarePositionalEncoding(nn.Module):
             raise ValueError(f"region_id must be [B], got {tuple(region_id.shape)}")
 
         if doy is None:
-            doy = torch.arange(1, t + 1, device=climate.device, dtype=climate.dtype).unsqueeze(0).expand(b, -1)
+            doy = (
+                torch.arange(1, t + 1, device=climate.device, dtype=climate.dtype)
+                .unsqueeze(0)
+                .expand(b, -1)
+            )
         elif doy.shape != (b, t):
             raise ValueError(f"doy must be [B, T], got {tuple(doy.shape)}")
 
@@ -219,11 +222,11 @@ class PhenologyAwarePositionalEncoding(nn.Module):
 
 
 __all__ = [
-    "PhenologyAwarePositionalEncoding",
-    "PhenologyConfig",
     "REGION_KEYS",
     "REGION_TO_ID",
     "STAGE_NAMES",
+    "PhenologyAwarePositionalEncoding",
+    "PhenologyConfig",
     "crop_stage_one_hot",
     "load_phenology_config",
     "region_to_id",

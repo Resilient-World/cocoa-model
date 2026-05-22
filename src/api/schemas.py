@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from enum import Enum
-
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -146,7 +145,7 @@ class SimulateInterventionRequest(BaseModel):
 
     # Optional cooperative-level mode: request recommendations for many farms at once.
     # When present, the API can return a per-farm ranking using CATE estimates from tabular covariates.
-    batch_farms: list[dict] | None = Field(
+    batch_farms: list[dict[str, Any]] | None = Field(
         default=None,
         description="Optional list of farm records (cooperative rollouts); used by /rank-interventions",
     )
@@ -155,7 +154,9 @@ class SimulateInterventionRequest(BaseModel):
 class RankInterventionsRequest(BaseModel):
     """Request body for POST /rank-interventions (cooperative-level targeting)."""
 
-    rows: list[dict] = Field(..., description="Tabular rows with outcome, treatment, covariates, and farm metadata")
+    rows: list[dict[str, Any]] = Field(
+        ..., description="Tabular rows with outcome, treatment, covariates, and farm metadata"
+    )
     outcome: str = Field(..., description="Outcome column name in rows (e.g. yield delta)")
     treatment: str = Field(..., description="Treatment indicator column name (0/1)")
     covariates: list[str] = Field(..., description="Covariate column names used for CATE")
@@ -163,7 +164,9 @@ class RankInterventionsRequest(BaseModel):
     n_folds: int = Field(default=5, ge=2, le=10)
     cocoa_price_usd: float = Field(..., ge=0.0)
     intervention_cost_usd_per_farm: float = Field(default=0.0, ge=0.0)
-    farm_area_col: str = Field(default="farm_size_ha", description="Column name for farm area in hectares")
+    farm_area_col: str = Field(
+        default="farm_size_ha", description="Column name for farm area in hectares"
+    )
 
 
 class RankedFarmRecommendation(BaseModel):
@@ -217,7 +220,9 @@ class PolicyRulebook(BaseModel):
 class LearnPolicyRulesRequest(BaseModel):
     """Request body for POST /learn-policy-rules."""
 
-    rows: list[dict] = Field(..., description="Panel rows with outcome, treatment, and covariates")
+    rows: list[dict[str, Any]] = Field(
+        ..., description="Panel rows with outcome, treatment, and covariates"
+    )
     outcome: str
     treatment: str
     covariates: list[str]
@@ -499,7 +504,7 @@ class SimulateScenarioResponse(BaseModel):
         default=None,
         description="Current WCTM state for this scenario stratum (dashboard)",
     )
-    eudr_status: "EudrStatusBlock | None" = Field(
+    eudr_status: EudrStatusBlock | None = Field(
         default=None,
         description="Present when request includes farm_polygon (EUDR Art. 3 / Whisp)",
     )
@@ -566,7 +571,7 @@ class SimulateInterventionResponse(BaseModel):
             "keys ``baseline`` and ``projected``"
         ),
     )
-    eudr_status: "EudrStatusBlock | None" = Field(
+    eudr_status: EudrStatusBlock | None = Field(
         default=None,
         description="Present when request includes farm_polygon (EUDR Art. 3 / Whisp)",
     )
@@ -592,9 +597,8 @@ class SimulateInterventionResponse(BaseModel):
 # EUDR compliance (EU) 2023/1115
 # ---------------------------------------------------------------------------
 
-from api.eudr import EudrStatusBlock  # noqa: E402
-
-from compliance.eudr import (  # noqa: E402
+from api.eudr import EudrStatusBlock
+from compliance.eudr import (
     DueDiligenceStatement,
     OperatorInfo,
     PlotGeometry,

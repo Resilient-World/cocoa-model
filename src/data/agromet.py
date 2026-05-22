@@ -40,9 +40,7 @@ def vpd_kpa(tmean_c: float, rh_pct: float) -> float:
 
 def magnus_es_kpa(temp_c: ee.Image) -> ee.Image:
     """Saturation vapor pressure (kPa) from temperature (°C)."""
-    return ee.Image(MAGNUS_A).multiply(
-        temp_c.multiply(MAGNUS_B).divide(temp_c.add(MAGNUS_C)).exp()
-    )
+    return ee.Image(MAGNUS_A).multiply(temp_c.multiply(MAGNUS_B).divide(temp_c.add(MAGNUS_C)).exp())
 
 
 def fao_et0_daily(
@@ -61,24 +59,14 @@ def fao_et0_daily(
     ea = es.multiply(rh_pct.divide(100.0))
     vpd = es.subtract(ea).max(0)
 
-    delta = (
-        es.multiply(MAGNUS_B)
-        .multiply(MAGNUS_C)
-        .divide(tmean_c.add(MAGNUS_C).pow(2))
-    )
+    delta = es.multiply(MAGNUS_B).multiply(MAGNUS_C).divide(tmean_c.add(MAGNUS_C).pow(2))
 
     u2 = wind10m.multiply(WIND10_TO_WIND2_FACTOR)
     rn = srad_mj.multiply(1.0 - FAO_ALBEDO)
 
     t_k = tmean_c.add(KELVIN_OFFSET)
     num_rad = delta.multiply(rn).multiply(0.408)
-    num_aero = (
-        ee.Image(FAO_GAMMA)
-        .multiply(ee.Image(900).divide(t_k))
-        .multiply(u2)
-        .multiply(vpd)
-    )
+    num_aero = ee.Image(FAO_GAMMA).multiply(ee.Image(900).divide(t_k)).multiply(u2).multiply(vpd)
     den = delta.add(ee.Image(FAO_GAMMA).multiply(ee.Image(1).add(u2.multiply(0.34))))
 
     return num_rad.add(num_aero).divide(den).max(0).rename("et0")
-

@@ -12,7 +12,7 @@ import torch
 
 from data.yield_panel import PanelRow
 from models.conformal.cqr import DEFAULT_QUANTILES, ConformalCalibrator, QuantileYieldSurrogate
-from validation.baselines import evaluate_with_baselines, group_indices_by_stratum, panel_stratum
+from validation.baselines import evaluate_with_baselines, group_indices_by_stratum
 from validation.conformal_cv import _panel_coords, _quick_train, _rows_to_tensors
 from validation.forecast_scoring import (
     crps_ensemble,
@@ -154,9 +154,7 @@ def evaluate_cqr_calibration(
         sub["stratum_key"] = key
         by_stratum[key] = sub
 
-    pit_vals = (
-        (y_test - lowers) / np.maximum(uppers - lowers, 1e-6)
-    ).clip(0, 1).tolist()
+    pit_vals = ((y_test - lowers) / np.maximum(uppers - lowers, 1e-6)).clip(0, 1).tolist()
 
     return CalibrationReport(
         model="cqr_yield",
@@ -198,7 +196,9 @@ def run_calibration_gate(
     pit_p = float(data.get("pit_chi2_p", 1.0))
     if pit_p < PIT_CHI2_MIN_P:
         ok = False
-        messages.append(f"PIT chi2 p={pit_p:.4f} < {PIT_CHI2_MIN_P} (shape={data.get('pit_shape')})")
+        messages.append(
+            f"PIT chi2 p={pit_p:.4f} < {PIT_CHI2_MIN_P} (shape={data.get('pit_shape')})"
+        )
     if enforce_sharpness and baseline is not None:
         base_w = float(baseline.get("sharpness", float("nan")))
         cur_w = float(data["sharpness"])
@@ -262,9 +262,9 @@ def write_calibration_report(
 
 
 __all__ = [
-    "CalibrationReport",
     "COVERAGE_TOL",
     "PIT_CHI2_MIN_P",
+    "CalibrationReport",
     "evaluate_cqr_calibration",
     "run_calibration_gate",
     "write_calibration_report",

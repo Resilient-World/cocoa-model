@@ -7,10 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from analysis.run_evaluation import run_causal_evaluation
+from analysis.run_evaluation import _synthetic_panel, run_causal_evaluation
 from analysis.validate_parallel_trends import validate_parallel_trends_report
 from analysis.validate_smd import validate_smd_report
-from analysis.run_evaluation import _synthetic_panel
 from models.conformal import SplitConformalYield, save_conformal
 from models.validate_conformal_coverage import validate_conformal_coverage
 

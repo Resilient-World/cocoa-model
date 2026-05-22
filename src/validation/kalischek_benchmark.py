@@ -7,14 +7,13 @@ probability map on a held-out 10% spatial fold in Ghana and Côte d'Ivoire.
 
 from __future__ import annotations
 
-import structlog
-
 import logging
 import os
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol
 
 import numpy as np
+import structlog
 
 from validation._report import ValidationResult, write_report
 
@@ -34,7 +33,8 @@ HOLDOUT_FRACTION = 0.10
 REFERENCE_THRESHOLD = 0.5
 PREDICTION_THRESHOLD = 0.5
 
-from data.cocoa_exposure import REGIONS as COCOA_REGIONS, region_latlon_bounds
+from data.cocoa_exposure import REGIONS as COCOA_REGIONS
+from data.cocoa_exposure import region_latlon_bounds
 
 # Benchmark sampling windows (lat_min, lat_max, lon_min, lon_max) — all FDP regions
 REGIONS: dict[str, tuple[float, float, float, float]] = {
@@ -98,12 +98,7 @@ class HeuristicKalischekReference:
     def sample_reference(self, lats: np.ndarray, lons: np.ndarray) -> np.ndarray:
         in_belt = np.zeros(lats.shape, dtype=bool)
         for lat_min, lat_max, lon_min, lon_max in REGIONS.values():
-            in_belt |= (
-                (lats >= lat_min)
-                & (lats <= lat_max)
-                & (lons >= lon_min)
-                & (lons <= lon_max)
-            )
+            in_belt |= (lats >= lat_min) & (lats <= lat_max) & (lons >= lon_min) & (lons <= lon_max)
         prob = np.where(in_belt, 0.72, 0.18)
         prob += np.clip((7.0 - np.abs(lats - 6.5)) * 0.03, 0, 0.15)
         return np.clip(prob, 0.0, 1.0)
@@ -124,7 +119,7 @@ class GeeKalischekReference:
         image = ee.Image(self.asset)
         band = image.bandNames().getInfo()[0]
         features = [
-            ee.Feature(ee.Geometry.Point([float(lon), float(lat)]), {"p": float(p)})
+            ee.Feature(ee.Geometry.Point([float(lon), float(lat)]), {"p": 0.0})
             for lat, lon in zip(lats, lons, strict=True)
         ]
         fc = ee.FeatureCollection(features)
@@ -218,7 +213,9 @@ def main(argv: list[str] | None = None) -> int:
         segmentation_ckpt=args.checkpoint,
     )
     write_report(result, args.report)
-    log.info(f"Kalischek benchmark: {'PASS' if result.passed else 'FAIL'} (IoU={result.metrics['iou']:.3f})")
+    log.info(
+        f"Kalischek benchmark: {'PASS' if result.passed else 'FAIL'} (IoU={result.metrics['iou']:.3f})"
+    )
     return 0 if result.passed else 1
 
 

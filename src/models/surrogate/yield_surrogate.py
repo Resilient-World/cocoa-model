@@ -105,6 +105,7 @@ def pack_tree_age_static(
         planting_density_norm(planting_density_trees_ha),
     )
 
+
 # Legacy 4-channel order (geo_mock / early API): tmax, tmin, precip, srad
 _LEGACY_4_NAMES: tuple[str, ...] = ("tmax", "tmin", "precip", "srad")
 
@@ -341,9 +342,7 @@ class YieldSurrogateModel(nn.Module):
 
         self.sequence_length = sequence_length
         self._legacy_input_width = climate_features == 4
-        self.climate_features = (
-            N_CLIMATE_CHANNELS if self._legacy_input_width else climate_features
-        )
+        self.climate_features = N_CLIMATE_CHANNELS if self._legacy_input_width else climate_features
         if galileo_dim < 0:
             raise ValueError(f"galileo_dim must be >= 0, got {galileo_dim}")
         self.galileo_dim = galileo_dim
@@ -705,9 +704,7 @@ class DeepEnsemble(nn.Module):
     ) -> None:
         super().__init__()
         kwargs = model_kwargs or {}
-        self.members = nn.ModuleList(
-            [YieldSurrogateModel(**kwargs) for _ in range(n_members)]
-        )
+        self.members = nn.ModuleList([YieldSurrogateModel(**kwargs) for _ in range(n_members)])
 
     def predict(
         self,

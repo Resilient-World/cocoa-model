@@ -42,7 +42,7 @@ def _require_econml() -> None:
 
 def _check_binary_treatment(series: pd.Series) -> None:
     vals = set(pd.unique(series.dropna()))
-    if not vals.issubset({0, 1, False, True}):
+    if not vals.issubset({0, 1}):
         raise ValueError("treatment_col must be binary 0/1 (control/treated)")
 
 
@@ -239,9 +239,7 @@ def doubly_robust_policy_value(
     if len(pi) != len(y) or len(tau) != len(y):
         raise ValueError("policy_mask and tau_hat must align with df rows")
 
-    m_hat, e_hat = _crossfit_nuisances_policy(
-        x, y, t, n_folds=n_folds, random_state=random_state
-    )
+    m_hat, e_hat = _crossfit_nuisances_policy(x, y, t, n_folds=n_folds, random_state=random_state)
     direct = pi * tau
     resid = y - m_hat - tau * t
     ipw_correction = (pi * t - pi * e_hat) / (e_hat * (1.0 - e_hat)) * resid
@@ -574,7 +572,9 @@ def _evaluate_tree_policy(
     random_state: int,
     n_bootstrap: int,
 ) -> tuple[float, tuple[float, float], np.ndarray, np.ndarray]:
-    x, _, _ = _panel_arrays(df, treatment_col=treatment_col, outcome_col=outcome_col, covariate_cols=covariate_cols)
+    x, _, _ = _panel_arrays(
+        df, treatment_col=treatment_col, outcome_col=outcome_col, covariate_cols=covariate_cols
+    )
     pi = (tree.predict(x) == 1).astype(float)
     tau = tree.predict_value(x).ravel()
     pv = doubly_robust_policy_value(
@@ -632,7 +632,9 @@ def learn_policy_tree(
         df, treatment_col=treatment_col, outcome_col=outcome_col, covariate_cols=covariate_cols
     )
     tree = _fit_dr_policy_tree(
-        x, y, t,
+        x,
+        y,
+        t,
         max_depth=max_depth,
         min_samples_leaf=min_samples_leaf,
         n_folds=n_folds,
@@ -645,15 +647,15 @@ def learn_policy_tree(
             raise ValueError(f"Missing cost column '{cost_col}'")
         cost = df[cost_col].astype(float).to_numpy()
         policy_est = _fit_cost_aware_policy_view(
-            tree, x, cost,
+            tree,
+            x,
+            cost,
             max_depth=max_depth,
             min_samples_leaf=min_samples_leaf,
             random_state=random_state,
         )
 
-    feature_names = list(
-        policy_est.policy_feature_names(feature_names=list(covariate_cols))
-    )
+    feature_names = list(policy_est.policy_feature_names(feature_names=list(covariate_cols)))
     treatment_names = list(policy_est.policy_treatment_names())
     df_reset = df.reset_index(drop=True)
 
@@ -901,17 +903,17 @@ def root_split_feature(result: PolicyTreeResult) -> str | None:
 
 
 __all__ = [
-    "PolicyTreeResult",
     "PolicyForestResult",
-    "rank_farms_by_uplift",
-    "policy_value_curve",
-    "optimal_targeting_policy",
+    "PolicyTreeResult",
     "doubly_robust_policy_value",
-    "targeting_from_cate",
-    "learn_policy_tree",
+    "first_split_threshold",
     "learn_policy_forest",
+    "learn_policy_tree",
+    "optimal_targeting_policy",
+    "policy_value_curve",
+    "rank_farms_by_uplift",
     "render_policy_rules",
     "render_policy_rules_from_forest",
-    "first_split_threshold",
     "root_split_feature",
+    "targeting_from_cate",
 ]

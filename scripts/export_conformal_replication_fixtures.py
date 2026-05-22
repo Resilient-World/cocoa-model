@@ -31,6 +31,7 @@ def synthetic_prophet_like_scores(n: int, *, seed: int, vol: float = 0.4) -> np.
         ar[t] = 0.7 * ar[t - 1] + rng.normal(0, 0.05)
     return np.maximum(base + ar, 0.0).astype(np.float64)
 
+
 OUT = _REPO / "tests" / "fixtures" / "conformal"
 N = 2000
 

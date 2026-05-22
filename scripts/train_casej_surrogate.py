@@ -25,9 +25,9 @@ if str(_REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 from models.casej_surrogate import (
+    DEFAULT_CASEJ_CHECKPOINT,
     CASEJPhysicsLoss,
     CASEJSurrogate,
-    DEFAULT_CASEJ_CHECKPOINT,
 )
 from validation.icco_yield_backtest import load_icco_table
 
@@ -72,7 +72,13 @@ def _icco_country_validation(
     if icco.empty:
         return {"icco_r2": float("nan"), "icco_mae": float("nan")}
 
-    from models.casej_process import CASEJSite, synthesize_daily_weather, site_to_static_vector, weather_to_climate_tensor
+    from models.casej_process import (
+        CASEJSite,
+        site_to_static_vector,
+        synthesize_daily_weather,
+        weather_to_climate_tensor,
+    )
+
     preds: list[float] = []
     obs: list[float] = []
     model.eval()
@@ -161,10 +167,14 @@ def train(
             mlflow.log_metric(k, v)
 
         checkpoint.parent.mkdir(parents=True, exist_ok=True)
-        torch.save({"state_dict": model.state_dict(), "val_mae": val_mae, "val_r2": val_r2}, checkpoint)
+        torch.save(
+            {"state_dict": model.state_dict(), "val_mae": val_mae, "val_r2": val_r2}, checkpoint
+        )
         mlflow.log_artifact(str(checkpoint))
 
-    logger.info("Saved CASEJ surrogate to %s (val_mae=%.3f, val_r2=%.3f)", checkpoint, val_mae, val_r2)
+    logger.info(
+        "Saved CASEJ surrogate to %s (val_mae=%.3f, val_r2=%.3f)", checkpoint, val_mae, val_r2
+    )
     return {"val_mae": val_mae, "val_r2": val_r2, **icco_metrics}
 
 
@@ -175,7 +185,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CASEJ_CHECKPOINT)
-    parser.add_argument("--generate", action="store_true", help="Run LHS generator if parquet missing")
+    parser.add_argument(
+        "--generate", action="store_true", help="Run LHS generator if parquet missing"
+    )
     parser.add_argument("--n-generate", type=int, default=1500)
     args = parser.parse_args(argv)
 
@@ -201,7 +213,14 @@ def main(argv: list[str] | None = None) -> int:
             raise FileNotFoundError(f"Training parquet not found: {args.data}. Run with --generate")
 
     df = pd.read_parquet(args.data)
-    train(df, epochs=args.epochs, batch_size=args.batch_size, lr=args.lr, device=device, checkpoint=args.checkpoint)
+    train(
+        df,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        lr=args.lr,
+        device=device,
+        checkpoint=args.checkpoint,
+    )
     return 0
 
 

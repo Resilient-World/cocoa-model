@@ -8,7 +8,8 @@ vendored copy under :mod:`models.vendor.galileo_data_utils` when the package is 
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 import torch
 

@@ -7,8 +7,6 @@ Local: optional ERA5 Zarr cache for batch training.
 
 from __future__ import annotations
 
-import structlog
-
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -16,14 +14,15 @@ from typing import Any
 import ee
 import numpy as np
 import pandas as pd
+import structlog
 import xarray as xr
 
 from data.cocoa_exposure import (
-    DEFAULT_AGRIFM_CHECKPOINT,
+    _REPO_ROOT,
     DEFAULT_AEF_CHECKPOINT,
+    DEFAULT_AGRIFM_CHECKPOINT,
     DEFAULT_GALILEO_CHECKPOINT,
     DEFAULT_SCALE_M,
-    _REPO_ROOT,
     processed_era5_zarr_path,
     region_for_point,
     sample_cocoa_probability_at_point,
@@ -123,13 +122,16 @@ def sample_worldcover_histogram(
     initialize_earth_engine(project=project)
     geom = _point_buffer(lat, lon, buffer_m)
     wc = _worldcover_image()
-    hist = wc.reduceRegion(
-        reducer=ee.Reducer.frequencyHistogram(),
-        geometry=geom,
-        scale=scale_m,
-        bestEffort=True,
-        maxPixels=1e9,
-    ).getInfo() or {}
+    hist = (
+        wc.reduceRegion(
+            reducer=ee.Reducer.frequencyHistogram(),
+            geometry=geom,
+            scale=scale_m,
+            bestEffort=True,
+            maxPixels=1e9,
+        ).getInfo()
+        or {}
+    )
     raw = hist.get(WORLDCOVER_BAND, hist.get("Map"))
     fractions = _parse_frequency_histogram(raw)
     n_pixels = int(sum(float(v) for v in (raw or {}).values()) if isinstance(raw, dict) else 0)
@@ -144,9 +146,7 @@ def sample_canopy_fragmentation_index(
     project: str | None = None,
 ) -> float:
     """Shannon diversity of land-cover classes in a 1 km WorldCover buffer."""
-    fractions, _ = sample_worldcover_histogram(
-        lat, lon, buffer_m=buffer_m, project=project
-    )
+    fractions, _ = sample_worldcover_histogram(lat, lon, buffer_m=buffer_m, project=project)
     return shannon_diversity(fractions)
 
 
@@ -176,13 +176,16 @@ def _cocoa_fraction_gee(
     cocoa_mask = ee.Image.constant(prob >= cocoa_prob_threshold).rename("cocoa")
     one = ee.Image.constant(1).rename("one")
     stacked = one.addBands(cocoa_mask)
-    stats = stacked.reduceRegion(
-        reducer=ee.Reducer.sum(),
-        geometry=geom,
-        scale=DEFAULT_SCALE_M,
-        bestEffort=True,
-        maxPixels=1e9,
-    ).getInfo() or {}
+    stats = (
+        stacked.reduceRegion(
+            reducer=ee.Reducer.sum(),
+            geometry=geom,
+            scale=DEFAULT_SCALE_M,
+            bestEffort=True,
+            maxPixels=1e9,
+        ).getInfo()
+        or {}
+    )
     total = float(stats.get("one", 0) or 0)
     cocoa_n = float(stats.get("cocoa", 0) or 0)
     if total <= 0:
@@ -243,7 +246,11 @@ def _extreme_precip_from_zarr(
     arr = np.asarray(precip.values).ravel()
     if arr.size < EXTREME_PRECIP_WINDOW_DAYS + 1:
         return None
-    roll = pd.Series(arr).rolling(EXTREME_PRECIP_WINDOW_DAYS, min_periods=EXTREME_PRECIP_WINDOW_DAYS).sum()
+    roll = (
+        pd.Series(arr)
+        .rolling(EXTREME_PRECIP_WINDOW_DAYS, min_periods=EXTREME_PRECIP_WINDOW_DAYS)
+        .sum()
+    )
     return int((roll > EXTREME_PRECIP_MM).sum())
 
 
@@ -297,12 +304,15 @@ def _extreme_precip_gee(
     rolled = coll.map(_rolling5)
     extreme = rolled.map(lambda im: im.gt(EXTREME_PRECIP_MM).rename("extreme"))
     count_img = extreme.sum()
-    sample = count_img.reduceRegion(
-        reducer=ee.Reducer.first(),
-        geometry=geom,
-        scale=5000,
-        bestEffort=True,
-    ).getInfo() or {}
+    sample = (
+        count_img.reduceRegion(
+            reducer=ee.Reducer.first(),
+            geometry=geom,
+            scale=5000,
+            bestEffort=True,
+        ).getInfo()
+        or {}
+    )
     raw = sample.get("extreme", 0)
     try:
         return int(float(raw))
@@ -335,12 +345,15 @@ def _dtr_growing_season_gee(
         return tmax.subtract(tmin).rename("dtr")
 
     mean_dtr = era5.map(_dtr).mean()
-    sample = mean_dtr.reduceRegion(
-        reducer=ee.Reducer.first(),
-        geometry=geom,
-        scale=11_000,
-        bestEffort=True,
-    ).getInfo() or {}
+    sample = (
+        mean_dtr.reduceRegion(
+            reducer=ee.Reducer.first(),
+            geometry=geom,
+            scale=11_000,
+            bestEffort=True,
+        ).getInfo()
+        or {}
+    )
     raw = sample.get("dtr", 0)
     try:
         return float(raw)
@@ -394,9 +407,7 @@ def build_landscape_feature_row(
         year=year,
         project=project,
     )
-    fragmentation = sample_canopy_fragmentation_index(
-        lat, lon, buffer_m=1000, project=project
-    )
+    fragmentation = sample_canopy_fragmentation_index(lat, lon, buffer_m=1000, project=project)
     strain = lookup_strain_region(lat, lon)
 
     extreme_count: int | None = None
@@ -434,9 +445,9 @@ def landscape_features_cache_path(year: int, *, repo_root: Path | None = None) -
 
 
 __all__ = [
-    "BufferComposition",
     "ESA_WORLDCOVER",
     "HORIZON_MONTHS",
+    "BufferComposition",
     "LandscapeFeatureRow",
     "build_landscape_feature_row",
     "landscape_features_cache_path",

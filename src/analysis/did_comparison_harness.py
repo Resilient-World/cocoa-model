@@ -370,9 +370,7 @@ def write_did_comparison_report(
 
     display = table.copy()
     display["95% CI"] = display.apply(
-        lambda r: f"[{r['ci_low']:.4f}, {r['ci_high']:.4f}]"
-        if pd.notna(r["ci_low"])
-        else "NA",
+        lambda r: f"[{r['ci_low']:.4f}, {r['ci_high']:.4f}]" if pd.notna(r["ci_low"]) else "NA",
         axis=1,
     )
     cols = [
@@ -438,4 +436,4 @@ def _try_forest_plot(table: pd.DataFrame, png_path: Path) -> None:
     plt.close(fig)
 
 
-__all__ = ["compare_did_methods", "write_did_comparison_report", "METHOD_ALIASES"]
+__all__ = ["METHOD_ALIASES", "compare_did_methods", "write_did_comparison_report"]

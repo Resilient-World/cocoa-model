@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Callable, Protocol
+from typing import Protocol
 
 import numpy as np
 
-from models.aci import AdaptiveConformalInference
-from models.conformal_pid import ConformalPID
 from models.cqr import ConformalCalibrator
-from models.online_conformal_base import conformal_quantile
-from models.eci import ECICutoff, ECIIntegral, ErrorQuantifiedConformalInference
-from models.online_conformal_base import empirical_coverage, interval_from_q
+from models.online_conformal_base import conformal_quantile, interval_from_q
 
 
 class OnlineUpdater(Protocol):

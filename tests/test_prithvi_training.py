@@ -6,7 +6,6 @@ from data.cocoa_dataset import DEFAULT_IMAGERY_BANDS
 from training.cocoa_prithvi_datamodule import (
     PRITHVI_RGB_BANDS,
     PRITHVI_SENTINEL2_BANDS,
-    CocoaPrithviDataModule,
     hls_bands_for_input,
     prithvi_normalization_tensors,
     resolve_band_indices,

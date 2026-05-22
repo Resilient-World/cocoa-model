@@ -7,8 +7,6 @@ best-effort; stale cache or deterministic fallbacks keep CI and offline runs wor
 
 from __future__ import annotations
 
-import structlog
-
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
@@ -16,6 +14,7 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 import requests
+import structlog
 
 log = structlog.get_logger(__name__)
 
@@ -247,13 +246,13 @@ def resolve_price_usd_per_tonne(
     elif pricing_basis == "12m_forward":
         curve = fetch_forward_curve(as_of=as_of)
         row = curve.loc[curve["tenor_months"] == 12]
-        icco = float(row.iloc[0]["price_usd_per_tonne"]) if len(row) else DEFAULT_ICE_SPOT_USD_PER_TONNE
-    else:
-        icco = float(
-            fetch_icco_daily()
-            .sort_values("date")
-            .iloc[-1]["icco_ny_usd_per_tonne"]
+        icco = (
+            float(row.iloc[0]["price_usd_per_tonne"])
+            if len(row)
+            else DEFAULT_ICE_SPOT_USD_PER_TONNE
         )
+    else:
+        icco = float(fetch_icco_daily().sort_values("date").iloc[-1]["icco_ny_usd_per_tonne"])
 
     return farm_gate_price_usd(icco, country_code) if farm_gate else icco
 

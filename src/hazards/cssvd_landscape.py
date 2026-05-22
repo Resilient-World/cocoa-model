@@ -8,8 +8,6 @@ with bootstrap prediction intervals.
 
 from __future__ import annotations
 
-import structlog
-
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -18,11 +16,16 @@ from typing import Any
 import joblib
 import numpy as np
 import pandas as pd
+import structlog
 from sksurv.ensemble import ComponentwiseGradientBoostingSurvivalAnalysis
 from sksurv.metrics import concordance_index_censored
 
-from data.cssvd_landscape_features import HORIZON_MONTHS, LandscapeFeatureRow, build_landscape_feature_row
-from data.cssvd_strain_atlas import STRAIN_REGIONS, StrainRegion
+from data.cssvd_landscape_features import (
+    HORIZON_MONTHS,
+    LandscapeFeatureRow,
+    build_landscape_feature_row,
+)
+from data.cssvd_strain_atlas import STRAIN_REGIONS
 
 log = structlog.get_logger(__name__)
 
@@ -202,7 +205,9 @@ class LandscapeCSSVDModel:
 
     def _align_features(self, feats: dict[str, float]) -> pd.DataFrame:
         if self._feature_columns is None:
-            cols = list(NUMERIC_FEATURES) + [f"{STRAIN_PREFIX}{r}" for r in STRAIN_REGIONS if r != "2"]
+            cols = list(NUMERIC_FEATURES) + [
+                f"{STRAIN_PREFIX}{r}" for r in STRAIN_REGIONS if r != "2"
+            ]
         else:
             cols = self._feature_columns
         row_df = features_to_dataframe([feats])
@@ -212,14 +217,18 @@ class LandscapeCSSVDModel:
         if self._model is None:
             raise RuntimeError("LandscapeCSSVDModel is not fitted; call fit() or from_checkpoint()")
         X = self._align_features(feats)
-        point = float(incidence_probability_at_horizon(self._model, X, horizon_months=self.horizon_months)[0])
+        point = float(
+            incidence_probability_at_horizon(self._model, X, horizon_months=self.horizon_months)[0]
+        )
 
         if self._bootstrap_models:
             boot_probs = []
             for m in self._bootstrap_models:
                 boot_probs.append(
                     float(
-                        incidence_probability_at_horizon(m, X, horizon_months=self.horizon_months)[0]
+                        incidence_probability_at_horizon(m, X, horizon_months=self.horizon_months)[
+                            0
+                        ]
                     )
                 )
             arr = np.asarray(boot_probs, dtype=np.float64)
@@ -245,9 +254,7 @@ class LandscapeCSSVDModel:
         use_gee_climate: bool = False,
     ) -> IncidencePrediction:
         """Build landscape features at ``(lat, lon)`` and predict 12-month incidence."""
-        row = build_landscape_feature_row(
-            lat, lon, year, use_gee_climate=use_gee_climate
-        )
+        row = build_landscape_feature_row(lat, lon, year, use_gee_climate=use_gee_climate)
         return self.predict_from_features(feature_dict_from_row(row))
 
     def save(self, path: Path | str) -> None:
@@ -338,11 +345,7 @@ def fit_synthetic_demo(*, n_samples: int = 400, random_state: int = 42) -> Lands
         rows.append(feats)
         # Higher non-cocoa -> lower hazard (longer duration if no event)
         hazard = np.exp(
-            -1.5 * non_cocoa
-            + 0.05 * extreme
-            + 0.08 * dtr
-            - 0.3 * frag
-            + 0.2 * (strain != "2")
+            -1.5 * non_cocoa + 0.05 * extreme + 0.08 * dtr - 0.3 * frag + 0.2 * (strain != "2")
         )
         dur = float(rng.exponential(1.0 / max(hazard, 0.05)) * 6 + 1)
         dur = min(dur, HORIZON_MONTHS * 2)

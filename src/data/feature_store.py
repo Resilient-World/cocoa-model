@@ -25,7 +25,6 @@ from torch import Tensor
 
 from models.yield_surrogate import CLIMATE_CHANNEL_NAMES, STATIC_FEATURE_NAMES
 
-
 _ZARR_CLIMATE_ALIASES: dict[str, tuple[str, ...]] = {
     "tmax": ("tmax",),
     "tmin": ("tmin",),
@@ -56,7 +55,9 @@ def _pick_var(ds: xr.Dataset, names: tuple[str, ...]) -> str:
     raise KeyError(f"None of {names} in dataset vars {list(ds.data_vars)}")
 
 
-def _climate_tensor_from_dataset(ds: xr.Dataset, year: int, *, sequence_length: int = 365) -> np.ndarray:
+def _climate_tensor_from_dataset(
+    ds: xr.Dataset, year: int, *, sequence_length: int = 365
+) -> np.ndarray:
     if "time" not in ds.dims and "time" not in ds.coords:
         raise ValueError("Climate dataset missing time dimension")
 
@@ -113,8 +114,12 @@ class FeatureStore:
         if paths is None:
             paths = FeatureStorePaths(
                 era5_zarr=root / "era5_2020_2024.zarr",
-                soil_zarr=(root / "soilgrids_static.zarr") if (root / "soilgrids_static.zarr").is_dir() else None,
-                gedi_zarr=(root / "gedi_monthly.zarr") if (root / "gedi_monthly.zarr").is_dir() else None,
+                soil_zarr=(root / "soilgrids_static.zarr")
+                if (root / "soilgrids_static.zarr").is_dir()
+                else None,
+                gedi_zarr=(root / "gedi_monthly.zarr")
+                if (root / "gedi_monthly.zarr").is_dir()
+                else None,
                 smap_zarr=(root / "smap_l4.zarr") if (root / "smap_l4.zarr").is_dir() else None,
             )
         self.paths = paths
@@ -164,7 +169,9 @@ class FeatureStore:
             soil_pt = _nearest_point(soil, lat, lon)
             if "awc_mm" in soil_pt:
                 awc_val = float(soil_pt["awc_mm"].values)
-            elif "soil" in soil_pt and {"sand", "clay", "soc"}.issubset(set(soil_pt["soil"].coords.get("property", []))):
+            elif "soil" in soil_pt and {"sand", "clay", "soc"}.issubset(
+                set(soil_pt["soil"].coords.get("property", []))
+            ):
                 awc_val = float(np.nan)
             else:
                 awc_val = float(np.nan)
@@ -202,7 +209,9 @@ class FeatureStore:
         statics: list[Tensor] = []
         for lat, lon in locations:
             climates.append(
-                self.climate_tensor(lat=lat, lon=lon, year=year, climate_window_days=climate_window_days)
+                self.climate_tensor(
+                    lat=lat, lon=lon, year=year, climate_window_days=climate_window_days
+                )
             )
             statics.append(
                 self.static_vector(lat=lat, lon=lon, static_feature_names=static_feature_names)
@@ -215,4 +224,3 @@ class FeatureStore:
 
 
 __all__ = ["FeatureStore", "FeatureStorePaths"]
-

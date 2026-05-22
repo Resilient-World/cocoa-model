@@ -8,20 +8,19 @@ with MLflow logging, AdamW, and cosine LR scheduling.
 
 from __future__ import annotations
 
-import structlog
-
 import argparse
 import os
 import sys
 from pathlib import Path
 
 import lightning.pytorch as pl
+import structlog
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import MLFlowLogger
-
-from data.cocoa_dataset import CLASS_NAMES
 from terratorch.datasets import HLSBands
 from terratorch.tasks import SemanticSegmentationTask
+
+from data.cocoa_dataset import CLASS_NAMES
 from training.cocoa_prithvi_datamodule import (
     PRITHVI_RGB_BANDS,
     PRITHVI_SENTINEL2_BANDS,
@@ -183,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
         log.info(
             "Unsupported --input-bands. Use 6-band Prithvi S2 stack "
             f"{PRITHVI_SENTINEL2_BANDS} or RGB {PRITHVI_RGB_BANDS}.",
-            )
+        )
         log.error("train_prithvi_failed", error=str(exc))
         return 1
 

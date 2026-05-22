@@ -7,13 +7,10 @@ backend (Xee). No raw NetCDF downloads.
 
 from __future__ import annotations
 
-import structlog
-
 from pathlib import Path
 
 import ee
 import numpy as np
-import pandas as pd
 import xarray as xr
 
 # Registers the ``ee`` Xarray backend (Xee).
@@ -21,15 +18,17 @@ import xee  # noqa: F401
 
 from data.agromet import (
     KELVIN_OFFSET,
-    FAO_ALBEDO,
-    FAO_GAMMA,
-    MAGNUS_A,
-    MAGNUS_B,
-    MAGNUS_C,
-    WIND10_TO_WIND2_FACTOR,
+)
+from data.agromet import (
     fao_et0_daily as _fao_et0_daily,
+)
+from data.agromet import (
     magnus_es_kpa as _magnus_es_kpa,
+)
+from data.agromet import (
     saturation_vapor_pressure_kpa as _saturation_vapor_pressure_kpa,
+)
+from data.agromet import (
     vpd_kpa as _vpd_kpa,
 )
 from data.gee_auth import initialize_earth_engine
@@ -135,11 +134,7 @@ def _build_daily_collection(
         v = land_img.select("v_component_of_wind_10m")
         wind10m = u.hypot(v).rename("wind10m")
 
-        srad = (
-            land_img.select("surface_solar_radiation_downwards_sum")
-            .divide(1e6)
-            .rename("srad")
-        )
+        srad = land_img.select("surface_solar_radiation_downwards_sum").divide(1e6).rename("srad")
 
         sw1 = land_img.select("volumetric_soil_water_layer_1")
         sw2 = land_img.select("volumetric_soil_water_layer_2")
@@ -394,7 +389,6 @@ def main(argv: list[str] | None = None) -> int:
     """CLI: ingest ERA5-Land daily stack for an AOI or named region to Zarr."""
     import argparse
     import logging
-    import sys
 
     from data.cocoa_exposure import (
         REGIONS,
@@ -411,7 +405,9 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Named cocoa region (bounding box from data.cocoa_exposure.REGIONS)",
     )
-    parser.add_argument("--aoi", type=Path, default=None, help="AOI GeoJSON path (overrides --region)")
+    parser.add_argument(
+        "--aoi", type=Path, default=None, help="AOI GeoJSON path (overrides --region)"
+    )
     parser.add_argument("--start", required=True, help="Start date YYYY-MM-DD")
     parser.add_argument("--end", required=True, help="End date YYYY-MM-DD (inclusive)")
     parser.add_argument(

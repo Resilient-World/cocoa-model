@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import structlog
-
 import argparse
 import json
 import sys
 from pathlib import Path
+
+import structlog
 
 log = structlog.get_logger(__name__)
 MAX_SMD_THRESHOLD = 0.10
@@ -16,9 +16,7 @@ MAX_SMD_THRESHOLD = 0.10
 def validate_smd_report(report: dict, *, threshold: float = MAX_SMD_THRESHOLD) -> None:
     max_smd = float(report.get("max_smd", report.get("max_smd_matched", 1.0)))
     if max_smd >= threshold:
-        raise SystemExit(
-            f"SMD balance gate failed: max_smd={max_smd:.4f} >= {threshold:.2f}"
-        )
+        raise SystemExit(f"SMD balance gate failed: max_smd={max_smd:.4f} >= {threshold:.2f}")
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -8,10 +8,9 @@ conv proxy for CPU CI when the registry is unavailable.
 
 from __future__ import annotations
 
+from typing import Literal
+
 import structlog
-
-from typing import Any, Literal
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -35,9 +34,7 @@ def require_terramind_extra() -> None:
     import importlib.util
 
     if importlib.util.find_spec("terratorch") is None:
-        raise ImportError(
-            'TerraMind requires optional deps: pip install -e ".[terramind]"'
-        )
+        raise ImportError('TerraMind requires optional deps: pip install -e ".[terramind]"')
 
 
 def _collapse_tokens_to_map(tensor: torch.Tensor) -> torch.Tensor:
@@ -209,10 +206,10 @@ __all__ = [
     "DEFAULT_TIM_VARIANT",
     "DEFAULT_VARIANT",
     "DEM_CHANNELS",
-    "ModalityKey",
     "S1GRD_CHANNELS",
     "S2L2A_CHANNELS",
     "TERRAMIND_HF_REPO",
+    "ModalityKey",
     "TerraMindBackbone",
     "load_terramind_backbone",
     "require_terramind_extra",

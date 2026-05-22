@@ -21,7 +21,6 @@ import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
 import torch
-import torch.nn.functional as F
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
@@ -40,7 +39,6 @@ from models.ensemble_surrogate import (
     N_CLIMATE,
     N_STATIC,
     SEQ_LEN,
-    STATIC_FEATURE_NAMES,
     CocoaYieldPINN,
     YieldEnsemble,
     physics_residual_loss,
@@ -119,7 +117,9 @@ class FarmYieldDataset(Dataset[dict[str, Tensor]]):
         if not zarr_path.is_dir():
             matches = list(self.era5_dir.glob(f"{farm_id}*.zarr"))
             if not matches:
-                raise FileNotFoundError(f"No ERA5 Zarr for farm_id={farm_id!r} under {self.era5_dir}")
+                raise FileNotFoundError(
+                    f"No ERA5 Zarr for farm_id={farm_id!r} under {self.era5_dir}"
+                )
             zarr_path = matches[0]
         tensor = climate_tensor_from_zarr(xr.open_zarr(zarr_path, consolidated=True))
         self._climate_cache[farm_id] = tensor
@@ -395,12 +395,20 @@ def fit_stacking_from_predictions(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Train CocoaYieldPINN yield surrogate")
-    parser.add_argument("--case2-parquet", type=Path, default=_REPO_ROOT / "data/simulations/case2_lhs.parquet")
-    parser.add_argument("--almanac-parquet", type=Path, default=_REPO_ROOT / "data/simulations/almanac_lhs.parquet")
+    parser.add_argument(
+        "--case2-parquet", type=Path, default=_REPO_ROOT / "data/simulations/case2_lhs.parquet"
+    )
+    parser.add_argument(
+        "--almanac-parquet", type=Path, default=_REPO_ROOT / "data/simulations/almanac_lhs.parquet"
+    )
     parser.add_argument("--era5-dir", type=Path, default=_REPO_ROOT / "data/era5")
     parser.add_argument("--checkpoint", type=Path, default=_REPO_ROOT / "models/pinn_v1.ckpt")
-    parser.add_argument("--ensemble-weights", type=Path, default=_REPO_ROOT / "models/ensemble_weights.json")
-    parser.add_argument("--metrics-json", type=Path, default=_REPO_ROOT / "reports/pinn_metrics.json")
+    parser.add_argument(
+        "--ensemble-weights", type=Path, default=_REPO_ROOT / "models/ensemble_weights.json"
+    )
+    parser.add_argument(
+        "--metrics-json", type=Path, default=_REPO_ROOT / "reports/pinn_metrics.json"
+    )
     parser.add_argument("--max-epochs", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=3e-4)

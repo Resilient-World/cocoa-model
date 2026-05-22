@@ -55,9 +55,7 @@ def test_distribution_shift_eci_reconverges() -> None:
 
     scores = distribution_shift_scores(T=1000, shift_at=500, seed=4)
     eci = ErrorQuantifiedConformalInference(alpha=ALPHA, eta=2.0, window=100)
-    _, _, _, qs = run_online_coverage(
-        eci, scores, alpha=ALPHA, burn_in=0, warm_start=200
-    )
+    _, _, _, qs = run_online_coverage(eci, scores, alpha=ALPHA, burn_in=0, warm_start=200)
     cov_tail = post_shift_coverage(scores, qs, shift_at=500, window=100)
     assert abs(cov_tail - NOMINAL) <= 0.05
 
@@ -75,7 +73,5 @@ def test_wu_table_eci_variants_coverage(cls: type, fixture_name: str) -> None:
     scores = np.load(FIXTURES / f"{fixture_name}.npz")["scores"]
     eta = 4.0 if cls is ECIIntegral else 2.5
     updater = cls(alpha=ALPHA, eta=eta, window=100)
-    cov, _, _, _ = run_online_coverage(
-        updater, scores, alpha=ALPHA, burn_in=400, warm_start=200
-    )
+    cov, _, _, _ = run_online_coverage(updater, scores, alpha=ALPHA, burn_in=400, warm_start=200)
     assert NOMINAL - WU_TOL <= cov <= NOMINAL + WU_TOL

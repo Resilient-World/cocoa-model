@@ -8,14 +8,13 @@ stacks with a leading ``sample`` dimension for stochastic scenario UQ.
 
 from __future__ import annotations
 
-import structlog
-
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
+import structlog
 import xarray as xr
 
 from counterfactual.cmip6_scenarios import ScenarioBuilder
@@ -76,7 +75,9 @@ def corrdiff_cache_path(
     return processed_dir / f"corrdiff_{scenario}_{int(horizon)}_{region_key}.zarr"
 
 
-def corrdiff_cache_missing_message(cache_path: Path, scenario: str, horizon: int, region: str) -> str:
+def corrdiff_cache_missing_message(
+    cache_path: Path, scenario: str, horizon: int, region: str
+) -> str:
     return (
         f"CorrDiff cache not found at {cache_path}. "
         f"Run: PYTHONPATH=src python scripts/run_corrdiff_scenario_bulk.py "
@@ -138,10 +139,8 @@ class CorrDiffCMIP6Downscaler:
         aggregate to daily ERA5-schema fields for the configured region bbox.
         """
         _require_corrdiff()
-        import torch
         from earth2studio.data import CMIP6, CMIP6MultiRealm
         from earth2studio.data.utils import fetch_data
-        from earth2studio.models.dx import CorrDiffCMIP6
 
         model = self._load_model()
         device = next(model.parameters()).device
@@ -317,8 +316,14 @@ def _linear_delta_month_bridge(
     rng = np.random.default_rng(hash((horizon, month_start.month, region)) % (2**32))
     for s in range(n_samples):
         noise = xr.Dataset(
-            {v: (daily[v].dims, daily[v].values + rng.normal(0, 0.02, daily[v].shape).astype(np.float32))
-             for v in output_variables if v in daily.data_vars}
+            {
+                v: (
+                    daily[v].dims,
+                    daily[v].values + rng.normal(0, 0.02, daily[v].shape).astype(np.float32),
+                )
+                for v in output_variables
+                if v in daily.data_vars
+            }
         )
         ds_s = daily.copy()
         for v in output_variables:
@@ -340,7 +345,11 @@ def _hourly_to_daily_era5(
     if "variable" in hourly.dims or "variable" in hourly.coords:
         da = hourly["values"] if "values" in hourly else hourly.to_array(dim="variable")
     else:
-        da = hourly.to_array(dim="variable") if len(hourly.data_vars) > 1 else next(iter(hourly.data_vars.values()))
+        da = (
+            hourly.to_array(dim="variable")
+            if len(hourly.data_vars) > 1
+            else next(iter(hourly.data_vars.values()))
+        )
 
     # Standardize dim names
     rename = {}
@@ -522,10 +531,10 @@ def write_synthetic_corrdiff_cache(
 
 
 __all__ = [
-    "CorrDiffCMIP6Downscaler",
     "DEFAULT_OUTPUT_VARIABLES",
-    "corrdiff_cache_path",
+    "CorrDiffCMIP6Downscaler",
     "corrdiff_cache_missing_message",
+    "corrdiff_cache_path",
     "load_corrdiff_scenario_ensemble",
     "write_synthetic_corrdiff_cache",
 ]

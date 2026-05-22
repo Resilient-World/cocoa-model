@@ -7,13 +7,10 @@ mirid abundance; Asogwa et al. (2022) — ~25–30% yield attribution under high
 
 from __future__ import annotations
 
-from enum import Enum
-
 import numpy as np
 import xarray as xr
 
 from hazards.black_pod import ShadeSpecies
-
 
 # Mirid shade modifiers (Asitoakor 2024).
 SHADE_MIRID_MULTIPLIERS: dict[ShadeSpecies, float] = {
@@ -79,4 +76,4 @@ class MiridPressureModel:
         return float(np.clip(self.max_attributed_loss * pressure, 0.0, 1.0))
 
 
-__all__ = ["MiridPressureModel", "SHADE_MIRID_MULTIPLIERS"]
+__all__ = ["SHADE_MIRID_MULTIPLIERS", "MiridPressureModel"]

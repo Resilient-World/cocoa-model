@@ -23,7 +23,6 @@ if str(_REPO_ROOT) not in sys.path:
 
 from api.online_conformal_store import stratum_key
 from data.cocoa_exposure import REGIONS
-from models.cqr import ConformalCalibrator
 from models.eci import ECIIntegral
 from models.online_conformal_base import conformal_quantile
 from tests.conformal_online_helpers import run_online_coverage
@@ -206,9 +205,7 @@ def main() -> None:
     for region in REGIONS:
         for scenario in SCENARIOS:
             for horizon in HORIZONS:
-                key = stratum_key(
-                    scenario, horizon, region, downscaling_method=args.downscaling
-                )
+                key = stratum_key(scenario, horizon, region, downscaling_method=args.downscaling)
                 if use_synthetic:
                     row = validate_stratum_synthetic(
                         key=key,
@@ -270,7 +267,12 @@ def main() -> None:
     if failed:
         logger.error("ECI-Integral coverage out of band for: %s", ", ".join(failed))
         raise SystemExit(1)
-    logger.info("All %d strata passed ECI-Integral coverage gate [%.0f%%, %.0f%%]", len(results), COVERAGE_LO * 100, COVERAGE_HI * 100)
+    logger.info(
+        "All %d strata passed ECI-Integral coverage gate [%.0f%%, %.0f%%]",
+        len(results),
+        COVERAGE_LO * 100,
+        COVERAGE_HI * 100,
+    )
 
 
 if __name__ == "__main__":

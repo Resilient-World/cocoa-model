@@ -11,10 +11,10 @@ import torch
 import xarray as xr
 
 from api.feature_resolver import (
+    SITE_STATIC_DIM,
     FarmFeatureResolver,
     FeatureResolverConfig,
     ResolvedStaticFeatures,
-    SITE_STATIC_DIM,
     _awc_mm_from_texture,
     _climate_tensor_from_dataset,
     _lookup_farm_registry,

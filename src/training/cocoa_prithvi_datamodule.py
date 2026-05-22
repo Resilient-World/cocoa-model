@@ -5,14 +5,14 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import torch
+from terratorch.datasets import HLSBands
 from torchgeo.datasets.utils import Sample
 
 from data.cocoa_dataset import (
     CLASS_NAMES,
-    CocoaDataModule,
     DEFAULT_IMAGERY_BANDS,
+    CocoaDataModule,
 )
-from terratorch.datasets import HLSBands
 
 # Sentinel-2 band names aligned with Prithvi EO v2 pretraining (6 channels)
 PRITHVI_SENTINEL2_BANDS: tuple[str, ...] = ("B2", "B3", "B4", "B8", "B11", "B12")

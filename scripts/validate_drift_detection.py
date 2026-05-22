@@ -158,7 +158,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--shift-at", type=int, default=PAPER_SHIFT_AT)
     parser.add_argument("--alpha-fpr", type=float, default=ALPHA_FPR)
     parser.add_argument("--quick", action="store_true", help="Fewer seeds and shorter stream")
-    parser.add_argument("--plot", action="store_true", help="Write PNG figures (requires matplotlib)")
+    parser.add_argument(
+        "--plot", action="store_true", help="Write PNG figures (requires matplotlib)"
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -181,7 +183,9 @@ def main(argv: list[str] | None = None) -> int:
         d2 = _run_covariate_shift(t=t, shift_at=shift_at, seed=seed + 200, alpha_fpr=args.alpha_fpr)
         if d2 is not None:
             covariate_delays.append(d2)
-        joint_hits.append(_run_joint_shift(t=t, shift_at=shift_at, seed=seed + 300, alpha_fpr=args.alpha_fpr))
+        joint_hits.append(
+            _run_joint_shift(t=t, shift_at=shift_at, seed=seed + 300, alpha_fpr=args.alpha_fpr)
+        )
         cusum_rates.append(_cusum_agreement(t, shift_at, seed + 400))
 
     far = float(np.mean(null_alarms))
@@ -205,8 +209,8 @@ def main(argv: list[str] | None = None) -> int:
         "## Configuration",
         "",
         f"- Streams per scenario: {n_seeds} seeds × {t} steps",
-        f"- Changepoint at t={shift_at} (paper baseline ~{PAPER_SHIFT_AT}, ±{int(DELAY_TOLERANCE*100)}% delay window)",
-        f"- `alpha_fpr={args.alpha_fpr}` (alarm when log-martingale > {math.log(1/args.alpha_fpr):.3f})",
+        f"- Changepoint at t={shift_at} (paper baseline ~{PAPER_SHIFT_AT}, ±{int(DELAY_TOLERANCE * 100)}% delay window)",
+        f"- `alpha_fpr={args.alpha_fpr}` (alarm when log-martingale > {math.log(1 / args.alpha_fpr):.3f})",
         "",
         "## Results",
         "",
@@ -243,12 +247,16 @@ def main(argv: list[str] | None = None) -> int:
             wctm = WeightedConformalTestMartingale(alpha_fpr=args.alpha_fpr)
             log_path = []
             for step in range(t):
-                score = float(rng.normal(0.0, 0.5)) if step < shift_at else float(rng.normal(3.0, 0.7))
+                score = (
+                    float(rng.normal(0.0, 0.5)) if step < shift_at else float(rng.normal(3.0, 0.7))
+                )
                 log_path.append(wctm.update(score))
             plt.figure(figsize=(8, 3))
             plt.plot(log_path)
             plt.axvline(shift_at, color="red", linestyle="--", label="shift")
-            plt.axhline(math.log(1 / args.alpha_fpr), color="orange", linestyle=":", label="threshold")
+            plt.axhline(
+                math.log(1 / args.alpha_fpr), color="orange", linestyle=":", label="threshold"
+            )
             plt.title("WCTM log-martingale (concept shift example)")
             plt.legend()
             plt.tight_layout()

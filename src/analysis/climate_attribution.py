@@ -271,12 +271,8 @@ def _paired_mc_yields(
     if n_mc_samples > 1:
         y_factual_std = float(stack_f.std(unbiased=False).item())
         y_cf_std = float(stack_cf.std(unbiased=False).item())
-        cov = float(
-            ((stack_f - stack_f.mean()) * (stack_cf - stack_cf.mean())).mean().item()
-        )
-        climate_loss_se = float(
-            np.sqrt(max(0.0, y_factual_std**2 + y_cf_std**2 - 2.0 * cov))
-        )
+        cov = float(((stack_f - stack_f.mean()) * (stack_cf - stack_cf.mean())).mean().item())
+        climate_loss_se = float(np.sqrt(max(0.0, y_factual_std**2 + y_cf_std**2 - 2.0 * cov)))
     else:
         y_factual_std = 0.0
         y_cf_std = 0.0

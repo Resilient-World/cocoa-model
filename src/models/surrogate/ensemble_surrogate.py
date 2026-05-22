@@ -7,14 +7,12 @@ Static inputs cover management and soil (8). Two heads predict log1p yield (kg/h
 
 from __future__ import annotations
 
-import structlog
-
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
+import structlog
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -182,7 +180,9 @@ class CocoaYieldPINN(pl.LightningModule):
 
     def _validate_inputs(self, x_climate: Tensor, x_static: Tensor) -> None:
         if x_climate.ndim != 3:
-            raise ValueError(f"x_climate must be [B, {N_CLIMATE}, {SEQ_LEN}], got {tuple(x_climate.shape)}")
+            raise ValueError(
+                f"x_climate must be [B, {N_CLIMATE}, {SEQ_LEN}], got {tuple(x_climate.shape)}"
+            )
         if x_climate.shape[1] != N_CLIMATE or x_climate.shape[2] != SEQ_LEN:
             raise ValueError(
                 f"x_climate shape {tuple(x_climate.shape)} != ({N_CLIMATE}, {SEQ_LEN})"

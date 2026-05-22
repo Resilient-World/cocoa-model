@@ -23,8 +23,12 @@ def _to_schema_panel(df: pd.DataFrame, *, treatment_year: int | None = None) -> 
             years = sorted(out["year"].unique())
             ty = years[len(years) // 2] if years else years[0]
         pre_mask = out["year"] < ty if ty is not None else out["treatment"] == 0
-        out["yield_pre"] = out.loc[pre_mask].groupby("farm_id")["yield_tonnes_per_ha"].transform("mean")
-        out["yield_post"] = out.loc[~pre_mask].groupby("farm_id")["yield_tonnes_per_ha"].transform("mean")
+        out["yield_pre"] = (
+            out.loc[pre_mask].groupby("farm_id")["yield_tonnes_per_ha"].transform("mean")
+        )
+        out["yield_post"] = (
+            out.loc[~pre_mask].groupby("farm_id")["yield_tonnes_per_ha"].transform("mean")
+        )
         out["yield_pre"] = out["yield_pre"].fillna(out["yield_tonnes_per_ha"])
         out["yield_post"] = out["yield_post"].fillna(out["yield_tonnes_per_ha"])
     if "cocoa_price_usd" not in out.columns:

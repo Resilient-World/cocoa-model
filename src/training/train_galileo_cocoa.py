@@ -8,14 +8,13 @@ with inverse-frequency class weights, two-stage backbone freezing, and MLflow lo
 
 from __future__ import annotations
 
-import structlog
-
 import argparse
 import os
 import sys
 from pathlib import Path
 
 import lightning.pytorch as pl
+import structlog
 import torch
 import torch.nn.functional as F
 from lightning.pytorch.callbacks import Callback, LearningRateMonitor, ModelCheckpoint
@@ -226,7 +225,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--mlflow-run-name", type=str, default="galileo-cocoa-seg")
     parser.add_argument("--checkpoint-dir", type=Path, default=Path("models/checkpoints"))
     parser.add_argument("--class-weight-batches", type=int, default=50)
-    parser.add_argument("--synthetic", action="store_true", help="Smoke training without tile files")
+    parser.add_argument(
+        "--synthetic", action="store_true", help="Smoke training without tile files"
+    )
     parser.add_argument("--quick", action="store_true", help="Few epochs / nano model for CI")
     parser.add_argument(
         "--out",

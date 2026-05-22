@@ -6,7 +6,7 @@ Pure NumPy; no external conformal libraries.
 
 from __future__ import annotations
 
-from typing import Deque
+from collections import deque
 
 import numpy as np
 
@@ -37,7 +37,7 @@ def miscoverage_indicator(score: float, q: float) -> float:
 
 
 def adaptive_learning_rate(
-    scores_window: Deque[float] | list[float],
+    scores_window: deque[float] | list[float],
     eta_base: float,
     *,
     window: int = 100,

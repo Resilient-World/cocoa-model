@@ -20,7 +20,9 @@ from registry.mlflow_registry import register_model
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Register checkpoint as MLflow challenger")
     parser.add_argument("--model-name", default="yield_surrogate_v2")
-    parser.add_argument("--checkpoint", type=Path, default=_REPO_ROOT / "models" / "yield_surrogate_v2.pt")
+    parser.add_argument(
+        "--checkpoint", type=Path, default=_REPO_ROOT / "models" / "yield_surrogate_v2.pt"
+    )
     parser.add_argument("--experiment", default="resilient-cocoa-registry")
     args = parser.parse_args(argv)
 
@@ -32,7 +34,9 @@ def main(argv: list[str] | None = None) -> int:
             artifacts={"checkpoint": str(args.checkpoint)},
         )
         version = register_model(args.model_name, run.info.run_id, alias="challenger")
-        print(f"Registered {args.model_name} version {version} as challenger (run {run.info.run_id})")
+        print(
+            f"Registered {args.model_name} version {version} as challenger (run {run.info.run_id})"
+        )
     return 0
 
 

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import math
 
-import pytest
-
 from monitoring.conformal_cusum import ConformalCUSUM
 from monitoring.wctm import (
     WeightedConformalTestMartingale,

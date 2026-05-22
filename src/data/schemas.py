@@ -136,8 +136,7 @@ def validate_dataframe(schema: type[pa.DataFrameModel], df: pd.DataFrame) -> pd.
     except pa.errors.SchemaErrors as exc:
         cases = exc.failure_cases.head(3).to_dict(orient="records")
         raise ValueError(
-            f"Schema validation failed for {schema.__name__}: {exc.message}; "
-            f"examples={cases}"
+            f"Schema validation failed for {schema.__name__}: {exc.message}; examples={cases}"
         ) from exc
 
 

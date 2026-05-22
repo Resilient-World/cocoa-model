@@ -179,8 +179,7 @@ def _verify_paired_tiles(image_dir: Path, mask_dir: Path) -> None:
         preview = ", ".join(missing[:5])
         suffix = f" (and {len(missing) - 5} more)" if len(missing) > 5 else ""
         raise FileNotFoundError(
-            f"Missing mask GeoTIFFs for {len(missing)} imagery file(s): "
-            f"{preview}{suffix}"
+            f"Missing mask GeoTIFFs for {len(missing)} imagery file(s): {preview}{suffix}"
         )
 
 
@@ -286,4 +285,3 @@ class CocoaDataModule(GeoDataModule):
         if self.trainer and self.trainer.training and self.train_aug is not None:
             return self.train_aug(batch)
         return batch
-

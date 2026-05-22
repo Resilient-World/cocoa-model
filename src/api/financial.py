@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from api.schemas import FinancialImpactResponse
 
 from finance.pricing import (
     PricingBasis,
-    SupportedCurrency,
     convert_usd_amount,
     infer_country_code,
     resolve_price_usd_per_tonne,
@@ -100,7 +102,9 @@ def calculate_financial_impact(
     usd_low = max(0.0, tonnes_low) * price_usd
     usd_high = max(0.0, tonnes_high) * price_usd
 
-    def _pack(amount_usd: float, low_usd: float, high_usd: float, code: CurrencyCode) -> FinancialImpact:
+    def _pack(
+        amount_usd: float, low_usd: float, high_usd: float, code: CurrencyCode
+    ) -> FinancialImpact:
         return FinancialImpact(
             point=convert_usd_amount(amount_usd, code),
             ci_low=convert_usd_amount(low_usd, code),
@@ -119,7 +123,7 @@ def calculate_financial_impact(
     return FinancialImpactMulti(primary=primary, usd=usd, ghs=ghs, xof=xof)
 
 
-def financial_impact_to_schema(block: FinancialImpactMulti) -> "FinancialImpactResponse":
+def financial_impact_to_schema(block: FinancialImpactMulti) -> FinancialImpactResponse:
     """Map dataclass bundle to Pydantic response (avoids circular import at module load)."""
     from api.schemas import CurrencyFinancialBand, FinancialImpactResponse
 

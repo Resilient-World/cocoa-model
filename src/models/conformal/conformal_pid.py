@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 from collections import deque
-from typing import Callable, Deque
+from collections.abc import Callable
 
 from models.conformal.online_conformal_base import adaptive_learning_rate, miscoverage_indicator
 
@@ -49,7 +49,7 @@ class ConformalPID:
         self.g_prime = g_prime
         self.q: float = float(q_init)
         self.t: int = 0
-        self._scores: Deque[float] = deque(maxlen=10_000)
+        self._scores: deque[float] = deque(maxlen=10_000)
         self._cum_err: float = 0.0
 
     @property

@@ -40,7 +40,7 @@ def _sample_grid(n: int, region: str, seed: int) -> tuple[np.ndarray, np.ndarray
     rng = np.random.default_rng(seed)
     lats, lons, labels = [], [], []
     per = max(n // 2, 10)
-    for reg in (["ghana", "civ"] if region == "both" else [region]):
+    for reg in ["ghana", "civ"] if region == "both" else [region]:
         lat_min, lat_max, lon_min, lon_max = region_latlon_bounds(reg)
         la = rng.uniform(lat_min, lat_max, per)
         lo = rng.uniform(lon_min, lon_max, per)
@@ -103,7 +103,9 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     fold_rows: list[dict[str, float | int]] = []
-    for fold_i, (_train_idx, test_idx) in enumerate(splitter.split(lats, lons, residuals=residuals)):
+    for fold_i, (_train_idx, test_idx) in enumerate(
+        splitter.split(lats, lons, residuals=residuals)
+    ):
         if len(test_idx) < 5:
             continue
         yt = labels[test_idx] >= 0.5
@@ -132,12 +134,16 @@ def main(argv: list[str] | None = None) -> int:
             f"{row['precision']:.3f} | {row['recall']:.3f} |"
         )
     lines.append("")
-    lines.append("Backbones (AEF, Galileo, AgriFM, ensemble_v2) use the same fold indices in production runs.")
+    lines.append(
+        "Backbones (AEF, Galileo, AgriFM, ensemble_v2) use the same fold indices in production runs."
+    )
     out_md.write_text("\n".join(lines), encoding="utf-8")
     fig_path = args.out_dir / "figures" / f"variogram_{day}.png"
     _plot_variogram(fig_path, vario)
     meta = args.out_dir / f"spatial_cv_{day}.json"
-    meta.write_text(json.dumps({"variogram": vario, "folds": fold_rows}, indent=2), encoding="utf-8")
+    meta.write_text(
+        json.dumps({"variogram": vario, "folds": fold_rows}, indent=2), encoding="utf-8"
+    )
     logger.info("Wrote %s", out_md)
     return 0
 

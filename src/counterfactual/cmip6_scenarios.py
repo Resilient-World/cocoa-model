@@ -9,17 +9,16 @@ This is intentionally compatible with :mod:`counterfactual.delta_downscaler` uti
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
 import numpy as np
 import xarray as xr
 
+from api.telemetry import trace_span
 from counterfactual.delta_downscaler import (
     _apply_monthly_additive,
     _apply_monthly_multiplicative,
     _recompute_vpd_et0_cwd,
 )
-from api.telemetry import trace_span
 from data.era5_ingest import compute_derived_features
 
 
@@ -82,15 +81,19 @@ class ScenarioBuilder:
         delta_hurs = (hist_m["hurs"] - fut_m["hurs"]).astype(np.float32)
 
         # multiplicative helper is adjusted = factual / ratio; to apply forward ratio we invert.
-        ratio_pr = (hist_m["pr"] / fut_m["pr"].where(fut_m["pr"] != 0)).clip(min=1e-6).astype(
-            np.float32
+        ratio_pr = (
+            (hist_m["pr"] / fut_m["pr"].where(fut_m["pr"] != 0)).clip(min=1e-6).astype(np.float32)
         )
         ratio_rsds = (
-            hist_m["rsds"] / fut_m["rsds"].where(fut_m["rsds"] != 0)
-        ).clip(min=1e-6).astype(np.float32)
+            (hist_m["rsds"] / fut_m["rsds"].where(fut_m["rsds"] != 0))
+            .clip(min=1e-6)
+            .astype(np.float32)
+        )
         ratio_wind = (
-            hist_m["sfcWind"] / fut_m["sfcWind"].where(fut_m["sfcWind"] != 0)
-        ).clip(min=1e-6).astype(np.float32)
+            (hist_m["sfcWind"] / fut_m["sfcWind"].where(fut_m["sfcWind"] != 0))
+            .clip(min=1e-6)
+            .astype(np.float32)
+        )
 
         out = hist.copy()
         out["tmean"] = _apply_monthly_additive(out["tmean"], delta_tas)
@@ -115,4 +118,3 @@ class ScenarioBuilder:
         out.attrs["window_end"] = window[1]
         out.attrs["method"] = "cmip6_delta_change"
         return out
-

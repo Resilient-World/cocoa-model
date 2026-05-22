@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import structlog
-
 import os
 import sys
 from pathlib import Path
 from typing import Any
 
 import ee
+import structlog
 
 log = structlog.get_logger(__name__)
 # Kumasi, Ghana — representative cocoa-belt test location (lon, lat)
@@ -60,7 +59,9 @@ def _load_dotenv() -> None:
 
 
 def _resolve_project(project: str | None) -> str | None:
-    return project or os.environ.get("EARTHENGINE_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT")
+    return (
+        project or os.environ.get("EARTHENGINE_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT")
+    )
 
 
 def _is_auth_error(exc: BaseException) -> bool:
@@ -146,9 +147,7 @@ def initialize_earth_engine(
         if _is_already_initialized_error(exc):
             return
         if _is_auth_error(exc):
-            raise EarthEngineNotAuthenticatedError(
-                f"{exc}\n\n{AUTHENTICATE_INSTRUCTIONS}"
-            ) from exc
+            raise EarthEngineNotAuthenticatedError(f"{exc}\n\n{AUTHENTICATE_INSTRUCTIONS}") from exc
         raise EarthEngineAuthError(
             f"Failed to initialize Earth Engine: {exc}\n\n"
             "Check that Earth Engine is enabled for your GCP project and that "
@@ -156,9 +155,7 @@ def initialize_earth_engine(
         ) from exc
     except Exception as exc:
         if _is_auth_error(exc):
-            raise EarthEngineNotAuthenticatedError(
-                f"{exc}\n\n{AUTHENTICATE_INSTRUCTIONS}"
-            ) from exc
+            raise EarthEngineNotAuthenticatedError(f"{exc}\n\n{AUTHENTICATE_INSTRUCTIONS}") from exc
         raise EarthEngineAuthError(f"Failed to initialize Earth Engine: {exc}") from exc
 
 
@@ -188,9 +185,7 @@ def get_elevation_at_point(
 
     elevation = value.getInfo()
     if elevation is None:
-        raise EarthEngineAuthError(
-            f"Elevation sample was empty for ({lat:.4f}, {lon:.4f})."
-        )
+        raise EarthEngineAuthError(f"Elevation sample was empty for ({lat:.4f}, {lon:.4f}).")
 
     return float(elevation)
 

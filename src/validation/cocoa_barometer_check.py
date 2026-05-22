@@ -7,14 +7,12 @@ anomaly directions in the Barometer (positive / negative / neutral).
 
 from __future__ import annotations
 
-import structlog
-
 import json
 import logging
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
+import structlog
 
 from validation._report import ValidationResult, write_report
 from validation.icco_yield_backtest import (
@@ -47,7 +45,9 @@ def _sign_from_delta(delta: float, tol: float = 0.02) -> str:
     return "neutral"
 
 
-def predicted_yoy_signs(icco_df: pd.DataFrame, yield_factors: dict[str, float] | None) -> pd.DataFrame:
+def predicted_yoy_signs(
+    icco_df: pd.DataFrame, yield_factors: dict[str, float] | None
+) -> pd.DataFrame:
     """Derive YoY production change sign from aggregated model production forecasts."""
     preds = predict_national_production(icco_df, country_yield_factors=yield_factors)
     rows: list[dict] = []

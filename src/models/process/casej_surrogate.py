@@ -8,20 +8,18 @@ and shade-LAI VPD moderation.
 
 from __future__ import annotations
 
-import structlog
-
 from pathlib import Path
-from typing import Any
 
+import structlog
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
 from models.surrogate.yield_surrogate import (
     CLIMATE_IDX,
-    MCDropout,
     N_CLIMATE_CHANNELS,
     N_STATIC_SITE,
+    MCDropout,
     YieldPrediction,
 )
 
@@ -78,8 +76,12 @@ class CASEJPhysicsLoss(nn.Module):
         climate: Tensor,
         static: Tensor,
     ) -> Tensor:
-        co2_low = torch.full((climate.size(0),), self.co2_low_ppm, device=climate.device, dtype=climate.dtype)
-        co2_high = torch.full((climate.size(0),), self.co2_high_ppm, device=climate.device, dtype=climate.dtype)
+        co2_low = torch.full(
+            (climate.size(0),), self.co2_low_ppm, device=climate.device, dtype=climate.dtype
+        )
+        co2_high = torch.full(
+            (climate.size(0),), self.co2_high_ppm, device=climate.device, dtype=climate.dtype
+        )
         y_low = model(climate, static, co2_ppm=co2_low)
         y_high = model(climate, static, co2_ppm=co2_high)
         return F.relu(y_low - y_high).mean()
@@ -257,10 +259,7 @@ def predict_casej_with_uncertainty(
     was_training = model.training
     model.eval()
     samples = torch.stack(
-        [
-            model(climate, static, co2_ppm=co2_ppm).squeeze(0)
-            for _ in range(num_samples)
-        ],
+        [model(climate, static, co2_ppm=co2_ppm).squeeze(0) for _ in range(num_samples)],
         dim=0,
     )
     if was_training:

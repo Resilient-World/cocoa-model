@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -15,7 +14,9 @@ DEFAULT_BASELINE = _REPO_ROOT / "tests" / "fixtures" / "promotion" / "baseline_e
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--baseline", type=Path, default=DEFAULT_BASELINE)
-    parser.add_argument("--report", type=Path, required=True, help="olmoearth_vs_v3 markdown or JSON metrics")
+    parser.add_argument(
+        "--report", type=Path, required=True, help="olmoearth_vs_v3 markdown or JSON metrics"
+    )
     args = parser.parse_args(argv)
 
     if not args.baseline.is_file():

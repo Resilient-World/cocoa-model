@@ -8,7 +8,6 @@ import pytest
 from validation.calibration_metrics import run_calibration_gate
 from validation.forecast_scoring import (
     crps_ensemble,
-    crps_quantile,
     crpss,
     energy_score,
     pit_histogram,

@@ -93,7 +93,10 @@ def test_mse_ranking_twfe_worse_than_robust_estimators() -> None:
         for method in mse:
             try:
                 if method == "twfe":
-                    from analysis._staggered_did_common import estimate_twfe, prepare_staggered_panel
+                    from analysis._staggered_did_common import (
+                        estimate_twfe,
+                        prepare_staggered_panel,
+                    )
 
                     prep = prepare_staggered_panel(panel)
                     est = estimate_twfe(prep)

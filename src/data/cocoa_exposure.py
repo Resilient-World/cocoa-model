@@ -28,20 +28,22 @@ lazy Xarray/Zarr materialization (Xee).
 
 from __future__ import annotations
 
-import structlog
-
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import ee
 import numpy as np
+import structlog
 import xarray as xr
 
 # Registers the ``ee`` Xarray backend (Xee).
 import xee  # noqa: F401
 
 from data.gee_auth import initialize_earth_engine
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 log = structlog.get_logger(__name__)
 
@@ -276,12 +278,16 @@ class CocoaExposureIngest:
             Path(galileo_checkpoint) if galileo_checkpoint else DEFAULT_GALILEO_CHECKPOINT
         )
         self.aef_checkpoint = Path(aef_checkpoint) if aef_checkpoint else DEFAULT_AEF_CHECKPOINT
-        self.agrifm_checkpoint = Path(agrifm_checkpoint) if agrifm_checkpoint else DEFAULT_AGRIFM_CHECKPOINT
+        self.agrifm_checkpoint = (
+            Path(agrifm_checkpoint) if agrifm_checkpoint else DEFAULT_AGRIFM_CHECKPOINT
+        )
         self.terramind_checkpoint = (
             Path(terramind_checkpoint) if terramind_checkpoint else DEFAULT_TERRAMIND_CHECKPOINT
         )
         self.terramind_tim_checkpoint = (
-            Path(terramind_tim_checkpoint) if terramind_tim_checkpoint else DEFAULT_TERRAMIND_TIM_CHECKPOINT
+            Path(terramind_tim_checkpoint)
+            if terramind_tim_checkpoint
+            else DEFAULT_TERRAMIND_TIM_CHECKPOINT
         )
         self.ensemble_weights = ensemble_weights
         self.ensemble_weights_path = (
@@ -337,12 +343,15 @@ class CocoaExposureIngest:
         initialize_earth_engine(project=self.project)
         point = ee.Geometry.Point([lon, lat])
         img = self.probability_image()
-        sample = img.reduceRegion(
-            reducer=ee.Reducer.first(),
-            geometry=point,
-            scale=scale_m,
-            bestEffort=True,
-        ).getInfo() or {}
+        sample = (
+            img.reduceRegion(
+                reducer=ee.Reducer.first(),
+                geometry=point,
+                scale=scale_m,
+                bestEffort=True,
+            ).getInfo()
+            or {}
+        )
 
         raw = sample.get("probability", sample.get(PROBABILITY_BAND))
         if raw is None:
@@ -361,9 +370,7 @@ class CocoaExposureIngest:
         from models.galileo_seg import GalileoCocoaSegmentation, load_galileo_seg_checkpoint
 
         if self.galileo_checkpoint.is_file():
-            self._galileo_model = load_galileo_seg_checkpoint(
-                self.galileo_checkpoint, device="cpu"
-            )
+            self._galileo_model = load_galileo_seg_checkpoint(self.galileo_checkpoint, device="cpu")
         else:
             log.warning(
                 "Galileo checkpoint missing at %s; using uninitialized GalileoCocoaSegmentation",
@@ -400,7 +407,9 @@ class CocoaExposureIngest:
         ).unsqueeze(0)
         loc = torch.tensor([[lat, lon]], dtype=torch.float32)
         months = torch.tensor([[6, 7, 8, 9]], dtype=torch.long)
-        batch = model.build_batch_dict(s2=s2, s1=s1, era5=era5, dem=dem, location=loc, months=months)
+        batch = model.build_batch_dict(
+            s2=s2, s1=s1, era5=era5, dem=dem, location=loc, months=months
+        )
         prob = model.predict_proba(batch)
         return float(prob.mean().item())
 
@@ -482,7 +491,10 @@ class CocoaExposureIngest:
         if use_tim:
             if self._terramind_tim_model is not None:
                 return self._terramind_tim_model
-            from models.terramind_seg import TerraMindTiMCocoaSegmentation, load_terramind_seg_checkpoint
+            from models.terramind_seg import (
+                TerraMindTiMCocoaSegmentation,
+                load_terramind_seg_checkpoint,
+            )
 
             path = self.terramind_tim_checkpoint
             if path.is_file():
@@ -505,7 +517,9 @@ class CocoaExposureIngest:
             self._terramind_model.eval()
         return self._terramind_model
 
-    def _terramind_tile_probability(self, lat: float, lon: float, *, use_tim: bool = False) -> float:
+    def _terramind_tile_probability(
+        self, lat: float, lon: float, *, use_tim: bool = False
+    ) -> float:
         import torch
 
         from data.utils import cocoa_batch_to_terramind_input
@@ -570,7 +584,10 @@ class CocoaExposureIngest:
 
     def _load_olmoearth_model(self) -> Any:
         if self._olmoearth_model is None:
-            from models.olmoearth_seg import OlmoEarthCocoaSegmentation, load_olmoearth_seg_checkpoint
+            from models.olmoearth_seg import (
+                OlmoEarthCocoaSegmentation,
+                load_olmoearth_seg_checkpoint,
+            )
 
             if self.olmoearth_checkpoint.is_file():
                 self._olmoearth_model = load_olmoearth_seg_checkpoint(self.olmoearth_checkpoint)
@@ -773,18 +790,23 @@ class CocoaExposureIngest:
         )
         ds.to_zarr(out_path, mode="w", consolidated=True)
 
-    def area_hectares(self, region: ee.Geometry | None = None, scale_m: int = DEFAULT_SCALE_M) -> float:
+    def area_hectares(
+        self, region: ee.Geometry | None = None, scale_m: int = DEFAULT_SCALE_M
+    ) -> float:
         """Sum binary-mask area (ha) over ``region`` or :attr:`aoi`."""
         initialize_earth_engine(project=self.project)
         geom = region or self.aoi
         area_img = self.binary_mask().multiply(ee.Image.pixelArea())
-        result = area_img.reduceRegion(
-            reducer=ee.Reducer.sum(),
-            geometry=geom,
-            scale=scale_m,
-            maxPixels=1e13,
-            bestEffort=True,
-        ).getInfo() or {}
+        result = (
+            area_img.reduceRegion(
+                reducer=ee.Reducer.sum(),
+                geometry=geom,
+                scale=scale_m,
+                maxPixels=1e13,
+                bestEffort=True,
+            ).getInfo()
+            or {}
+        )
         m2 = float(result.get("cocoa_mask", 0.0) or 0.0)
         return m2 / 10_000.0
 
@@ -813,7 +835,9 @@ def _global_aef_galileo_agrifm_probability(
         agrifm_checkpoint=agrifm_checkpoint,
         ensemble_weights_path=ensemble_weights_path,
     )
-    weights = load_ensemble_weights(None, path=ensemble_weights_path or ing.ensemble_weights_path, global_fallback=True)
+    weights = load_ensemble_weights(
+        None, path=ensemble_weights_path or ing.ensemble_weights_path, global_fallback=True
+    )
     parts: list[tuple[float, float]] = [
         (weights["aef"], ing._aef_probability_at_point(lat, lon)),
         (weights["galileo"], ing._galileo_probability_at_point(lat, lon)),
@@ -836,7 +860,9 @@ def _global_aef_galileo_probability(
     ensemble_weights_path: Path | str | None = None,
 ) -> float:
     """Backward-compatible global blend (delegates to AEF+Galileo+AgriFM when agrifm ckpt set)."""
-    if agrifm_checkpoint is not None or (ensemble_weights_path and Path(ensemble_weights_path).is_file()):
+    if agrifm_checkpoint is not None or (
+        ensemble_weights_path and Path(ensemble_weights_path).is_file()
+    ):
         return _global_aef_galileo_agrifm_probability(
             lat,
             lon,
@@ -1011,9 +1037,8 @@ def build_landscape_feature_row(
     )
 
 
-def validate_fdp_probability_batch(df: "pd.DataFrame") -> "pd.DataFrame":
+def validate_fdp_probability_batch(df: pd.DataFrame) -> pd.DataFrame:
     """Validate point-level FDP probability samples (Pandera)."""
-    import pandas as pd
 
     from data.schemas import FDPProbabilitySchema, validate_dataframe
 
@@ -1026,7 +1051,7 @@ def sample_fdp_validation_grid(
     n: int = 50,
     year: int = 2023,
     seed: int = 0,
-) -> "pd.DataFrame":
+) -> pd.DataFrame:
     """Build a validation grid of lat/lon/probability for schema checks."""
     import pandas as pd
 
@@ -1050,7 +1075,6 @@ def _cli_main(argv: list[str] | None = None) -> int:
     """CLI for FDP exposure ingest manifest (DVC ``stage_ingest_fdp``)."""
     import argparse
     import json
-    import sys
     from datetime import date
 
     parser = argparse.ArgumentParser(description="Cocoa exposure / FDP ingest manifest")
@@ -1090,20 +1114,21 @@ if __name__ == "__main__":
 
 
 __all__ = [
-    "CocoaExposureIngest",
-    "ExposureBackend",
-    "FDP_COCOA_COLLECTION",
-    "FDP_MODEL_CARD_URL",
     "DEFAULT_AEF_CHECKPOINT",
     "DEFAULT_AGRIFM_CHECKPOINT",
     "DEFAULT_ENSEMBLE_WEIGHTS",
     "DEFAULT_GALILEO_CHECKPOINT",
     "DEFAULT_THRESHOLD",
+    "FDP_COCOA_COLLECTION",
+    "FDP_MODEL_CARD_URL",
     "GLOBAL_AEF_GAL_WEIGHTS",
     "MIN_THRESHOLD",
     "REGIONS",
-    "RegionPreset",
     "SUPPORTED_YEARS",
+    "CocoaExposureIngest",
+    "ExposureBackend",
+    "RegionPreset",
+    "build_landscape_feature_row",
     "is_fdp_covered",
     "normalize_region_key",
     "point_in_region",
@@ -1113,7 +1138,6 @@ __all__ = [
     "region_geometry",
     "region_latlon_bounds",
     "resolve_exposure_probability",
-    "build_landscape_feature_row",
     "sample_buffer_composition",
     "sample_canopy_fragmentation_index",
     "sample_cocoa_probability_at_point",

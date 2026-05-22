@@ -347,7 +347,9 @@ class EarthEngineForestBackend:
             maxPixels=1e9,
         )
         stats_info = stats.getInfo() or {}
-        loss_pixels = int(stats_info.get("lossyear_count", 0) or stats_info.get("Map1_count", 0) or 0)
+        loss_pixels = int(
+            stats_info.get("lossyear_count", 0) or stats_info.get("Map1_count", 0) or 0
+        )
 
         pixel_area_m2 = 30 * 30
         loss_area_ha = loss_pixels * pixel_area_m2 / 10_000.0
@@ -426,10 +428,10 @@ def check_deforestation_free(
     backend: ForestScreeningBackend | None = None,
 ) -> DeforestationResult:
     """
-    Screen plot for forest loss after ``baseline_date`` (default 31 Dec 2020).
+      Screen plot for forest loss after ``baseline_date`` (default 31 Dec 2020).
 
-    Uses Hansen Global Forest Change 2023 v1.11 and JRC Tropical Moist Forest
-  GFC2020 V1 disturbance layer via Earth Engine unless ``backend`` is supplied.
+      Uses Hansen Global Forest Change 2023 v1.11 and JRC Tropical Moist Forest
+    GFC2020 V1 disturbance layer via Earth Engine unless ``backend`` is supplied.
     """
     screen_backend = backend or EarthEngineForestBackend()
     screening = screen_backend.screen(

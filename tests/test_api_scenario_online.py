@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import time
 from pathlib import Path
@@ -20,10 +19,9 @@ from api.online_conformal_store import OnlineConformalStore, stratum_key
 from api.scenario_conformal import apply_scenario_conformal, resolve_region
 from models.casej_surrogate import CASEJSurrogate
 from models.cqr import QuantileYieldSurrogate
-from models.yield_surrogate import N_CLIMATE_CHANNELS
 from models.eci import ECIIntegral
+from models.yield_surrogate import N_CLIMATE_CHANNELS
 from tests.conformal_online_helpers import (
-    distribution_shift_scores,
     post_shift_coverage,
     run_online_coverage,
 )

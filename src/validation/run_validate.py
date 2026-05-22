@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import structlog
-
 import argparse
 import logging
 import os
 import sys
 from pathlib import Path
+
+import structlog
 
 from validation._report import combine_summary, write_report
 from validation.cocoa_barometer_check import run_barometer_check
@@ -38,7 +38,9 @@ def _run_calibration_artifacts(reports_dir: Path) -> None:
         "--out",
         str(reports_dir),
     ]
-    subprocess.run(cmd_report, check=False, cwd=str(_REPO_ROOT), env={**os.environ, "PYTHONPATH": "src"})
+    subprocess.run(
+        cmd_report, check=False, cwd=str(_REPO_ROOT), env={**os.environ, "PYTHONPATH": "src"}
+    )
     plot = _REPO_ROOT / "scripts" / "plot_reliability.py"
     if plot.is_file():
         subprocess.run(

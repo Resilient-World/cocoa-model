@@ -1,17 +1,15 @@
 import os
 
+import ee
 import pytest
-import ee  # noqa: F401
 
 from data.cocoa_exposure import (
-    CocoaExposureIngest,
     FDP_COCOA_COLLECTION,
-    GLOBAL_AEF_GAL_WEIGHTS,
     REGIONS,
+    CocoaExposureIngest,
     is_fdp_covered,
     normalize_region_key,
     point_in_region,
-    region_latlon_bounds,
     sample_cocoa_probability_at_point,
 )
 
@@ -89,7 +87,6 @@ def test_ensemble_blends_aef_galileo_and_fdp(monkeypatch: pytest.MonkeyPatch) ->
 def test_sample_point_in_civ_cocoa_belt():
     if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS") and not os.getenv("EARTHENGINE_PROJECT"):
         pytest.skip("No GEE credentials")
-    import ee
 
     ee.Initialize()
     # Known cocoa-dense pixel near Divo, CIV (in-situ validation region from Kalischek 2023)

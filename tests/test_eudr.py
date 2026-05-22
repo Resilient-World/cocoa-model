@@ -220,14 +220,13 @@ def test_compliance_dds_api_endpoint(api_client: TestClient) -> None:
 # Whisp-backed EUDR due diligence (Oct 2025 amendments)
 # ---------------------------------------------------------------------------
 
-from data.whisp_client import MockWhispClient, WhispPlotResult  # noqa: E402
-
-from api.eudr import (  # noqa: E402
+from api.config import APISettings
+from api.eudr import (
     EudrDueDiligenceRequest,
     evaluate_eudr_status,
     run_eudr_due_diligence,
 )
-from api.config import APISettings  # noqa: E402
+from data.whisp_client import MockWhispClient, WhispPlotResult
 
 
 def _mock_whisp_clean() -> MockWhispClient:

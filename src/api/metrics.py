@@ -163,14 +163,14 @@ def inc_policy_endpoint(endpoint: str) -> None:
 
 
 __all__ = [
-    "setup_metrics",
+    "inc_eudr_status",
+    "inc_policy_endpoint",
+    "inc_simulation_error",
     "is_enabled",
-    "observe_inference_latency",
     "observe_avoided_loss",
+    "observe_inference_latency",
     "set_conformal_coverage",
     "set_drift_score",
-    "inc_eudr_status",
     "set_mediation_ratio",
-    "inc_simulation_error",
-    "inc_policy_endpoint",
+    "setup_metrics",
 ]

@@ -120,9 +120,15 @@ class APISettings(BaseSettings):
         description="Dev-only: run CorrDiff on cache miss (requires GPU + [corrdiff] extra)",
     )
     corrdiff_source_id: str = Field(default="CanESM5", validation_alias="CORRDIFF_SOURCE_ID")
-    corrdiff_variant_label: str = Field(default="r1i1p2f1", validation_alias="CORRDIFF_VARIANT_LABEL")
-    corrdiff_number_of_samples: int = Field(default=8, validation_alias="CORRDIFF_NUMBER_OF_SAMPLES")
-    corrdiff_solver: Literal["euler", "heun"] = Field(default="euler", validation_alias="CORRDIFF_SOLVER")
+    corrdiff_variant_label: str = Field(
+        default="r1i1p2f1", validation_alias="CORRDIFF_VARIANT_LABEL"
+    )
+    corrdiff_number_of_samples: int = Field(
+        default=8, validation_alias="CORRDIFF_NUMBER_OF_SAMPLES"
+    )
+    corrdiff_solver: Literal["euler", "heun"] = Field(
+        default="euler", validation_alias="CORRDIFF_SOLVER"
+    )
     corrdiff_sampler_type: Literal["deterministic", "stochastic"] = Field(
         default="stochastic",
         validation_alias="CORRDIFF_SAMPLER_TYPE",

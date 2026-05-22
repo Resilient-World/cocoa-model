@@ -173,9 +173,7 @@ def test_simulate_intervention_happy_path(client: TestClient) -> None:
         max(0.0, projected - baseline) * VALID_PAYLOAD["farm_size_ha"],
         rel=1e-5,
     )
-    assert financial == pytest.approx(
-        avoided * VALID_PAYLOAD["cocoa_price_usd"] * 0.72, rel=1e-3
-    )
+    assert financial == pytest.approx(avoided * VALID_PAYLOAD["cocoa_price_usd"] * 0.72, rel=1e-3)
     assert "financial_impact" in data
     assert data["financial_impact"]["usd"]["currency"] == "USD"
     assert data["financial_impact"]["ghs"]["currency"] == "GHS"

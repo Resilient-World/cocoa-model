@@ -1,4 +1,5 @@
 """Backward-compatible shim; implementation in models.process.case2_runner."""
+
 import importlib as _importlib
 
 _mod = _importlib.import_module("models.process.case2_runner")

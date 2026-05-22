@@ -62,9 +62,7 @@ def _scoring_extras(
         local = np.array([pos_map[int(i)] for i in idx if int(i) in pos_map], dtype=np.int64)
         if local.size == 0:
             continue
-        _, _, _, sub_pit = pit_histogram(
-            y_test[local], lowers=lowers[local], uppers=uppers[local]
-        )
+        _, _, _, sub_pit = pit_histogram(y_test[local], lowers=lowers[local], uppers=uppers[local])
         _, _, sub_ece, _ = reliability_diagram(y_test[local], q_raw[local], DEFAULT_QUANTILES)
         by_stratum[key] = {
             "ece": sub_ece,

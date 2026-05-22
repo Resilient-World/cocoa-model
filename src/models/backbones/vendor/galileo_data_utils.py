@@ -8,7 +8,7 @@ full Galileo package layout.
 from __future__ import annotations
 
 import math
-from typing import NamedTuple, Union, cast
+from typing import NamedTuple, cast
 
 import numpy as np
 import torch
@@ -20,16 +20,16 @@ from .single_file_galileo import (
     LOCATION_BANDS,
     S1_BANDS,
     S2_BANDS,
-    SPACE_BANDS,
     SPACE_BAND_GROUPS_IDX,
+    SPACE_BANDS,
     SPACE_TIME_BANDS,
     SPACE_TIME_BANDS_GROUPS_IDX,
     SRTM_BANDS,
-    STATIC_BANDS,
     STATIC_BAND_GROUPS_IDX,
+    STATIC_BANDS,
     TC_BANDS,
-    TIME_BANDS,
     TIME_BAND_GROUPS_IDX,
+    TIME_BANDS,
     VIIRS_BANDS,
     WC_BANDS,
 )
@@ -234,12 +234,11 @@ class Normalizer:
         spec = self.shift_div_dict[x.shape[-1]]
         return (x - spec["shift"]) / spec["div"]
 
+
 def to_cartesian(
     lat,
     lon,
 ):
-    import math
-    from typing import Union
     if isinstance(lat, float):
         lat_rad = lat * math.pi / 180
         lon_rad = lon * math.pi / 180
@@ -383,9 +382,7 @@ def construct_galileo_input(
             if group_key == "location":
                 x = cast(torch.Tensor, to_cartesian(x[0], x[1]))
             indices = [idx for idx, val in enumerate(STATIC_BANDS) if val in bands_list]
-            groups_idx = [
-                idx for idx, key in enumerate(STATIC_BAND_GROUPS_IDX) if group_key in key
-            ]
+            groups_idx = [idx for idx, key in enumerate(STATIC_BAND_GROUPS_IDX) if group_key in key]
             st_x[indices] = x
             st_m[groups_idx] = 0
 
@@ -396,10 +393,16 @@ def construct_galileo_input(
 
     if normalize:
         normalizer = Normalizer(normalizing_dicts=PRETRAINING_NORMALIZING_DICT, std=True)
-        s_t_x = torch.from_numpy(normalizer(s_t_x.cpu().numpy())).to(device=device, dtype=torch.float32)
-        sp_x = torch.from_numpy(normalizer(sp_x.cpu().numpy())).to(device=device, dtype=torch.float32)
+        s_t_x = torch.from_numpy(normalizer(s_t_x.cpu().numpy())).to(
+            device=device, dtype=torch.float32
+        )
+        sp_x = torch.from_numpy(normalizer(sp_x.cpu().numpy())).to(
+            device=device, dtype=torch.float32
+        )
         t_x = torch.from_numpy(normalizer(t_x.cpu().numpy())).to(device=device, dtype=torch.float32)
-        st_x = torch.from_numpy(normalizer(st_x.cpu().numpy())).to(device=device, dtype=torch.float32)
+        st_x = torch.from_numpy(normalizer(st_x.cpu().numpy())).to(
+            device=device, dtype=torch.float32
+        )
 
     return MaskedOutput(
         space_time_x=s_t_x,

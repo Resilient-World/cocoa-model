@@ -38,14 +38,16 @@ def build_mpdta_like(*, seed: int = 42) -> pd.DataFrame:
             treat = int(g > 0 and yr >= g)
             effect = -0.02 * treat if g > 0 else 0.0
             lemp = fe + 0.01 * (yr - 2004) + effect + rng.normal(0, 0.05)
-            rows.append({
-                "countyreal": int(c),
-                "year": yr,
-                "first.treat": float(g),
-                "lpop": lpop,
-                "lemp": lemp,
-                "treat": treat,
-            })
+            rows.append(
+                {
+                    "countyreal": int(c),
+                    "year": yr,
+                    "first.treat": float(g),
+                    "lpop": lpop,
+                    "lemp": lemp,
+                    "treat": treat,
+                }
+            )
     df = pd.DataFrame(rows)
     df.loc[df["first.treat"] == 0, "first.treat"] = np.nan
     return df

@@ -8,14 +8,13 @@ Uses Redis when ``REDIS_URL`` is set; otherwise atomic JSON at ``online_conforma
 
 from __future__ import annotations
 
-import structlog
-
 import json
 import os
-from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
+
+import structlog
 
 from models.aci import AdaptiveConformalInference
 from models.conformal_pid import ConformalPID

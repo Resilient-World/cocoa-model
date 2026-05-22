@@ -8,7 +8,6 @@ Error-quantified Conformal Inference for Time Series.
 from __future__ import annotations
 
 from collections import deque
-from typing import Deque
 
 import numpy as np
 
@@ -51,7 +50,7 @@ class ErrorQuantifiedConformalInference:
         self.adaptive_eta = adaptive_eta
         self.q: float = float(q_init)
         self.t: int = 0
-        self._scores: Deque[float] = deque(maxlen=10_000)
+        self._scores: deque[float] = deque(maxlen=10_000)
 
     @property
     def current_threshold(self) -> float:
@@ -144,9 +143,9 @@ class ECIIntegral(ErrorQuantifiedConformalInference):
     ) -> None:
         super().__init__(alpha, eta, c=c, window=window, q_init=q_init)
         self.decay = float(decay)
-        self._history_scores: Deque[float] = deque(maxlen=2_000)
-        self._history_qs: Deque[float] = deque(maxlen=2_000)
-        self._history_err: Deque[float] = deque(maxlen=2_000)
+        self._history_scores: deque[float] = deque(maxlen=2_000)
+        self._history_qs: deque[float] = deque(maxlen=2_000)
+        self._history_err: deque[float] = deque(maxlen=2_000)
 
     def reset(self, *, q_init: float | None = None) -> None:
         super().reset(q_init=q_init)
@@ -175,7 +174,9 @@ class ECIIntegral(ErrorQuantifiedConformalInference):
             self._history_err,
             strict=True,
         ):
-            integrated += w * ((e_i - self.alpha) + (s_i - q_i) * float(sigmoid_derivative(s_i - q_i, c=self.c)))
+            integrated += w * (
+                (e_i - self.alpha) + (s_i - q_i) * float(sigmoid_derivative(s_i - q_i, c=self.c))
+            )
 
         eta_t = (
             adaptive_learning_rate(self._scores, self.eta_base, window=self.window)

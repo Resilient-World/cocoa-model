@@ -1,4 +1,5 @@
 """Backward-compatible shim; implementation in models.backbones.vendor.galileo_data_utils."""
+
 import importlib as _importlib
 
 _mod = _importlib.import_module("models.backbones.vendor.galileo_data_utils")

@@ -27,4 +27,3 @@ def test_agroforestry_index_threshold_logic() -> None:
     val = float(idx.values.reshape(-1)[0])
     assert val in (0.0, 1.0)
     assert val == 1.0
-

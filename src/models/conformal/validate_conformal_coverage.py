@@ -2,22 +2,22 @@
 
 from __future__ import annotations
 
-import structlog
-
 import argparse
 import json
 import sys
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
+import structlog
 
+from data.yield_panel import build_yield_panel
 from models.conformal.aci import AdaptiveConformalInference
 from models.conformal.conformal_pid import ConformalPID
 from models.conformal.cqr import ConformalCalibrator
 from models.conformal.eci import ECICutoff, ECIIntegral, ErrorQuantifiedConformalInference
-from data.yield_panel import build_yield_panel
 from models.conformal.online_conformal_base import (
     empirical_coverage,
     interval_from_q,
@@ -145,7 +145,13 @@ def run_online_calibration_comparison(
 
     methods: dict[str, MethodRunner] = {
         "aci": lambda s, a: _stream_method(
-            s, a, AdaptiveConformalInference(a, eta=0.02), q_lo=q_lo, q_hi=q_hi, y=y, burn_in=burn_in
+            s,
+            a,
+            AdaptiveConformalInference(a, eta=0.02),
+            q_lo=q_lo,
+            q_hi=q_hi,
+            y=y,
+            burn_in=burn_in,
         ),
         "conformal_pid": lambda s, a: _stream_method(
             s, a, ConformalPID(a, eta=0.02, window=100), q_lo=q_lo, q_hi=q_hi, y=y, burn_in=burn_in
@@ -302,8 +308,12 @@ def write_cv_strategy_report(out_dir: Path, results: dict[str, Any]) -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Conformal coverage validation and online benchmarks")
-    parser.add_argument("conformal_json", type=Path, nargs="?", help="models/conformal.json (legacy gate)")
+    parser = argparse.ArgumentParser(
+        description="Conformal coverage validation and online benchmarks"
+    )
+    parser.add_argument(
+        "conformal_json", type=Path, nargs="?", help="models/conformal.json (legacy gate)"
+    )
     parser.add_argument("--tolerance", type=float, default=COVERAGE_TOLERANCE)
     parser.add_argument(
         "--benchmark-online",
@@ -405,9 +415,7 @@ def main(argv: list[str] | None = None) -> int:
 
             baseline_payload = None
             if args.baseline_calibration.is_file():
-                baseline_payload = json.loads(
-                    args.baseline_calibration.read_text(encoding="utf-8")
-                )
+                baseline_payload = json.loads(args.baseline_calibration.read_text(encoding="utf-8"))
             gate_data = {
                 "nominal_coverage": 1.0 - args.alpha,
                 "empirical_coverage": stats["coverage"],

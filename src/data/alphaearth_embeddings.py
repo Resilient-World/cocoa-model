@@ -11,14 +11,12 @@ See ``NOTICE.md`` for commercial-use notes.
 
 from __future__ import annotations
 
-import structlog
-
 from pathlib import Path
 
 import ee
 import numpy as np
+import structlog
 import xarray as xr
-
 import xee  # noqa: F401 — registers the ``ee`` Xarray backend
 
 from data.gee_auth import initialize_earth_engine
@@ -113,12 +111,17 @@ class AlphaEarthIngest:
         """Return embedding vector ``[64]`` at a single point, or ``None`` if masked."""
         initialize_earth_engine(project=self.project)
         point = ee.Geometry.Point([float(lon), float(lat)])
-        sample = self.embedding_image().reduceRegion(
-            reducer=ee.Reducer.first(),
-            geometry=point,
-            scale=scale_m,
-            bestEffort=True,
-        ).getInfo() or {}
+        sample = (
+            self.embedding_image()
+            .reduceRegion(
+                reducer=ee.Reducer.first(),
+                geometry=point,
+                scale=scale_m,
+                bestEffort=True,
+            )
+            .getInfo()
+            or {}
+        )
 
         vec = np.array(
             [float(sample.get(b, np.nan)) for b in AEF_BAND_NAMES],

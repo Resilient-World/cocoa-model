@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import structlog
-
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+import structlog
 import torch
 
-from models.checkpoint_migration import is_v1_static_checkpoint, migrate_v1_static_to_v2
 from models.casej_surrogate import CASEJSurrogate, load_casej_surrogate
+from models.checkpoint_migration import is_v1_static_checkpoint, migrate_v1_static_to_v2
 from models.yield_surrogate import YieldSurrogateModel
 from models.yield_surrogate_v2 import YieldSurrogateV2
 from models.yield_surrogate_v2_teleconnection import YieldSurrogateV2Teleconnection
@@ -81,6 +80,7 @@ def _load_yield_from_registry(model_name: str) -> YieldModel | None:
 def _load_yield_from_registry_impl(model_name: str) -> YieldModel | None:
     try:
         from mlflow.exceptions import MlflowException
+
         from registry.mlflow_registry import get_champion
     except ImportError:
         return None

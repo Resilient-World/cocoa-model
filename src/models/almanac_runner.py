@@ -1,4 +1,5 @@
 """Backward-compatible shim; implementation in models.process.almanac_runner."""
+
 import importlib as _importlib
 
 _mod = _importlib.import_module("models.process.almanac_runner")

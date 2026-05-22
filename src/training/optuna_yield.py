@@ -20,15 +20,15 @@ from data.spatial_splits import spatial_holdout_mask
 from models.yield_surrogate import CocoaPINNLoss
 from models.yield_surrogate_v2 import YieldSurrogateV2
 from registry.promotion_gate import crps_1d
-from scripts.train_yield_surrogate import load_lhs_table, stratified_split
+from scripts.train_yield_surrogate import load_lhs_table
 from scripts.train_yield_surrogate_v2 import YieldSurrogateV2Dataset, evaluate
 
 
 def _ensure_synthetic_data(case2: Path, almanac: Path, era5_dir: Path) -> None:
     from data.pipeline_stubs import (
+        write_era5_zarr,
         write_lhs_parquets,
         write_per_farm_era5_zarrs,
-        write_era5_zarr,
     )
 
     if not case2.is_file():
@@ -92,7 +92,9 @@ def run_study(*, n_trials: int = 50, study_name: str = "yield_hpo") -> optuna.St
                         batch["static"].to(device),
                         batch["region_id"].to(device),
                     )
-                    loss = loss_fn(pred, batch["target"].to(device), traces, batch["climate"].to(device))
+                    loss = loss_fn(
+                        pred, batch["target"].to(device), traces, batch["climate"].to(device)
+                    )
                     loss.backward()
                     opt.step()
 

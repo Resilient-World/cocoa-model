@@ -7,7 +7,13 @@ import urllib.request
 from pathlib import Path
 
 URL = "https://raw.githubusercontent.com/synth-inference/synthdid/master/data/california_prop99.csv"
-OUT = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "synthdid" / "california_prop99.csv"
+OUT = (
+    Path(__file__).resolve().parents[1]
+    / "tests"
+    / "fixtures"
+    / "synthdid"
+    / "california_prop99.csv"
+)
 
 
 def main() -> None:

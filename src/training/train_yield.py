@@ -8,8 +8,6 @@ Hydra entrypoint::
 
 from __future__ import annotations
 
-import structlog
-
 import logging
 import sys
 from pathlib import Path
@@ -17,6 +15,7 @@ from typing import Any
 
 import mlflow
 import numpy as np
+import structlog
 import torch
 from hydra import compose, initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
@@ -163,7 +162,7 @@ def train_yield_surrogate(cfg: DictConfig) -> Path:
         mlflow.log_artifact(str(checkpoint_path), artifact_path="checkpoints")
         try:
             mlflow.pytorch.log_model(model, artifact_path="yield_surrogate")
-        except Exception as exc:  # noqa: BLE001 — optional MLflow flavor
+        except Exception as exc:
             log.warning("MLflow pytorch log_model skipped: %s", exc)
 
         final_val = _evaluate(model, val_rows, loss_fn, device)

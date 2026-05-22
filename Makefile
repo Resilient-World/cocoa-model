@@ -1,4 +1,4 @@
-.PHONY: help train-all benchmark report ingest-gee ci lint typecheck test dvc-dag dvc-repro hpo promote validate-spatial validate-temporal validate-calibration plot-reliability loadtest
+.PHONY: help train-all benchmark report ingest-gee ci lint typecheck typecheck-strict test dvc-dag dvc-repro hpo promote validate-spatial validate-temporal validate-calibration plot-reliability loadtest
 
 REGION ?= ghana
 
@@ -21,6 +21,7 @@ help:
 	@echo "  make report       - Causal PDF report (synthetic panel)"
 	@echo "  make lint         - ruff check"
 	@echo "  make typecheck    - mypy src/"
+	@echo "  make typecheck-strict - mypy --strict on strict_enabled modules"
 	@echo "  make test         - pytest (fast subset)"
 	@echo "  make dvc-dag      - Print DVC pipeline graph"
 	@echo "  make validate-spatial REGION=ghana - Spatial block CV report"
@@ -47,6 +48,9 @@ lint:
 
 typecheck:
 	mypy src
+
+typecheck-strict:
+	python scripts/mypy_strict_ratchet.py
 
 test:
 	pytest tests/test_joint_exposure_yield.py tests/test_api_simulate.py tests/test_feature_resolver.py tests/test_yield_surrogate.py tests/validation/ -q
@@ -95,4 +99,4 @@ run-tcav:
 compare-dml-nuisances:
 	python scripts/compare_dml_nuisances.py
 
-ci: lint typecheck test dvc-dag
+ci: lint typecheck-strict typecheck test dvc-dag

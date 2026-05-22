@@ -1,5 +1,4 @@
 """
-log = structlog.get_logger(__name__)
 Build a cloud-free Sentinel-2 / Sentinel-1 composite for a cocoa region (dry season).
 
 Creates a median Sentinel-2 SR composite with QA60 cloud masking, NDVI/EVI
@@ -9,20 +8,14 @@ region-tagged multi-band GeoTIFF (``data/processed/s2_s1_<region>.tif``).
 
 from __future__ import annotations
 
-import structlog
-
 import argparse
 import sys
 from pathlib import Path
 from typing import Literal
 
 import ee
+import structlog
 
-from data.era5_ingest import (
-    Era5ExportError,
-    export_local_geotiff,
-    export_to_google_drive,
-)
 from data.cocoa_exposure import (
     REGIONS,
     normalize_region_key,
@@ -30,11 +23,18 @@ from data.cocoa_exposure import (
     region_bounds_dict,
     region_geometry,
 )
+from data.era5_ingest import (
+    Era5ExportError,
+    export_local_geotiff,
+    export_to_google_drive,
+)
 from data.gee_auth import (
     EarthEngineAuthError,
     EarthEngineNotAuthenticatedError,
     initialize_earth_engine,
 )
+
+log = structlog.get_logger(__name__)
 
 S2_SR_COLLECTION = "COPERNICUS/S2_SR_HARMONIZED"
 S1_GRD_COLLECTION = "COPERNICUS/S1_GRD"
@@ -137,9 +137,7 @@ def build_s2_median_composite(
 
 def compute_ndvi(image: ee.Image) -> ee.Image:
     """Normalized Difference Vegetation Index from B8 (NIR) and B4 (red)."""
-    return image.addBands(
-        image.normalizedDifference(["B8", "B4"]).rename("NDVI")
-    )
+    return image.addBands(image.normalizedDifference(["B8", "B4"]).rename("NDVI"))
 
 
 def compute_evi(image: ee.Image) -> ee.Image:
@@ -212,8 +210,7 @@ def combine_optical_sar(
     return combined.set(
         {
             "description": (
-                "Sentinel-2 median SR (QA60 masked) with NDVI/EVI + "
-                "Sentinel-1 median VV/VH"
+                "Sentinel-2 median SR (QA60 masked) with NDVI/EVI + Sentinel-1 median VV/VH"
             ),
             "region": "Ghana",
             "s2_bands": s2_bands,
@@ -372,9 +369,9 @@ def main(argv: list[str] | None = None) -> int:
         from data.pipeline_stubs import write_sentinel_manifest
 
         out = args.output or Path("data/processed/s2_s1_manifest.json")
-        from data.schemas import SentinelTileManifestSchema, validate_dataframe
-
         import pandas as pd
+
+        from data.schemas import SentinelTileManifestSchema, validate_dataframe
 
         write_sentinel_manifest(out, region=args.region)
         manifest_df = pd.DataFrame(

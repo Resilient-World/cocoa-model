@@ -7,12 +7,11 @@ Expected supplement: ~2,847 plots with coordinates and survival outcomes
 
 from __future__ import annotations
 
-import structlog
-
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import structlog
 
 from data.cssvd_landscape_features import (
     LandscapeFeatureRow,
@@ -219,10 +218,18 @@ def join_exposure_features(
                 lat=lat,
                 lon=lon,
                 year=year,
-                cocoa_probability_local=float(row.get("cocoa_probability_local", 0.55 + 0.2 * rng.random())),
-                non_cocoa_buffer_500m=float(row.get("non_cocoa_buffer_500m", 0.35 + 0.4 * rng.random())),
-                canopy_fragmentation_index=float(row.get("canopy_fragmentation_index", 0.8 + rng.random())),
-                extreme_precip_5day_count_yr=int(row.get("extreme_precip_5day_count_yr", rng.integers(2, 35))),
+                cocoa_probability_local=float(
+                    row.get("cocoa_probability_local", 0.55 + 0.2 * rng.random())
+                ),
+                non_cocoa_buffer_500m=float(
+                    row.get("non_cocoa_buffer_500m", 0.35 + 0.4 * rng.random())
+                ),
+                canopy_fragmentation_index=float(
+                    row.get("canopy_fragmentation_index", 0.8 + rng.random())
+                ),
+                extreme_precip_5day_count_yr=int(
+                    row.get("extreme_precip_5day_count_yr", rng.integers(2, 35))
+                ),
                 dtr_growing_season=float(row.get("dtr_growing_season", 6.0 + 4.0 * rng.random())),
                 strain_region=lookup_strain_region(lat, lon),
             )

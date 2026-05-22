@@ -10,8 +10,8 @@ GCM models and SSP scenarios, with derived variables aligned to the ERA5 ingest 
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 import ee
 import numpy as np
@@ -299,4 +299,3 @@ class CMIP6Ingest:
         out.attrs["additive_vars"] = list(additive)
         out.attrs["multiplicative_vars"] = list(multiplicative)
         return out
-

@@ -10,7 +10,6 @@ References
 from __future__ import annotations
 
 from collections import deque
-from typing import Deque
 
 import numpy as np
 
@@ -53,9 +52,9 @@ class AdaptiveConformalInference:
         self.eps_1 = float(eps_1)
         self.q: float = float(q_init)
         self.t: int = 0
-        self._scores: Deque[float] = deque(maxlen=10_000)
-        self._errs: Deque[float] = deque(maxlen=10_000)
-        self._covered: Deque[bool] = deque(maxlen=10_000)
+        self._scores: deque[float] = deque(maxlen=10_000)
+        self._errs: deque[float] = deque(maxlen=10_000)
+        self._covered: deque[bool] = deque(maxlen=10_000)
 
     @property
     def current_threshold(self) -> float:
