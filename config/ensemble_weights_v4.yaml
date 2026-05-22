@@ -1,0 +1,17 @@
+schema_version: 1
+fitted_date: synthetic
+synthetic: true
+default:
+  olmoearth: 0.25
+  agrifm: 0.20
+  terramind: 0.20
+  galileo: 0.15
+  aef: 0.15
+  fdp: 0.05
+global:
+  olmoearth: 0.30
+  agrifm: 0.25
+  terramind: 0.20
+  galileo: 0.15
+  aef: 0.10
+regions: {}

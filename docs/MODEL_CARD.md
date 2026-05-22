@@ -14,7 +14,7 @@
 |-------|--------|
 | **Model family** | Multi-stage geospatial + yield + causal stack (not a single monolithic model) |
 | **Primary tasks** | (1) Cocoa plantation segmentation; (2) yield prediction (tonnes/ha); (3) climate-attributable loss; (4) cohort causal impact (DiD ATT); (5) farm-level avoided-loss simulation |
-| **Backbones** | Prithvi / Galileo ViT segmentation (`training.train_prithvi_cocoa`); `YieldSurrogateModel` PINN surrogate; optional CASE2/ALMANAC ensemble (`models.ensemble_surrogate`) |
+| **Backbones** | Production exposure: **ensemble_v2** (default). Opt-in: ensemble_v3, **ensemble_v4** (gated), OlmoEarth (nano/tiny/base/large), Clay v1.5. Segmentation: Prithvi / Galileo / AgriFM / TerraMind. Yield: `YieldSurrogateV2` + optional CASEJ/CASE2/ALMANAC process BMA on `/simulate-scenario`. |
 | **Deployment surface** | FastAPI (`api.main`): `POST /simulate-intervention`, `POST /compliance/dds` |
 | **License (application code)** | MIT (`pyproject.toml`) |
 | **License (ATTRICI boundary)** | GPLv3 ATTRICI invoked only via subprocess — see [licensing/ATTRICI_GPL_BOUNDARY.md](licensing/ATTRICI_GPL_BOUNDARY.md) |
@@ -313,7 +313,54 @@ flowchart TB
 
 ---
 
-## 10. Recommendations & caveats
+## 10. Opt-in model leaderboard (v0.3+)
+
+Production defaults are unchanged until promotion gates pass (`promotion_gate_backbone.py`, ensemble_v4 F1 check).
+
+### Exposure / segmentation
+
+| Backend | Status | Notes |
+|---------|--------|--------|
+| `ensemble_v2` | **Production default** | `COCOA_EXPOSURE_BACKEND=ensemble_v2`, `ENSEMBLE_BACKEND=v2` |
+| `ensemble_v3` | Opt-in | TerraMind + five-way NNLS; `config/ensemble_weights_v3.yaml` |
+| `ensemble_v4` | Gated | OlmoEarth-Base + AgriFM + TerraMind + Galileo + AEF + FDP; requires >2pp F1 vs v3 on ≥4/6 regions |
+| `olmoearth_{nano,tiny,base,large}` | Benchmark / train | HF `allenai/OlmoEarth-*`; reports under `reports/backbones/` |
+| `clay_v15` | Benchmark only | Exposure API stub unless `CLAY_EXPOSURE_ENABLED=true` |
+
+Latest comparison reports: [`reports/backbones/olmoearth_vs_v3_*.md`](../reports/backbones/), [`comparison_*.md`](../reports/backbones/).
+
+### Scenario downscaling (`POST /simulate-scenario`)
+
+| `downscaling_method` | Default | Env |
+|----------------------|---------|-----|
+| `linear_delta` | **Yes** | ERA5 + CMIP6 Zarr |
+| `corrdiff` | Opt-in | `CORRDIFF_AVAILABLE`, precomputed cache |
+| `neuralgcm` | Opt-in | `NEURALGCM_ENABLED=true` |
+| `ace2_era5` | Opt-in | `ACE2_ERA5_ENABLED=true` |
+
+See [`neuralgcm_evaluation.md`](neuralgcm_evaluation.md) for QBO/SAM limitations and horizon guidance.
+
+### Causal nuisances (AIPW / DML)
+
+| `nuisance_estimator` | Default | Package |
+|----------------------|---------|---------|
+| `hgb` | **Yes** | sklearn HistGradientBoosting |
+| `ngboost` | Opt-in | `pip install -e '.[causal]'` |
+
+Report: [`reports/causal/ngboost_vs_hgb_dml_*.md`](../reports/causal/).
+
+### Interpretability & process ensemble
+
+| Feature | Env | Endpoint |
+|---------|-----|----------|
+| TCAV | `INTERPRET_ENABLED=true`, `INTERPRET_AUTH_TOKEN` | `POST /interpret` — [`INTERPRETABILITY.md`](INTERPRETABILITY.md) |
+| Process BMA | `PROCESS_BMA_ENABLED=true`, `ensemble_process_method=bma\|best` | Blends CASEJ/CASE2/ALMANAC on `/simulate-scenario` |
+
+Weights: `config/process_bma_weights.json` via `scripts/fit_process_bma_weights.py`.
+
+---
+
+## 11. Recommendations & caveats
 
 1. **Regenerate validation** after every segmentation or yield checkpoint promotion: `dvc repro validate`.
 2. **Replace synthetic causal panels** with audited `farm_panel.parquet` before publishing ATT figures.

@@ -253,6 +253,16 @@ Copy `.env.example` to `.env` (never commit `.env`).
 | `ERA5_ZARR_PATH` | API | Historical ERA5-Land stack (`ScenarioBuilder` + `/simulate-intervention` resolver) |
 | `CMIP6_ZARR_PATH` | API | NASA/GDDP-CMIP6 (or compatible) ensemble Zarr for `/simulate-scenario` deltas |
 | `DVC_REMOTE_URL` | DVC | Example remote store URL |
+| `COCOA_EXPOSURE_BACKEND` | Exposure API | Default `ensemble_v2`; opt-in `ensemble_v3`, `ensemble_v4`, `olmoearth_*`, `clay_v15` |
+| `ENSEMBLE_BACKEND` | Exposure weights | `v2` (default), `v3`, `v4` |
+| `CLAY_EXPOSURE_ENABLED` | Clay v1.5 exposure | `false` until benchmark promotion |
+| `NEURALGCM_ENABLED` | Scenario API | `false`; set `true` + `downscaling_method=neuralgcm` |
+| `ACE2_ERA5_ENABLED` | Scenario API | `false`; set `true` + `downscaling_method=ace2_era5` |
+| `PROCESS_BMA_ENABLED` | Scenario API | `false`; blend CASEJ/CASE2/ALMANAC when `true` |
+| `ENSEMBLE_PROCESS_METHOD` | Scenario API | `mean` (default), `bma`, or `best` |
+| `INTERPRET_ENABLED` | TCAV API | `false`; enables `POST /interpret` when `true` |
+| `INTERPRET_AUTH_TOKEN` | TCAV API | Bearer token for `/interpret` (required when enabled) |
+| `AIPW_NUISANCE_ESTIMATOR` | Causal scripts | `hgb` (default) or `ngboost` |
 
 API settings are loaded via `pydantic-settings` in `api.config.APISettings`.
 
@@ -312,6 +322,9 @@ Latest reports: [`reports/backbones/benchmark_<region>_<date>.md`](reports/backb
 | **Production (candidate)** | **AlphaEarth Foundations (AEF)** + MLP head | GEE `GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL` 64-D annual embeddings (arXiv:2507.22291); near-zero inference via [`alphaearth_embeddings.py`](src/data/alphaearth_embeddings.py) + [`aef_cocoa_head.py`](src/models/aef_cocoa_head.py) |
 | **Production (active)** | **Galileo + AlphaEarth + AgriFM ensemble (region-weighted)** | `ensemble_v2` loads per-region weights from [`config/ensemble_weights.yaml`](config/ensemble_weights.yaml) (fit via [`scripts/fit_ensemble_v2_weights.py`](scripts/fit_ensemble_v2_weights.py)); blends AEF, Galileo-Base, AgriFM Video Swin, and FDP |
 | **Opt-in** | **Ensemble v3 (+ TerraMind 1.0)** | `ensemble_v3` via `ENSEMBLE_BACKEND=v3`; five-way NNLS blend in [`config/ensemble_weights_v3.yaml`](config/ensemble_weights_v3.yaml) (fit via [`scripts/fit_ensemble_v3_weights.py`](scripts/fit_ensemble_v3_weights.py)) |
+| **Opt-in (gated)** | **Ensemble v4 (+ OlmoEarth-Base)** | `ensemble_v4` after [`scripts/promotion_gate_backbone.py`](scripts/promotion_gate_backbone.py); weights in [`config/ensemble_weights_v4.yaml`](config/ensemble_weights_v4.yaml) |
+| **Opt-in** | **OlmoEarth (4 sizes)** | `olmoearth_nano` … `olmoearth_large`; HF weights via [`scripts/download_olmoearth_weights.py`](scripts/download_olmoearth_weights.py); benchmark vs v3: `make benchmark-olmoearth` |
+| **Opt-in** | **Clay v1.5** | `clay_v15` in benchmark; exposure gated by `CLAY_EXPOSURE_ENABLED` |
 | **Segmentation (single)** | **Galileo-Base** + binary seg head | Multimodal S2×10, S1 VV/VH, ERA5 monthly (5 vars → Galileo time bands), DEM; 10 m `P(cocoa)` via [`galileo_seg.py`](src/models/galileo_seg.py) |
 | **Foundation (agriculture)** | **AgriFM (Video Swin)** | Li et al. (RSE 2026; arXiv:2505.21357); S2 10-band temporal stack; MIT reimplementation in [`agrifm_backbone.py`](src/models/agrifm_backbone.py) + [`agrifm_cocoa_head.py`](src/models/agrifm_cocoa_head.py); **Apache-2.0** pretrained weights via [`download_agrifm_weights.py`](scripts/download_agrifm_weights.py) |
 | **Foundation (geospatial)** | **TerraMind 1.0** | IBM-ESA `TerraMind-1.0-base` (Apache-2.0); optional `[terramind]` extra; [`terramind_backbone.py`](src/models/terramind_backbone.py) + TiM path [`terramind_tim.py`](src/models/terramind_tim.py); fine-tune via [`train_terramind_cocoa.py`](scripts/train_terramind_cocoa.py) |

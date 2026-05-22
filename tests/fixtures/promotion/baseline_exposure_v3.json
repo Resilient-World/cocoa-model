@@ -1,0 +1,4 @@
+{
+  "min_f1": 0.0,
+  "note": "Populate from held-out benchmark before enabling ENSEMBLE_BACKEND=v4"
+}

@@ -245,6 +245,23 @@ class APISettings(BaseSettings):
         validation_alias="PROMETHEUS_METRICS_PATH",
     )
 
+    interpret_enabled: bool = Field(default=False, validation_alias="INTERPRET_ENABLED")
+    interpret_auth_token: str | None = Field(default=None, validation_alias="INTERPRET_AUTH_TOKEN")
+
+    neuralgcm_enabled: bool = Field(default=False, validation_alias="NEURALGCM_ENABLED")
+    ace2_era5_enabled: bool = Field(default=False, validation_alias="ACE2_ERA5_ENABLED")
+
+    process_bma_enabled: bool = Field(default=False, validation_alias="PROCESS_BMA_ENABLED")
+    ensemble_process_method: str = Field(
+        default="mean",
+        validation_alias="ENSEMBLE_PROCESS_METHOD",
+        description="mean | bma | best for CASEJ/CASE2/ALMANAC on simulate-scenario",
+    )
+    process_bma_weights_path: Path = Field(
+        default=Path("config/process_bma_weights.json"),
+        validation_alias="PROCESS_BMA_WEIGHTS_PATH",
+    )
+
     @field_validator("dvds_lambda_grid", mode="before")
     @classmethod
     def _parse_dvds_lambda_grid(cls, value: object) -> object:

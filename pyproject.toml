@@ -125,6 +125,21 @@ corrdiff = [
     "nvidia-modulus[earth2studio]>=1.0",
     "nvidia-earth2studio[corrdiff]>=0.8",
 ]
+olmoearth = [
+    "transformers>=4.40",
+    "safetensors>=0.4",
+]
+clay = [
+    "transformers>=4.40",
+    "safetensors>=0.4",
+]
+causal = [
+    "ngboost>=0.5",
+]
+scenario_ml = [
+    "xarray>=2024.1",
+    "netcdf4>=1.6",
+]
 
 # Optional extensions:
 # differences>=0.2.0

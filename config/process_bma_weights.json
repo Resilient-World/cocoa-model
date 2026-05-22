@@ -1,0 +1,7 @@
+{
+  "casej": 0.55,
+  "case2": 0.25,
+  "almanac": 0.20,
+  "fitted_date": "synthetic",
+  "note": "Refit quarterly via scripts/fit_process_bma_weights.py from ICCO CRPS backtest"
+}

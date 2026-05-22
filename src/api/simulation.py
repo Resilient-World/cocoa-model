@@ -149,6 +149,143 @@ def _climate_tensor_to_dataset(climate: Tensor, year: int) -> xr.Dataset:
     return xr.Dataset(data_vars, coords={"time": time})
 
 
+def _dataset_to_case2_weather(ds: xr.Dataset) -> pd.DataFrame:
+    """Map resolved climate dataset to CASE2/ALMANAC daily weather columns."""
+    tmin = ds["tmin_c"].values.astype(float)
+    tmax = ds["tmax_c"].values.astype(float)
+    precip = ds["precip_mm"].values.astype(float)
+    srad = ds.get("srad_mj", ds["precip_mm"] * 0 + 12.0).values.astype(float)
+    vp = ds.get("vapor_pressure_kpa", ds["precip_mm"] * 0 + 1.5).values.astype(float)
+    return pd.DataFrame(
+        {
+            "date": pd.to_datetime(ds["time"].values),
+            "tmin_c": tmin,
+            "tmax_c": tmax,
+            "precip_mm": precip,
+            "srad_mj": srad,
+            "vapor_pressure_kpa": vp,
+        }
+    )
+
+
+def _try_case2_yield_tonnes_ha(ds: xr.Dataset, *, n_years: int = 8) -> float | None:
+    try:
+        from models.process.case2_runner import CASE2NotInstalled, CASE2Runner
+    except ImportError:
+        return None
+    try:
+        runner = CASE2Runner()
+        weather = _dataset_to_case2_weather(ds)
+        result = runner.simulate(weather, soil={}, management={}, n_years=n_years)
+        kg = float(np.nanmean(result.yearly_yield_kg_ha[-1:]))
+        return kg / 1000.0
+    except (CASE2NotInstalled, RuntimeError, ValueError, OSError) as exc:
+        log.debug("CASE2 unavailable for process BMA: %s", exc)
+        return None
+
+
+def _try_almanac_yield_tonnes_ha(ds: xr.Dataset, *, n_years: int = 8) -> float | None:
+    try:
+        from models.process.almanac_runner import ALMANACNotInstalled, ALMANACRunner
+    except ImportError:
+        return None
+    try:
+        runner = ALMANACRunner()
+        weather = _dataset_to_case2_weather(ds)
+        result = runner.simulate(weather, soil={}, management={}, n_years=n_years)
+        kg = float(np.nanmean(result.yearly_yield_kg_ha[-1:]))
+        return kg / 1000.0
+    except (ALMANACNotInstalled, RuntimeError, ValueError, OSError) as exc:
+        log.debug("ALMANAC unavailable for process BMA: %s", exc)
+        return None
+
+
+def _apply_process_bma_to_means(
+    *,
+    request: SimulateScenarioRequest,
+    settings: Any,
+    model: CASEJSurrogate | YieldSurrogateModel | YieldSurrogateV2 | YieldSurrogateV2Teleconnection,
+    baseline_mean: float,
+    projected_mean: float,
+    climate_baseline: Tensor,
+    climate_projected: Tensor,
+    static_cf: Tensor,
+    static_factual: Tensor,
+    scenario_co2: float,
+    year: int,
+    lat: float,
+    lon: float,
+    country_code: str | None,
+    feature_resolver: Any,
+    horizon: int,
+) -> tuple[float, float]:
+    """Blend CASEJ/CASE2/ALMANAC point yields when PROCESS_BMA_ENABLED and method is bma|best."""
+    if settings is None or not getattr(settings, "process_bma_enabled", False):
+        return baseline_mean, projected_mean
+    method = request.ensemble_process_method
+    if method == "mean":
+        return baseline_mean, projected_mean
+
+    from models.process.bma import combine_predictions
+
+    weights_path = getattr(settings, "process_bma_weights_path", Path("config/process_bma_weights.json"))
+
+    def _casej_mean(climate: Tensor, static: Tensor) -> float | None:
+        if not isinstance(model, CASEJSurrogate):
+            return None
+        return float(
+            predict_scenario_yield_samples(model, climate, static, scenario_co2, 1).mean().item()
+        )
+
+    def _surrogate_mean(climate: Tensor, static: Tensor) -> float | None:
+        if isinstance(model, CASEJSurrogate):
+            return None
+        region_id = _region_id_tensor(model, climate, lat=lat, lon=lon, country_code=country_code)
+        teleconnection = feature_resolver.resolve_teleconnection(lat, lon, horizon)
+        return float(
+            predict_yield_samples(
+                model,
+                climate,
+                static,
+                1,
+                region_id=region_id,
+                teleconnection=teleconnection,
+                lat=lat,
+                lon=lon,
+            ).mean().item()
+        )
+
+    ds_b = _climate_tensor_to_dataset(climate_baseline, year)
+    ds_p = _climate_tensor_to_dataset(climate_projected, year)
+    casej_b = _casej_mean(climate_baseline, static_cf) or _surrogate_mean(climate_baseline, static_cf)
+    casej_p = _casej_mean(climate_projected, static_factual) or _surrogate_mean(
+        climate_projected, static_factual
+    )
+    case2_b = _try_case2_yield_tonnes_ha(ds_b)
+    case2_p = _try_case2_yield_tonnes_ha(ds_p)
+    alm_b = _try_almanac_yield_tonnes_ha(ds_b)
+    alm_p = _try_almanac_yield_tonnes_ha(ds_p)
+
+    try:
+        new_b = combine_predictions(
+            casej=casej_b,
+            case2=case2_b,
+            almanac=alm_b,
+            method=method,
+            weights_path=weights_path,
+        )
+        new_p = combine_predictions(
+            casej=casej_p,
+            case2=case2_p,
+            almanac=alm_p,
+            method=method,
+            weights_path=weights_path,
+        )
+    except ValueError:
+        return baseline_mean, projected_mean
+    return new_b, new_p
+
+
 def _biotic_static_features(
     intervention_type: InterventionType | None,
     *,
@@ -865,7 +1002,21 @@ def simulate_scenario(
         )
         ds_scenario = builder.build_scenario(request.scenario, window)
         climate_ensemble = [climate_tensor_from_dataset_point(ds_scenario, lat, lon, year)]
-    else:
+    elif downscaling == "neuralgcm":
+        if settings is None or not getattr(settings, "neuralgcm_enabled", False):
+            raise ValueError("neuralgcm downscaling requires NEURALGCM_ENABLED=true")
+        from counterfactual.neuralgcm_runner import emulate_era5_point
+
+        ds_ng = emulate_era5_point(lat=lat, lon=lon, start=window[0], end=window[1])
+        climate_ensemble = [climate_tensor_from_dataset_point(ds_ng, lat, lon, horizon)]
+    elif downscaling == "ace2_era5":
+        if settings is None or not getattr(settings, "ace2_era5_enabled", False):
+            raise ValueError("ace2_era5 downscaling requires ACE2_ERA5_ENABLED=true")
+        from counterfactual.ace2_era5_runner import emulate_era5_ace2
+
+        ds_ace = emulate_era5_ace2(lat=lat, lon=lon, start=window[0], end=window[1])
+        climate_ensemble = [climate_tensor_from_dataset_point(ds_ace, lat, lon, horizon)]
+    elif downscaling == "corrdiff":
         processed_dir = (
             settings.corrdiff_processed_dir
             if settings is not None
@@ -899,6 +1050,8 @@ def simulate_scenario(
         except FileNotFoundError as exc:
             raise ValueError(str(exc)) from exc
         corrdiff_n = len(climate_ensemble)
+    else:
+        raise ValueError(f"Unknown downscaling_method: {downscaling}")
 
     climate_baseline = climate_ensemble[0].clone()
     climate_projected = _apply_intervention_climate(climate_ensemble[0], request.intervention_type)
@@ -964,6 +1117,33 @@ def simulate_scenario(
 
     b_mean, b_p10, b_p90 = _mean_p10_p90(baseline_blended)
     p_mean, p_p10, p_p90 = _mean_p10_p90(projected_blended)
+
+    b_mean_bma, p_mean_bma = _apply_process_bma_to_means(
+        request=request,
+        settings=settings,
+        model=model,
+        baseline_mean=b_mean,
+        projected_mean=p_mean,
+        climate_baseline=climate_baseline,
+        climate_projected=climate_projected,
+        static_cf=static_cf,
+        static_factual=static_factual,
+        scenario_co2=scenario_co2,
+        year=year,
+        lat=lat,
+        lon=lon,
+        country_code=request.country_code,
+        feature_resolver=feature_resolver,
+        horizon=horizon,
+    )
+    if abs(b_mean) > 1e-9 and b_mean_bma != b_mean:
+        baseline_blended = baseline_blended * (b_mean_bma / b_mean)
+        b_mean = b_mean_bma
+    if abs(p_mean) > 1e-9 and p_mean_bma != p_mean:
+        projected_blended = projected_blended * (p_mean_bma / p_mean)
+        p_mean = p_mean_bma
+    b_p10, b_p90 = float(np.percentile(baseline_blended, 10)), float(np.percentile(baseline_blended, 90))
+    p_p10, p_p90 = float(np.percentile(projected_blended, 10)), float(np.percentile(projected_blended, 90))
 
     avoided_arr = np.maximum(projected_blended - baseline_blended, 0.0) * request.farm_size_ha
     a_mean, a_p10, a_p90 = _mean_p10_p90(avoided_arr)
