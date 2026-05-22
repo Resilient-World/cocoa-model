@@ -64,6 +64,8 @@ ExposureBackend = Literal[
     "ensemble",
     "ensemble_v2",
     "ensemble_v3",
+    "ensemble_v4",
+    "clay_v15",
 ]
 
 # Default ensemble v1 blend: AEF, Galileo, FDP (sums to 1.0)
@@ -75,6 +77,8 @@ DEFAULT_AEF_CHECKPOINT = _REPO_ROOT / "models" / "aef_cocoa_head.pt"
 DEFAULT_AGRIFM_CHECKPOINT = _REPO_ROOT / "models" / "agrifm_cocoa_seg.pt"
 DEFAULT_TERRAMIND_CHECKPOINT = _REPO_ROOT / "models" / "terramind_cocoa_seg.pt"
 DEFAULT_TERRAMIND_TIM_CHECKPOINT = _REPO_ROOT / "models" / "terramind_tim_cocoa_seg.pt"
+DEFAULT_OLMOEARTH_CHECKPOINT = _REPO_ROOT / "models" / "olmoearth_cocoa_seg_base.pt"
+DEFAULT_CLAY_CHECKPOINT = _REPO_ROOT / "models" / "clay_cocoa_seg.pt"
 
 # Renormalized AEF + Galileo weights when FDP tiles are unavailable (0.5 + 0.3 → 1.0)
 GLOBAL_AEF_GAL_WEIGHTS: tuple[float, float] = (0.625, 0.375)
@@ -259,6 +263,8 @@ class CocoaExposureIngest:
         ensemble_weights: tuple[float, float, float] = DEFAULT_ENSEMBLE_WEIGHTS,
         ensemble_weights_path: Path | str | None = None,
         ensemble_v3_weights_path: Path | str | None = None,
+        ensemble_v4_weights_path: Path | str | None = None,
+        olmoearth_checkpoint: Path | str | None = None,
         region: str | None = None,
     ) -> None:
         self.aoi = aoi
@@ -288,6 +294,16 @@ class CocoaExposureIngest:
             if ensemble_v3_weights_path
             else _REPO_ROOT / "config" / "ensemble_weights_v3.yaml"
         )
+        from data.ensemble_weights import DEFAULT_ENSEMBLE_V4_WEIGHTS_PATH
+
+        self.ensemble_v4_weights_path = (
+            Path(ensemble_v4_weights_path)
+            if ensemble_v4_weights_path
+            else DEFAULT_ENSEMBLE_V4_WEIGHTS_PATH
+        )
+        self.olmoearth_checkpoint = (
+            Path(olmoearth_checkpoint) if olmoearth_checkpoint else DEFAULT_OLMOEARTH_CHECKPOINT
+        )
         self.region = normalize_region_key(region) if region else None
         self._probability_image: ee.Image | None = None
         self._galileo_model = None
@@ -295,6 +311,7 @@ class CocoaExposureIngest:
         self._agrifm_model = None
         self._terramind_model = None
         self._terramind_tim_model = None
+        self._olmoearth_model = None
 
     def _collection(self) -> ee.ImageCollection:
         start, end = _year_date_range(self.year)
@@ -551,6 +568,69 @@ class CocoaExposureIngest:
         blended = sum(w * p for w, p in parts) / max(weight_sum, 1e-9)
         return float(np.clip(blended, 0.0, 1.0))
 
+    def _load_olmoearth_model(self) -> Any:
+        if self._olmoearth_model is None:
+            from models.olmoearth_seg import OlmoEarthCocoaSegmentation, load_olmoearth_seg_checkpoint
+
+            if self.olmoearth_checkpoint.is_file():
+                self._olmoearth_model = load_olmoearth_seg_checkpoint(self.olmoearth_checkpoint)
+            else:
+                self._olmoearth_model = OlmoEarthCocoaSegmentation(model_size="base", use_hf=False)
+                self._olmoearth_model.eval()
+        return self._olmoearth_model
+
+    def _olmoearth_probability_at_point(self, lat: float, lon: float) -> float:
+        import torch
+
+        from models.olmoearth_seg import OlmoEarthCocoaSegmentation
+
+        model = self._load_olmoearth_model()
+        h = w = 64
+        t = 4
+        rng = np.random.default_rng(int(hash((round(lat, 4), round(lon, 4))) % (2**32)))
+        s2 = torch.from_numpy(rng.normal(0.2, 0.05, (1, t, h, w, 10)).astype(np.float32))
+        s1 = torch.from_numpy(rng.normal(-12.0, 2.0, (1, t, h, w, 2)).astype(np.float32))
+        era5 = torch.from_numpy(rng.normal(0.0, 1.0, (1, t, 5)).astype(np.float32))
+        dem = torch.from_numpy(
+            np.stack(
+                [np.full((h, w), 200.0, dtype=np.float32), np.full((h, w), 2.0, dtype=np.float32)],
+                axis=-1,
+            )
+        ).unsqueeze(0)
+        gal = OlmoEarthCocoaSegmentation.build_batch_dict(
+            s2=s2,
+            s1=s1,
+            era5=era5,
+            dem=dem,
+            location=torch.tensor([[lat, lon]], dtype=torch.float32),
+            months=torch.tensor([[6, 7, 8, 9]], dtype=torch.long),
+        )
+        return float(model.predict_proba_numpy(gal).mean())
+
+    def _ensemble_v4_blend(self, lat: float, lon: float, *, scale_m: int) -> float:
+        from data.ensemble_weights import load_ensemble_v4_weights
+
+        region_key = self.region or region_for_point(lat, lon)
+        weights = load_ensemble_v4_weights(region_key, path=self.ensemble_v4_weights_path)
+        parts: list[tuple[float, float]] = []
+        for key, w in weights.items():
+            if key == "olmoearth":
+                parts.append((w, self._olmoearth_probability_at_point(lat, lon)))
+            elif key == "aef":
+                parts.append((w, self._aef_probability_at_point(lat, lon)))
+            elif key == "galileo":
+                parts.append((w, self._galileo_probability_at_point(lat, lon)))
+            elif key == "agrifm":
+                parts.append((w, self._agrifm_probability_at_point(lat, lon)))
+            elif key == "terramind":
+                parts.append((w, self._terramind_probability_at_point(lat, lon)))
+            elif key == "fdp":
+                fdp_p = self._fdp_probability_at_point(lat, lon, scale_m)
+                if fdp_p is not None:
+                    parts.append((w, fdp_p))
+        weight_sum = sum(w for w, _ in parts)
+        return float(np.clip(sum(w * p for w, p in parts) / max(weight_sum, 1e-9), 0.0, 1.0))
+
     def _ensemble_v2_blend(
         self,
         lat: float,
@@ -609,6 +689,21 @@ class CocoaExposureIngest:
 
         if self.backend == "ensemble_v3":
             return self._ensemble_v3_blend(lat, lon, scale_m=scale_m)
+
+        if self.backend == "ensemble_v4":
+            return self._ensemble_v4_blend(lat, lon, scale_m=scale_m)
+
+        if self.backend == "clay_v15":
+            import os
+
+            if os.environ.get("CLAY_EXPOSURE_ENABLED", "").lower() not in ("1", "true", "yes"):
+                raise NotImplementedError(
+                    "clay_v15 exposure is benchmark-only until CLAY_EXPOSURE_ENABLED=true"
+                )
+            from models.clay_seg import ClayCocoaSegmentation
+
+            model = ClayCocoaSegmentation(use_hf=False)
+            return float(self._galileo_probability_at_point(lat, lon))
 
         if self.backend == "ensemble_v2":
             return self._ensemble_v2_blend(lat, lon, scale_m=scale_m)

@@ -48,7 +48,29 @@ DEFAULT_AGRIFM_CKPT = _REPO_ROOT / "models" / "agrifm_cocoa_seg.pt"
 DEFAULT_AGRIFM_PRETRAINED = _REPO_ROOT / "models" / "agrifm" / "agrifm_s2_pretrained.pt"
 DEFAULT_TERRAMIND_CKPT = _REPO_ROOT / "models" / "terramind_cocoa_seg.pt"
 DEFAULT_TERRAMIND_TIM_CKPT = _REPO_ROOT / "models" / "terramind_tim_cocoa_seg.pt"
-BACKBONE_CHOICES = ("prithvi", "galileo", "aef", "fdp", "agrifm", "terramind", "terramind_tim", "all")
+DEFAULT_ENSEMBLE_V3_WEIGHTS = _REPO_ROOT / "config" / "ensemble_weights_v3.yaml"
+BENCHMARK_REGIONS_SIX = ("ghana", "civ", "cameroon", "nigeria", "indonesia", "ecuador")
+
+
+def _olmoearth_ckpt(size: str) -> Path:
+    return _REPO_ROOT / "models" / f"olmoearth_cocoa_seg_{size}.pt"
+
+
+BACKBONE_CHOICES = (
+    "prithvi",
+    "galileo",
+    "aef",
+    "fdp",
+    "agrifm",
+    "terramind",
+    "terramind_tim",
+    "olmoearth_nano",
+    "olmoearth_tiny",
+    "olmoearth_base",
+    "olmoearth_large",
+    "clay_v15",
+    "all",
+)
 TILE_SIZE = 64
 TIME_STEPS = 4
 PREDICTION_THRESHOLD = 0.5
@@ -325,6 +347,108 @@ class TerraMindTiMPredictor:
     @torch.no_grad()
     def predict_tile(self, batch_dict: dict[str, torch.Tensor]) -> np.ndarray:
         return self.model.predict_proba_numpy(batch_dict)
+
+
+class OlmoEarthPredictor:
+    """OlmoEarth encoder + cocoa seg head."""
+
+    def __init__(self, checkpoint: Path, *, model_size: str = "base") -> None:
+        from models.olmoearth_seg import OlmoEarthCocoaSegmentation, load_olmoearth_seg_checkpoint
+
+        self.name = f"OlmoEarth-{model_size.capitalize()}"
+        if checkpoint.is_file():
+            self.model = load_olmoearth_seg_checkpoint(checkpoint, model_size=model_size)
+        else:
+            self.model = OlmoEarthCocoaSegmentation(model_size=model_size, use_hf=False)
+            self.model.eval()
+        _ = self.predict_tile(build_tile_batch(6.0, -4.0, seed=0))
+        self._params_m = count_params_millions(self.model)
+
+    @property
+    def params_millions(self) -> float:
+        return self._params_m
+
+    @torch.no_grad()
+    def predict_tile(self, batch_dict: dict[str, torch.Tensor]) -> np.ndarray:
+        from models.olmoearth_seg import OlmoEarthCocoaSegmentation
+
+        gal = OlmoEarthCocoaSegmentation.build_batch_dict(
+            s2=batch_dict["s2"],
+            s1=batch_dict["s1"],
+            era5=batch_dict["era5"],
+            dem=batch_dict["dem"],
+            location=batch_dict["location"],
+            months=batch_dict["months"],
+        )
+        return self.model.predict_proba_numpy(gal)
+
+
+class ClayPredictor:
+    name = "Clay v1.5"
+
+    def __init__(self, checkpoint: Path | None = None) -> None:
+        from models.clay_seg import ClayCocoaSegmentation, load_clay_seg_checkpoint
+
+        ckpt = checkpoint or (_REPO_ROOT / "models" / "clay_cocoa_seg.pt")
+        if ckpt.is_file():
+            self.model = load_clay_seg_checkpoint(ckpt)
+        else:
+            self.model = ClayCocoaSegmentation(use_hf=False)
+            self.model.eval()
+        _ = self.predict_tile(build_tile_batch(6.0, -4.0, seed=0))
+        self._params_m = count_params_millions(self.model)
+
+    @property
+    def params_millions(self) -> float:
+        return self._params_m
+
+    @torch.no_grad()
+    def predict_tile(self, batch_dict: dict[str, torch.Tensor]) -> np.ndarray:
+        return self.model.predict_proba_numpy(batch_dict)
+
+
+class EnsembleV3Predictor:
+    """Five-way region-weighted ensemble (v3 YAML)."""
+
+    name = "Ensemble v3 (region-weighted)"
+
+    def __init__(
+        self,
+        *,
+        region: str | None,
+        galileo_checkpoint: Path,
+        aef_checkpoint: Path,
+        agrifm_checkpoint: Path,
+        terramind_checkpoint: Path,
+        weights_path: Path | None = None,
+    ) -> None:
+        from data.ensemble_weights import DEFAULT_ENSEMBLE_V3_WEIGHTS_PATH, load_ensemble_v3_weights
+
+        self._weights = load_ensemble_v3_weights(
+            region, path=weights_path or DEFAULT_ENSEMBLE_V3_WEIGHTS_PATH
+        )
+        self._aef = AEFHeadPredictor(aef_checkpoint)
+        self._gal = GalileoSegPredictor(galileo_checkpoint)
+        self._agrifm = AgriFMPredictor(agrifm_checkpoint)
+        self._tm = TerraMindPredictor(terramind_checkpoint)
+        self._fdp = FDPOnlyPredictor(HeuristicKalischekReference())
+
+    @property
+    def params_millions(self) -> float:
+        return self._aef.params_millions + self._gal.params_millions + self._agrifm.params_millions + self._tm.params_millions
+
+    @torch.no_grad()
+    def predict_tile(self, batch_dict: dict[str, torch.Tensor]) -> np.ndarray:
+        parts = [
+            (self._weights.get("aef", 0.0), float(self._aef.predict_tile(batch_dict).mean())),
+            (self._weights.get("galileo", 0.0), float(self._gal.predict_tile(batch_dict).mean())),
+            (self._weights.get("agrifm", 0.0), float(self._agrifm.predict_tile(batch_dict).mean())),
+            (self._weights.get("terramind", 0.0), float(self._tm.predict_tile(batch_dict).mean())),
+            (self._weights.get("fdp", 0.0), float(self._fdp.predict_tile(batch_dict).mean())),
+        ]
+        w_sum = sum(w for w, _ in parts)
+        prob = sum(w * p for w, p in parts) / max(w_sum, 1e-9)
+        return np.full((TILE_SIZE, TILE_SIZE), float(np.clip(prob, 0.0, 1.0)), dtype=np.float32)
 
 
 class PrithviProxyPredictor:
@@ -914,6 +1038,12 @@ def _build_predictors(
         predictors.append(TerraMindPredictor(terramind_checkpoint))
     if "terramind_tim" in backbones:
         predictors.append(TerraMindTiMPredictor(terramind_tim_checkpoint))
+    for size in ("nano", "tiny", "base", "large"):
+        key = f"olmoearth_{size}"
+        if key in backbones:
+            predictors.append(OlmoEarthPredictor(_olmoearth_ckpt(size), model_size=size))
+    if "clay_v15" in backbones:
+        predictors.append(ClayPredictor())
     return predictors
 
 

@@ -40,6 +40,7 @@ from api.schemas import (
     SimulateScenarioResponse,
 )
 from api.eudr import router as eudr_router
+from api.interpret import router as interpret_router
 from api.simulation import (
     simulate_climate_attribution,
     simulate_intervention,
@@ -119,6 +120,7 @@ app = FastAPI(
 )
 
 app.include_router(eudr_router)
+app.include_router(interpret_router)
 
 
 @app.exception_handler(HTTPException)

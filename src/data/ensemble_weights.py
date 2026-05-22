@@ -21,9 +21,12 @@ log = structlog.get_logger(__name__)
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ENSEMBLE_WEIGHTS_PATH = _REPO_ROOT / "config" / "ensemble_weights.yaml"
 DEFAULT_ENSEMBLE_V3_WEIGHTS_PATH = _REPO_ROOT / "config" / "ensemble_weights_v3.yaml"
+DEFAULT_ENSEMBLE_V4_WEIGHTS_PATH = _REPO_ROOT / "config" / "ensemble_weights_v4.yaml"
 
 BACKEND_KEYS = ("aef", "galileo", "agrifm", "fdp")
 V3_BACKEND_KEYS = ("aef", "galileo", "agrifm", "terramind", "fdp")
+V4_BACKEND_KEYS = ("olmoearth", "agrifm", "terramind", "galileo", "aef", "fdp")
+GLOBAL_V4_BACKEND_KEYS = ("olmoearth", "agrifm", "terramind", "galileo", "aef")
 GLOBAL_BACKEND_KEYS = ("aef", "galileo", "agrifm")
 GLOBAL_V3_BACKEND_KEYS = ("aef", "galileo", "agrifm", "terramind")
 
@@ -140,3 +143,51 @@ def load_ensemble_v3_weights(
     else:
         block = doc.get("default", {})
     return _normalize_weights(block, V3_BACKEND_KEYS)
+
+
+def _builtin_v4_defaults() -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "default": {
+            "olmoearth": 0.25,
+            "agrifm": 0.20,
+            "terramind": 0.20,
+            "galileo": 0.15,
+            "aef": 0.15,
+            "fdp": 0.05,
+        },
+        "global": {
+            "olmoearth": 0.30,
+            "agrifm": 0.25,
+            "terramind": 0.20,
+            "galileo": 0.15,
+            "aef": 0.10,
+        },
+        "regions": {},
+    }
+
+
+def load_ensemble_v4_weights(
+    region: str | None = None,
+    *,
+    path: Path | str = DEFAULT_ENSEMBLE_V4_WEIGHTS_PATH,
+    global_fallback: bool = False,
+) -> dict[str, float]:
+    """Return normalized weights for opt-in ``ensemble_v4``."""
+    p = Path(path)
+    if not p.is_file():
+        doc = _builtin_v4_defaults()
+    else:
+        with p.open(encoding="utf-8") as handle:
+            doc = yaml.safe_load(handle) or _builtin_v4_defaults()
+    if global_fallback:
+        block = doc.get("global") or doc.get("default", {})
+        return _normalize_weights(block, GLOBAL_V4_BACKEND_KEYS)
+    region_key = normalize_region_key(region) if region else None
+    regions = doc.get("regions") or {}
+    if region_key and region_key in regions:
+        entry = regions[region_key]
+        block = entry.get("weights", entry)
+    else:
+        block = doc.get("default", {})
+    return _normalize_weights(block, V4_BACKEND_KEYS)

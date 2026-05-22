@@ -80,4 +80,19 @@ loadtest:
 	chmod +x scripts/run_k6_loadtest.sh
 	./scripts/run_k6_loadtest.sh "$(URL)" "$(TOKEN)"
 
+benchmark-olmoearth:
+	python scripts/write_backbone_comparison_reports.py --stub-only
+
+fit-ensemble-v4:
+	python scripts/fit_ensemble_v4_weights.py --synthetic
+
+validate-neuralgcm:
+	python scripts/validate_neuralgcm_scenario.py
+
+run-tcav:
+	python scripts/run_tcav_analysis.py
+
+compare-dml-nuisances:
+	python scripts/compare_dml_nuisances.py
+
 ci: lint typecheck test dvc-dag

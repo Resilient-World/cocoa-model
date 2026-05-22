@@ -482,6 +482,24 @@ class YieldSurrogateModel(nn.Module):
         y = traces["y_mech"] + residual
         return y, traces
 
+    def forward_with_activations(
+        self,
+        climate: Tensor,
+        static: Tensor,
+    ) -> tuple[Tensor, Tensor]:
+        """Return ``(yield, hidden)`` where hidden is the fusion layer before the residual head."""
+        self._validate_inputs(climate, static)
+        climate_full = self._pad_climate(climate)
+        traces = self.mechanistic(climate_full, static)
+        gru_out, _ = self.climate_gru(climate_full)
+        climate_emb = self.climate_dropout(self.attention_pool(gru_out))
+        static_emb = self.static_mlp(static)
+        stress_summary = traces["stress_trace"].mean(dim=1)
+        hidden = torch.cat([climate_emb, static_emb, stress_summary], dim=1)
+        residual = self.residual_head(hidden).squeeze(-1)
+        y = traces["y_mech"] + residual
+        return y, hidden
+
     def forward(self, climate: Tensor, static: Tensor) -> Tensor:
         y, _ = self.forward_with_traces(climate, static)
         return y

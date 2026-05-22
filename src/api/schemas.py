@@ -350,7 +350,9 @@ class ConformalConfidenceInterval(BaseModel):
 
 ScenarioSSP = Literal["ssp245", "ssp585"]
 ScenarioHorizonYear = Literal[2030, 2050, 2080]
-DownscalingMethod = Literal["linear_delta", "corrdiff"]
+DownscalingMethod = Literal["linear_delta", "corrdiff", "neuralgcm", "ace2_era5"]
+
+ProcessEnsembleMethod = Literal["mean", "bma", "best"]
 
 
 class SimulateScenarioRequest(BaseModel):
@@ -387,7 +389,11 @@ class SimulateScenarioRequest(BaseModel):
     )
     downscaling_method: DownscalingMethod = Field(
         default="linear_delta",
-        description="linear_delta (ScenarioBuilder) or corrdiff (precomputed CorrDiff-CMIP6 Zarr ensemble)",
+        description="linear_delta, corrdiff, neuralgcm, or ace2_era5 (latter two require env flags)",
+    )
+    ensemble_process_method: ProcessEnsembleMethod = Field(
+        default="mean",
+        description="Combine CASEJ/CASE2/ALMANAC when PROCESS_BMA_ENABLED=true",
     )
 
 

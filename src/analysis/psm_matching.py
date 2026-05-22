@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -307,6 +308,74 @@ def love_plot_data(report: BalanceReport) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 
+NuisanceEstimator = Literal["hgb", "ngboost"]
+
+
+def _fit_outcome_model(
+    estimator: NuisanceEstimator,
+    X: np.ndarray,
+    y: np.ndarray,
+    *,
+    random_state: int,
+) -> Any:
+    if estimator == "ngboost":
+        from ngboost import NGBRegressor
+        from ngboost.distns import Normal
+
+        model = NGBRegressor(Dist=Normal, n_estimators=200, learning_rate=0.05, random_state=random_state)
+        model.fit(X, y)
+        return model
+    model = HistGradientBoostingRegressor(
+        max_iter=300, learning_rate=0.05, random_state=random_state
+    )
+    model.fit(X, y)
+    return model
+
+
+def _predict_outcome(model: Any, X: np.ndarray, *, estimator: NuisanceEstimator) -> np.ndarray:
+    if estimator == "ngboost":
+        return model.predict(X)
+    return model.predict(X)
+
+
+def _fit_propensity_model(
+    estimator: NuisanceEstimator,
+    X: np.ndarray,
+    A: np.ndarray,
+    *,
+    random_state: int,
+) -> Any:
+    if estimator == "ngboost":
+        try:
+            from ngboost import NGBClassifier
+
+            model = NGBClassifier(n_estimators=200, learning_rate=0.05, random_state=random_state)
+            model.fit(X, A)
+            return ("ngb_clf", model)
+        except ImportError:
+            pass
+    model = HistGradientBoostingClassifier(
+        max_iter=300, learning_rate=0.05, random_state=random_state
+    )
+    model.fit(X, A)
+    return ("hgb_clf", model)
+
+
+def _predict_propensity(
+    tagged: tuple[str, Any],
+    X: np.ndarray,
+    *,
+    ps_clip: tuple[float, float],
+) -> np.ndarray:
+    kind, model = tagged
+    if kind == "ngb_clf":
+        proba = model.predict_proba(X)
+        p = proba[:, 1] if proba.shape[1] > 1 else proba[:, 0]
+    else:
+        p = model.predict_proba(X)[:, 1]
+    return np.clip(p, ps_clip[0], ps_clip[1])
+
+
 def aipw_estimator(
     df: pd.DataFrame,
     *,
@@ -317,6 +386,7 @@ def aipw_estimator(
     ps_clip: tuple[float, float] = (0.01, 0.99),
     n_folds: int = 5,
     random_state: int = 42,
+    nuisance_estimator: NuisanceEstimator = "hgb",
 ) -> AIPWResult:
     """
     Cross-fit doubly-robust ATE and ATT (DML; Chernozhukov et al. 2018).
@@ -347,25 +417,15 @@ def aipw_estimator(
 
     skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=random_state)
     for tr, te in skf.split(X, A):
-        g = HistGradientBoostingClassifier(
-            max_iter=300,
-            learning_rate=0.05,
-            max_depth=None,
-            random_state=random_state,
-        )
-        g.fit(X[tr], A[tr])
-        e_hat[te] = np.clip(g.predict_proba(X[te])[:, 1], ps_clip[0], ps_clip[1])
+        g = _fit_propensity_model(nuisance_estimator, X[tr], A[tr], random_state=random_state)
+        e_hat[te] = _predict_propensity(g, X[te], ps_clip=ps_clip)
 
         tr_t = tr[A[tr] == 1]
         tr_c = tr[A[tr] == 0]
-        m1 = HistGradientBoostingRegressor(
-            max_iter=300, learning_rate=0.05, random_state=random_state
-        ).fit(X[tr_t], Y[tr_t])
-        m0 = HistGradientBoostingRegressor(
-            max_iter=300, learning_rate=0.05, random_state=random_state
-        ).fit(X[tr_c], Y[tr_c])
-        mu1_hat[te] = m1.predict(X[te])
-        mu0_hat[te] = m0.predict(X[te])
+        m1 = _fit_outcome_model(nuisance_estimator, X[tr_t], Y[tr_t], random_state=random_state)
+        m0 = _fit_outcome_model(nuisance_estimator, X[tr_c], Y[tr_c], random_state=random_state)
+        mu1_hat[te] = _predict_outcome(m1, X[te], estimator=nuisance_estimator)
+        mu0_hat[te] = _predict_outcome(m0, X[te], estimator=nuisance_estimator)
 
     if_ate = mu1_hat - mu0_hat + A * (Y - mu1_hat) / e_hat - (1 - A) * (Y - mu0_hat) / (1 - e_hat)
     ate = float(if_ate.mean())
