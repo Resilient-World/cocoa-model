@@ -1,12 +1,20 @@
-.PHONY: help train-all benchmark report ingest-gee ci lint typecheck test dvc-dag
+.PHONY: help train-all benchmark report ingest-gee ci lint typecheck test dvc-dag dvc-repro hpo promote
 
 REPO_ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 export PYTHONPATH := $(REPO_ROOT)src
+
+MODEL ?= yield
+N ?= 50
+PROMOTE_MODEL ?= yield_surrogate_v2
+PROMOTE_RUN_ID ?=
 
 help:
 	@echo "Targets:"
 	@echo "  make ingest-gee   - Write data/raw ingest manifest + AOI"
 	@echo "  make train-all    - DVC repro: AEF head, CASEJ surrogate, joint head"
+	@echo "  make dvc-repro    - Full mock-GEE DVC pipeline (params.mock_gee=true)"
+	@echo "  make hpo MODEL=yield N=50 - Optuna HPO → MLflow"
+	@echo "  make promote MODEL=yield_surrogate_v2 - Promotion gate + champion alias"
 	@echo "  make benchmark    - Backbone benchmark → reports/backbones/benchmark_latest.md"
 	@echo "  make report       - Causal PDF report (synthetic panel)"
 	@echo "  make lint         - ruff check"
@@ -38,5 +46,14 @@ test:
 
 dvc-dag:
 	dvc dag
+
+dvc-repro:
+	dvc repro
+
+hpo:
+	python scripts/run_hpo.py --model $(MODEL) --n-trials $(N)
+
+promote:
+	scripts/promote_champion.sh $(PROMOTE_MODEL) $(PROMOTE_RUN_ID)
 
 ci: lint typecheck test dvc-dag

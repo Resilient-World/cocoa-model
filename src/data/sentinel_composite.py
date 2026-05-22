@@ -358,11 +358,23 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Do not wait for Drive export completion",
     )
     parser.add_argument("--project", default=None, help="GCP project ID")
+    parser.add_argument(
+        "--stub",
+        action="store_true",
+        help="Write manifest only (no Earth Engine export)",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
+    if args.stub:
+        from data.pipeline_stubs import write_sentinel_manifest
+
+        out = args.output or Path("data/processed/s2_s1_manifest.json")
+        write_sentinel_manifest(out, region=args.region)
+        log.info(f"Wrote stub Sentinel manifest: {out}")
+        return 0
     if args.output is not None and args.export != "local":
         args.export = "local"
     try:

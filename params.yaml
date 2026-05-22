@@ -1,0 +1,32 @@
+# DVC pipeline parameters — https://dvc.org/doc/user-guide/project-structure/params
+region: ghana
+mock_gee: true
+
+era5:
+  start: "2020-01-01"
+  end: "2024-12-31"
+  out: data/processed/era5_2020_2024.zarr
+
+sentinel:
+  start: "2023-01-01"
+  end: "2023-12-31"
+  manifest: data/processed/s2_s1_manifest.json
+
+fdp:
+  manifest: data/raw/fdp_ingest_manifest.json
+
+train:
+  epochs: 5
+  quick: true
+  synthetic: true
+  batch_size: 8
+  lr: 0.0003
+  n_lhs_farms: 60
+
+validate:
+  use_gee: false
+  fail_fast: false
+
+mlflow:
+  tracking_uri: null
+  experiment_prefix: resilient-cocoa

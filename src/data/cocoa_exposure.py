@@ -916,6 +916,49 @@ def build_landscape_feature_row(
     )
 
 
+def _cli_main(argv: list[str] | None = None) -> int:
+    """CLI for FDP exposure ingest manifest (DVC ``stage_ingest_fdp``)."""
+    import argparse
+    import json
+    import sys
+    from datetime import date
+
+    parser = argparse.ArgumentParser(description="Cocoa exposure / FDP ingest manifest")
+    parser.add_argument("--region", choices=sorted(REGIONS.keys()), default="ghana")
+    parser.add_argument(
+        "--write-manifest",
+        type=Path,
+        default=_REPO_ROOT / "data" / "raw" / "fdp_ingest_manifest.json",
+    )
+    parser.add_argument(
+        "--stub",
+        action="store_true",
+        help="Offline manifest only (no GEE)",
+    )
+    args = parser.parse_args(argv)
+    args.write_manifest.parent.mkdir(parents=True, exist_ok=True)
+    if args.stub:
+        from data.pipeline_stubs import write_fdp_manifest
+
+        write_fdp_manifest(args.write_manifest, region=args.region)
+        return 0
+    payload = {
+        "region": normalize_region_key(args.region),
+        "date": date.today().isoformat(),
+        "fdp_asset": FDP_COCOA_COLLECTION,
+        "backend": "fdp",
+        "note": "Production ingest uses CocoaExposureIngest with authenticated GEE",
+    }
+    args.write_manifest.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(_cli_main())
+
+
 __all__ = [
     "CocoaExposureIngest",
     "ExposureBackend",

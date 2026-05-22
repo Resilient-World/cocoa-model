@@ -1,0 +1,3 @@
+{"farm_location": {"lat": 6.5, "lon": -1.2}, "farm_size_ha": 5.0, "current_yield": 2.0, "intervention_type": "shade_trees", "cocoa_price_usd": 3200.0}
+{"farm_location": {"lat": 5.8, "lon": -3.0}, "farm_size_ha": 3.5, "current_yield": 1.8, "intervention_type": "fertilizer", "cocoa_price_usd": 3100.0}
+{"farm_location": {"lat": 7.0, "lon": -2.5}, "farm_size_ha": 8.0, "current_yield": 2.2, "intervention_type": "irrigation", "cocoa_price_usd": 3300.0}
