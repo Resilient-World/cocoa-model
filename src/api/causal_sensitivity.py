@@ -66,6 +66,13 @@ def compute_sensitivity_bounds(settings: APISettings) -> list[SensitivityBounds]
 
     ``tipping_point_lambda`` is computed once and repeated on each grid element.
     """
+    from api.telemetry import trace_span
+
+    with trace_span("dvds.sensitivity"):
+        return _compute_sensitivity_bounds_impl(settings)
+
+
+def _compute_sensitivity_bounds_impl(settings: APISettings) -> list[SensitivityBounds]:
     panel = load_dvds_panel(settings)
     snapshot = build_dvds_snapshot(panel)
     covs = [c for c in PSM_COVARIATE_COLS if c in snapshot.columns]

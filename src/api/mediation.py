@@ -103,6 +103,36 @@ def compute_intervention_mediation(
     random_state: int = 42,
 ) -> MediationDecomposition:
     """Run per-mediator NDE/NIE and optional multi-mediator path table."""
+    from api.telemetry import trace_span
+
+    with trace_span("mediation.decompose", intervention=request.intervention_type):
+        return _compute_intervention_mediation_impl(
+            request,
+            samples_cf=samples_cf,
+            samples_factual=samples_factual,
+            ds_cf=ds_cf,
+            ds_factual=ds_factual,
+            biotic_baseline=biotic_baseline,
+            biotic_projected=biotic_projected,
+            decompose_mediators=decompose_mediators,
+            n_bootstrap=n_bootstrap,
+            random_state=random_state,
+        )
+
+
+def _compute_intervention_mediation_impl(
+    request: SimulateInterventionRequest,
+    *,
+    samples_cf: Tensor,
+    samples_factual: Tensor,
+    ds_cf: xr.Dataset,
+    ds_factual: xr.Dataset,
+    biotic_baseline: dict[str, Any] | None,
+    biotic_projected: dict[str, Any] | None,
+    decompose_mediators: Sequence[MediatorId],
+    n_bootstrap: int = 200,
+    random_state: int = 42,
+) -> MediationDecomposition:
     lat = request.farm_location.lat
     lon = request.farm_location.lon
     cf_vals, fact_vals = resolve_mediator_scalars(
@@ -178,6 +208,16 @@ def compute_intervention_mediation(
                 random_state=random_state,
             )
             path_table = table.to_dict(orient="records")
+
+    from api import metrics as prom_metrics
+
+    if per_mediator:
+        first = per_mediator[0]
+        if first.nde and abs(first.nde) > 1e-9:
+            prom_metrics.set_mediation_ratio(
+                request.intervention_type,
+                float(first.nie / first.nde) if first.nie is not None else 0.0,
+            )
 
     return MediationDecomposition(per_mediator=per_mediator, path_table=path_table)
 

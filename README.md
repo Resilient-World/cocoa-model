@@ -614,11 +614,34 @@ Body matches `/simulate-intervention` plus `scenario` (`ssp245` \| `ssp585`) and
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the `models/` subpackage layout, structlog conventions, and `make typecheck` (mypy strict on `src/`).
 
+## Local observability stack
+
+Optional OpenTelemetry tracing, Prometheus metrics, Grafana dashboards, and k6 load tests.
+Disabled by default for local dev (`OTEL_ENABLED=false`, `PROMETHEUS_ENABLED=false`).
+
+```bash
+pip install -e ".[observability]"
+export OTEL_ENABLED=true PROMETHEUS_ENABLED=true
+docker compose -f docker-compose.observability.yml up -d
+USE_REAL_FEATURES=false uvicorn api.main:app --reload --app-dir src
+```
+
+- Jaeger UI: http://localhost:16686
+- Prometheus: http://localhost:9090
+- Grafana: http://localhost:3000 (admin/admin)
+
+SLOs and incident recipes: [docs/SLOS.md](docs/SLOS.md), [docs/RUNBOOK_INCIDENTS.md](docs/RUNBOOK_INCIDENTS.md).
+
+```bash
+make loadtest URL=http://localhost:8000
+```
+
 ## Testing
 
 ```bash
 source .venv/bin/activate
 pytest                    # full suite
+pytest tests/api/test_metrics.py tests/api/test_telemetry.py -v
 pytest tests/test_api_simulate.py tests/test_api_scenario.py -v
 pytest --cov=src          # with coverage (dev extra)
 ```

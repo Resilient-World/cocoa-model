@@ -1,0 +1,41 @@
+# Reference burn-rate alerts (enable in production Prometheus).
+groups:
+  - name: cocoa_api_slo
+    rules:
+      - alert: SimulateInterventionHighErrorRate
+        expr: |
+          sum(rate(cocoa_simulation_errors_total{endpoint=~".*simulate.*"}[5m]))
+          / sum(rate(http_requests_total{handler="/simulate-intervention"}[5m])) > 0.005
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: simulate-intervention error budget burn (5m)
+
+      - alert: SimulateInterventionLatencyP95
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(rate(cocoa_inference_latency_seconds_bucket{endpoint="/simulate-intervention"}[5m])) by (le)
+          ) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: p95 simulate-intervention latency above 500ms SLO
+
+      - alert: ConformalCoverageDrift
+        expr: abs(cocoa_conformal_coverage_running_avg - 0.9) > 0.03
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: conformal coverage deviates >3pp from nominal 90%
+
+      - alert: WCTMDriftWealth
+        expr: cocoa_drift_score > 100
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: WCTM wealth e-value exceeded page threshold

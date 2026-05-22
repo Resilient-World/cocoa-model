@@ -110,6 +110,46 @@ def apply_scenario_conformal(
     """
     method: ConformalMethod = getattr(settings, "conformal_method", "eci_integral")
 
+    from api.telemetry import trace_span
+
+    with trace_span(
+        "conformal.lookup",
+        scenario=request.scenario,
+        horizon_year=request.horizon_year,
+    ):
+        return _apply_scenario_conformal_inner(
+            request,
+            cqr_model=cqr_model,
+            cqr_calibrator=cqr_calibrator,
+            store=store,
+            drift_store=drift_store,
+            settings=settings,
+            climate_baseline=climate_baseline,
+            climate_projected=climate_projected,
+            static_cf=static_cf,
+            static_factual=static_factual,
+            biotic_cf_frac=biotic_cf_frac,
+            biotic_fact_frac=biotic_fact_frac,
+            method=method,
+        )
+
+
+def _apply_scenario_conformal_inner(
+    request: SimulateScenarioRequest,
+    *,
+    cqr_model: QuantileYieldSurrogate,
+    cqr_calibrator: ConformalCalibrator | None,
+    store: OnlineConformalStore | None,
+    drift_store: DriftStore | None,
+    settings: APISettings | Any,
+    climate_baseline: Tensor,
+    climate_projected: Tensor,
+    static_cf: Tensor,
+    static_factual: Tensor,
+    biotic_cf_frac: float,
+    biotic_fact_frac: float,
+    method: ConformalMethod,
+) -> ScenarioConformalResult | None:
     if method == "split_cqr":
         if cqr_calibrator is None:
             log.warning("split_cqr requested but calibrator missing; skipping conformal CI")
@@ -179,6 +219,18 @@ def apply_scenario_conformal(
     covered = fact_adj_lo <= observed_y <= fact_adj_hi
     updater.update(score, covered=covered)
     store.save_after_update(key, updater, covered=covered, method=method)
+
+    from api import metrics as prom_metrics
+
+    region = resolve_region(request.farm_location.lat, request.farm_location.lon)
+    cov_avg = store.coverage_running_avg(key)
+    if cov_avg is not None:
+        prom_metrics.set_conformal_coverage(
+            scenario=request.scenario,
+            horizon=str(request.horizon_year),
+            region=region,
+            value=float(cov_avg),
+        )
 
     q_adj = float(updater.current_threshold)
 

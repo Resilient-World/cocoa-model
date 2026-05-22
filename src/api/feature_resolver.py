@@ -47,6 +47,7 @@ from data.ensemble_weights import (
     DEFAULT_ENSEMBLE_V3_WEIGHTS_PATH,
     DEFAULT_ENSEMBLE_WEIGHTS_PATH,
 )
+from api.telemetry import trace_span
 from data.era5_ingest import ERA5Ingest
 from data.teleconnection_ingest import (
     DEFAULT_PARQUET as DEFAULT_TELECONNECTION_PARQUET,
@@ -376,6 +377,10 @@ class FarmFeatureResolver:
 
     def resolve_climate(self, lat: float, lon: float, year: int) -> Tensor:
         """Daily climate ``[1, 365, 11]`` from cache / Zarr / GEE / geo_mock."""
+        with trace_span("feature_resolver.resolve_climate", lat=lat, lon=lon, year=year):
+            return self._resolve_climate_impl(lat, lon, year)
+
+    def _resolve_climate_impl(self, lat: float, lon: float, year: int) -> Tensor:
         key = self._grid_key(lat, lon, year)
         hit = self._cache_get_climate(key)
         if hit is not None:
@@ -444,6 +449,10 @@ class FarmFeatureResolver:
 
     def resolve_static(self, lat: float, lon: float, year: int | None = None) -> Tensor:
         """Site static ``[1, 13]`` for the yield surrogate."""
+        with trace_span("feature_resolver.resolve_static", lat=lat, lon=lon):
+            return self._resolve_static_impl(lat, lon, year)
+
+    def _resolve_static_impl(self, lat: float, lon: float, year: int | None = None) -> Tensor:
         key = self._grid_key(lat, lon)
         hit = self._cache_get_static(key)
         if hit is not None:

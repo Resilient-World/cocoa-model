@@ -12,7 +12,7 @@ COPY data/external ./data/external
 RUN uv venv /opt/venv && \
     . /opt/venv/bin/activate && \
     uv pip install --no-cache pip setuptools wheel && \
-    uv pip install --no-cache -e .
+    uv pip install --no-cache -e ".[observability]"
 
 FROM python:3.12-slim AS runtime
 

@@ -1,4 +1,4 @@
-.PHONY: help train-all benchmark report ingest-gee ci lint typecheck test dvc-dag dvc-repro hpo promote validate-spatial validate-temporal validate-calibration plot-reliability
+.PHONY: help train-all benchmark report ingest-gee ci lint typecheck test dvc-dag dvc-repro hpo promote validate-spatial validate-temporal validate-calibration plot-reliability loadtest
 
 REGION ?= ghana
 
@@ -27,6 +27,7 @@ help:
 	@echo "  make validate-temporal            - Forward-chain temporal CV report"
 	@echo "  make validate-calibration         - CRPS/ECE/PIT/sharpness calibration gate"
 	@echo "  make plot-reliability             - Reliability figure from calibration_latest.json"
+	@echo "  make loadtest URL=http://localhost:8000 - k6 load tests (optional TOKEN=)"
 	@echo "  make ci           - lint + test + dvc-dag (local CI)"
 
 ingest-gee:
@@ -73,5 +74,10 @@ validate-calibration:
 
 plot-reliability:
 	python scripts/plot_reliability.py --model cqr_yield --scores reports/validation/calibration_latest.json
+
+loadtest:
+	@command -v k6 >/dev/null || (echo "install k6: https://k6.io" && exit 1)
+	chmod +x scripts/run_k6_loadtest.sh
+	./scripts/run_k6_loadtest.sh "$(URL)" "$(TOKEN)"
 
 ci: lint typecheck test dvc-dag

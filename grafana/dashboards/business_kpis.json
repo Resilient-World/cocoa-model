@@ -1,0 +1,59 @@
+{
+  "uid": "cocoa-business-kpis",
+  "title": "Cocoa Business KPIs",
+  "tags": ["cocoa", "business"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Avoided loss (tonnes/request)",
+      "type": "histogram",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "sum(rate(cocoa_avoided_loss_tonnes_per_request_bucket[5m])) by (le, endpoint)",
+          "legendFormat": "{{endpoint}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "EUDR screening outcomes",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {
+          "expr": "sum(rate(cocoa_eudr_compliance_total[5m])) by (status)",
+          "legendFormat": "{{status}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Mediation NIE/NDE ratio",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {
+          "expr": "cocoa_mediation_nde_nie_ratio",
+          "legendFormat": "{{intervention}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Policy ranking calls",
+      "type": "stat",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {
+          "expr": "sum(increase(cocoa_policy_ranking_total[24h]))",
+          "legendFormat": "24h calls"
+        }
+      ]
+    }
+  ]
+}

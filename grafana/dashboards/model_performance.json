@@ -1,0 +1,52 @@
+{
+  "uid": "cocoa-model-performance",
+  "title": "Cocoa Model Performance",
+  "tags": ["cocoa", "calibration"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1h",
+  "panels": [
+    {
+      "id": 1,
+      "title": "CRPS (textfile / calibration push)",
+      "type": "stat",
+      "gridPos": {"h": 6, "w": 8, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "cocoa_calibration_crps_1d",
+          "legendFormat": "CRPS 1d"
+        }
+      ],
+      "description": "Refresh via scripts/push_calibration_metrics.py"
+    },
+    {
+      "id": 2,
+      "title": "Reliability ECE",
+      "type": "stat",
+      "gridPos": {"h": 6, "w": 8, "x": 8, "y": 0},
+      "targets": [
+        {
+          "expr": "cocoa_calibration_ece",
+          "legendFormat": "ECE"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Inference latency p50/p95",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 16, "x": 0, "y": 6},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum(rate(cocoa_inference_latency_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(cocoa_inference_latency_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ]
+    }
+  ]
+}

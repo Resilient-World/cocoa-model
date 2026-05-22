@@ -19,6 +19,7 @@ from counterfactual.delta_downscaler import (
     _apply_monthly_multiplicative,
     _recompute_vpd_et0_cwd,
 )
+from api.telemetry import trace_span
 from data.era5_ingest import compute_derived_features
 
 
@@ -34,6 +35,10 @@ class ScenarioBuilder:
         return xr.open_zarr(self.cmip6_zarr_path)
 
     def build_scenario(self, scenario: str, window: tuple[str, str]) -> xr.Dataset:
+        with trace_span("scenario_builder.build", scenario=scenario):
+            return self._build_scenario_impl(scenario, window)
+
+    def _build_scenario_impl(self, scenario: str, window: tuple[str, str]) -> xr.Dataset:
         """
         Apply delta-change from CMIP6 (raw vars) to historical ERA5 schema vars.
 
