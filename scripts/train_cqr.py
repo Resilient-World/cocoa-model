@@ -111,6 +111,9 @@ def train_cqr(
     checkpoint_path: Path = DEFAULT_CQR_CHECKPOINT,
     calibrator_path: Path = DEFAULT_CQR_CALIBRATOR,
     mlflow_experiment: str = "cqr_yield",
+    cv_strategy: str = "spatial_block",
+    block_size_km: float = 50.0,
+    variogram_from_checkpoint: bool = False,
 ) -> dict[str, float]:
     """Train quantile model, fit conformal calibrator, return test metrics."""
     train_loader = DataLoader(
@@ -154,14 +157,58 @@ def train_cqr(
             if epoch % 5 == 0 or epoch == max_epochs - 1:
                 mlflow.log_metric("train_pinball", epoch_loss / max(n_batches, 1), step=epoch)
 
-        cal_climate, cal_static, cal_y = _rows_to_tensors(cal_rows)
-        calibrator = ConformalCalibrator().fit(
-            model,
-            (cal_climate, cal_static),
-            cal_y,
-            alpha=alpha,
-            device=device,
+        all_rows = train_rows + cal_rows + test_rows
+        climate_all, static_all, y_all = _rows_to_tensors(all_rows)
+        lats = np.array(
+            [
+                {"GHA": 6.5, "CIV": 6.8, "CMR": 4.5, "NGA": 6.5}.get(r.country_iso3, 6.0)
+                for r in all_rows
+            ]
         )
+        lons = np.array(
+            [
+                {"GHA": -1.5, "CIV": -5.5, "CMR": 9.5, "NGA": 5.5}.get(r.country_iso3, -2.0)
+                for r in all_rows
+            ]
+        )
+        block_km = block_size_km
+        if variogram_from_checkpoint:
+            from validation.spatial_cv import compute_residual_variogram, recommend_block_size_km
+
+            with torch.no_grad():
+                pred = model(climate_all.to(device), static_all.to(device)).cpu().numpy()[:, 1]
+            res = y_all.cpu().numpy() - pred
+            vario = compute_residual_variogram(
+                pred,
+                res,
+                np.column_stack([lons, lats]),
+            )
+            block_km = recommend_block_size_km(vario["range_km"])
+            logger.info("Variogram range_km=%.1f → block_size_km=%.1f", vario["range_km"], block_km)
+
+        calibrator = ConformalCalibrator()
+        if cv_strategy == "spatial_block":
+            from validation.spatial_cv import SpatialBlockSplit
+
+            splitter = SpatialBlockSplit(block_size_km=block_km, n_folds=5, seed=42)
+            calibrator.fit_blocked(
+                model,
+                (climate_all, static_all),
+                y_all,
+                splitter,
+                coords=(lats, lons),
+                alpha=alpha,
+                device=device,
+            )
+        else:
+            cal_climate, cal_static, cal_y = _rows_to_tensors(cal_rows)
+            calibrator.fit(
+                model,
+                (cal_climate, cal_static),
+                cal_y,
+                alpha=alpha,
+                device=device,
+            )
 
         test_climate, test_static, test_y = _rows_to_tensors(test_rows)
         test_metrics = _evaluate_coverage(
@@ -249,6 +296,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CQR_CHECKPOINT)
     parser.add_argument("--calibrator", type=Path, default=DEFAULT_CQR_CALIBRATOR)
+    parser.add_argument(
+        "--cv-strategy",
+        choices=("random", "spatial_block"),
+        default="spatial_block",
+        help="Conformal calibration split (production: spatial_block)",
+    )
+    parser.add_argument("--block-size-km", type=float, default=50.0)
+    parser.add_argument(
+        "--variogram-from-checkpoint",
+        action="store_true",
+        help="Set block size from residual variogram × 1.5 (Roberts 2017)",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -275,6 +334,9 @@ def main(argv: list[str] | None = None) -> int:
         device=device,
         checkpoint_path=args.checkpoint,
         calibrator_path=args.calibrator,
+        cv_strategy=args.cv_strategy,
+        block_size_km=args.block_size_km,
+        variogram_from_checkpoint=args.variogram_from_checkpoint,
     )
     nominal = 1.0 - args.alpha
     if metrics["coverage"] < nominal - 0.02:

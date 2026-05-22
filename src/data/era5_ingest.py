@@ -248,12 +248,18 @@ class ERA5Ingest:
         self._dataset = ds
         return ds
 
-    def to_zarr(self, path: str, mode: str = "w") -> None:
+    def to_zarr(self, path: str, mode: str = "w", *, validate: bool = True) -> None:
         """Materialize :meth:`build` output to a chunked Zarr store."""
         ds = self._dataset if self._dataset is not None else self.build()
         out = Path(path)
         out.parent.mkdir(parents=True, exist_ok=True)
         ds.to_zarr(str(out), mode=mode)
+        if validate:
+            from data.schemas import ERA5DailySchema, validate_dataframe, zarr_to_daily_df
+
+            sample = zarr_to_daily_df(out)
+            if not sample.empty:
+                validate_dataframe(ERA5DailySchema, sample)
 
 
 def compute_derived_features(ds: xr.Dataset) -> xr.Dataset:
@@ -436,7 +442,12 @@ def main(argv: list[str] | None = None) -> int:
             )
         if out_path is None:
             out_path = Path("data/processed/era5_2020_2024.zarr")
+        from data.schemas import ERA5DailySchema, validate_dataframe, zarr_to_daily_df
+
         write_era5_zarr(Path(out_path), start=args.start)
+        sample = zarr_to_daily_df(out_path)
+        if not sample.empty:
+            validate_dataframe(ERA5DailySchema, sample)
         logging.getLogger(__name__).info("Wrote stub ERA5 Zarr to %s", out_path)
         return 0
 

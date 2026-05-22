@@ -916,6 +916,41 @@ def build_landscape_feature_row(
     )
 
 
+def validate_fdp_probability_batch(df: "pd.DataFrame") -> "pd.DataFrame":
+    """Validate point-level FDP probability samples (Pandera)."""
+    import pandas as pd
+
+    from data.schemas import FDPProbabilitySchema, validate_dataframe
+
+    return validate_dataframe(FDPProbabilitySchema, df)
+
+
+def sample_fdp_validation_grid(
+    region: str,
+    *,
+    n: int = 50,
+    year: int = 2023,
+    seed: int = 0,
+) -> "pd.DataFrame":
+    """Build a validation grid of lat/lon/probability for schema checks."""
+    import pandas as pd
+
+    rng = np.random.default_rng(seed)
+    lat_min, lat_max, lon_min, lon_max = region_latlon_bounds(region)
+    lats = rng.uniform(lat_min, lat_max, n)
+    lons = rng.uniform(lon_min, lon_max, n)
+    probs = rng.uniform(0.0, 1.0, n)
+    df = pd.DataFrame(
+        {
+            "lat": lats,
+            "lon": lons,
+            "probability": probs,
+            "year": [2020 if year < 2022 else 2023] * n,
+        }
+    )
+    return validate_fdp_probability_batch(df)
+
+
 def _cli_main(argv: list[str] | None = None) -> int:
     """CLI for FDP exposure ingest manifest (DVC ``stage_ingest_fdp``)."""
     import argparse

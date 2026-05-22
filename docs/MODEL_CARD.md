@@ -127,7 +127,24 @@ flowchart LR
 
 External benchmarks run via `python -m validation.run_validate` (DVC stage `validate`). Latest committed reports under `reports/validation/` (regenerate in CI).
 
-### 4.1 Segmentation — Kalischek benchmark
+**Primary (production):** spatial-block cross-validation (Roberts et al. 2017), default **50 km** blocks in Ghana and Côte d'Ivoire — see [`docs/VALIDATION_PROTOCOL.md`](VALIDATION_PROTOCOL.md).
+
+**Secondary (diagnostic only):** random splits and 10% cell holdout — optimistic under spatial autocorrelation; do not use for insurer/regulator claims.
+
+### 4.0 Spatial-block CV (primary)
+
+| Metric | Reporting | Gate |
+|--------|-----------|------|
+| Segmentation mIoU / F1 | Per fold, `reports/validation/spatial_cv_<date>.md` | Documented per product gate |
+| Yield / CQR coverage | `spatial_block` strategy, 90% nominal | 88%–92% empirical |
+| Variogram range | `recommend_block_size_km` = 1.5 × range | Informs block size |
+
+```bash
+make validate-spatial REGION=ghana
+python -m models.conformal.validate_conformal_coverage --cv-strategy spatial_block
+```
+
+### 4.1 Segmentation — Kalischek benchmark (secondary diagnostic)
 
 | Metric | Value | Gate |
 |--------|-------|------|
@@ -136,7 +153,7 @@ External benchmarks run via `python -m validation.run_validate` (DVC stage `vali
 | Recall | 1.000 | — |
 | Holdout | 10% spatial (Ghana + CDI), n=402 | — |
 
-> **Caveat:** CI may use heuristic reference/prediction proxies when GEE and `models/segmentation.ckpt` are unavailable. Production evaluation must set `KALISCHEK_GEE_ASSET` and run full raster inference.
+> **Caveat:** CI may use heuristic reference/prediction proxies when GEE and `models/segmentation.ckpt` are unavailable. Production evaluation must set `KALISCHEK_GEE_ASSET` and run full raster inference with **spatial-block** reports as the primary metric.
 
 ### 4.2 National production — ICCO backtest (2015–2024)
 

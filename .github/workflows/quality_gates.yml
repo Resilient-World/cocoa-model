@@ -4,6 +4,9 @@ on:
   pull_request:
   push:
     branches: [main]
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
 
 jobs:
   quality:
@@ -37,6 +40,7 @@ jobs:
             tests/test_did_impact.py \
             tests/test_quality_gates.py \
             tests/test_validation.py \
+            tests/validation/ \
             --cov=analysis \
             --cov=api \
             --cov=compliance \
@@ -94,3 +98,43 @@ jobs:
         env:
           PYTHONPATH: src
         run: python -m validation.icco_yield_backtest --report reports/validation/icco_yield_backtest.md
+
+  validate_spatial_nightly:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package
+        run: pip install -e ".[dev]"
+      - name: Spatial block CV (quick)
+        env:
+          PYTHONPATH: src
+        run: python scripts/validate_spatial_holdout.py --region both --quick
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spatial-cv-report
+          path: reports/validation/spatial_cv_*.md
+
+  validate_temporal_nightly:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package
+        run: pip install -e ".[dev]"
+      - name: Temporal forward-chain (quick)
+        env:
+          PYTHONPATH: src
+        run: python scripts/validate_temporal_holdout.py --quick
+      - uses: actions/upload-artifact@v4
+        with:
+          name: temporal-cv-report
+          path: reports/validation/temporal_cv_*.md

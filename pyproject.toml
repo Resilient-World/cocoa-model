@@ -56,6 +56,9 @@ dependencies = [
     "rpy2>=3.5; platform_system != 'Windows'",
     "segmentation-models-pytorch>=0.3",
     "structlog>=24.1",
+    "pandera[pandas]>=0.20",
+    "scikit-gstat>=1.0",
+    "pyproj>=3.6",
     "galileo @ git+https://github.com/nasaharvest/galileo@main; python_version < '3.12'",
 ]
 
