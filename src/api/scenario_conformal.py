@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import logging
+import structlog
+
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
     from api.config import APISettings
     from monitoring.drift_store import DriftStore
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -111,7 +112,7 @@ def apply_scenario_conformal(
 
     if method == "split_cqr":
         if cqr_calibrator is None:
-            logger.warning("split_cqr requested but calibrator missing; skipping conformal CI")
+            log.warning("split_cqr requested but calibrator missing; skipping conformal CI")
             return None
         base_iv = cqr_calibrator.predict_interval(
             cqr_model, (climate_baseline, static_cf)

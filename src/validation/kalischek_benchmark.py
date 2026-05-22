@@ -7,6 +7,8 @@ probability map on a held-out 10% spatial fold in Ghana and Côte d'Ivoire.
 
 from __future__ import annotations
 
+import structlog
+
 import logging
 import os
 from pathlib import Path
@@ -16,7 +18,7 @@ import numpy as np
 
 from validation._report import ValidationResult, write_report
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_REPORT = _REPO_ROOT / "reports" / "validation" / "kalischek_benchmark.md"
@@ -155,7 +157,7 @@ class CheckpointSegmentationProvider:
             noise = rng.normal(0, 0.04, lats.size)
             return np.clip(ref + noise, 0.0, 1.0)
         # Full raster inference not bundled — use reference-correlated proxy until wired
-        logger.warning("Checkpoint present but raster inference not run; using proxy masks")
+        log.warning("Checkpoint present but raster inference not run; using proxy masks")
         ref = HeuristicKalischekReference().sample_reference(lats, lons)
         return np.clip(ref + 0.05, 0.0, 1.0)
 
@@ -221,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
         segmentation_ckpt=args.checkpoint,
     )
     write_report(result, args.report)
-    print(f"Kalischek benchmark: {'PASS' if result.passed else 'FAIL'} (IoU={result.metrics['iou']:.3f})")
+    log.info(f"Kalischek benchmark: {'PASS' if result.passed else 'FAIL'} (IoU={result.metrics['iou']:.3f})")
     return 0 if result.passed else 1
 
 

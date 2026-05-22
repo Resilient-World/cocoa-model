@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 from typing import Any
@@ -9,6 +10,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 import pandas as pd
 
+from common.logging import configure_logging
 from api.config import APISettings
 from api.cqr_loader import load_cqr_bundle
 from api.drift_monitoring import get_drift_status_for_stratum
@@ -61,6 +63,10 @@ from models.yield_surrogate import YieldSurrogateModel
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    configure_logging(
+        level=os.environ.get("LOG_LEVEL", "INFO"),
+        json=os.environ.get("LOG_JSON", "true").lower() in ("1", "true", "yes"),
+    )
     settings = APISettings()
     app.state.settings = settings
     app.state.feature_resolver = build_resolver_from_settings(settings)
@@ -93,6 +99,14 @@ app.include_router(eudr_router)
 
 @app.get("/health")
 def health() -> dict[str, str]:
+    """
+    Liveness probe for load balancers and CI smoke tests.
+
+    Returns
+    -------
+    dict
+        ``{"status": "ok"}`` when the process is up (no model inference).
+    """
     return {"status": "ok"}
 
 

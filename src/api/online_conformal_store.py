@@ -8,8 +8,9 @@ Uses Redis when ``REDIS_URL`` is set; otherwise atomic JSON at ``online_conforma
 
 from __future__ import annotations
 
+import structlog
+
 import json
-import logging
 import os
 from collections import deque
 from dataclasses import dataclass, field
@@ -21,7 +22,7 @@ from models.conformal_pid import ConformalPID
 from models.eci import ECICutoff, ECIIntegral, ErrorQuantifiedConformalInference
 from models.quantile_yield_surrogate_online import OnlineMethod, _build_updater
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 ConformalMethod = Literal[
     "split_cqr",
@@ -127,7 +128,7 @@ class OnlineConformalStore:
 
                 self._redis_client = redis.from_url(redis_url, decode_responses=True)
             except ImportError:
-                logger.warning("redis package not installed; falling back to JSON state file")
+                log.warning("redis package not installed; falling back to JSON state file")
 
     def _load_initial_blob(self) -> dict[str, dict[str, Any]]:
         if self._initial_cache is not None:

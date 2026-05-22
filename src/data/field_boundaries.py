@@ -11,7 +11,8 @@ Install: ``pip install -e ".[ftw]"``
 
 from __future__ import annotations
 
-import logging
+import structlog
+
 import math
 import subprocess
 from pathlib import Path
@@ -20,7 +21,7 @@ from typing import TYPE_CHECKING, Sequence
 if TYPE_CHECKING:
     import geopandas as gpd
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 MODEL_CCBY_COMMERCIAL = "3_Class_CCBY_FTW_Pretrained"
 MODEL_FULL_BENCHMARK = "FTW_3_Class_FULL_multiWindow"
@@ -50,7 +51,7 @@ def _validate_year(year: int) -> None:
 
 
 def _run_ftw(cmd: list[str], *, step: str) -> None:
-    logger.info("FTW %s: %s", step, " ".join(cmd))
+    log.info("FTW %s: %s", step, " ".join(cmd))
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
@@ -176,7 +177,7 @@ class FTWFieldBoundaries:
         final_path = out_dir / _FINAL_PARQUET
 
         if final_path.is_file() and not overwrite:
-            logger.info("Skipping delineation; exists: %s", final_path)
+            log.info("Skipping delineation; exists: %s", final_path)
             return final_path
 
         self._run_inference_all(bbox, year, out_dir, overwrite=overwrite)
@@ -185,7 +186,7 @@ class FTWFieldBoundaries:
         source_parquet = self._source_parquet_path(out_dir)
         parcels = self.load_parcels(source_parquet)
         parcels.to_parquet(final_path, index=False)
-        logger.info("Wrote %d cocoa parcels to %s", len(parcels), final_path)
+        log.info("Wrote %d cocoa parcels to %s", len(parcels), final_path)
         return final_path
 
     def load_parcels(
@@ -207,7 +208,7 @@ class FTWFieldBoundaries:
         gdf = _enrich_parcels(gdf)
         mask = (gdf["area_ha"] >= min_ha) & (gdf["area_ha"] <= max_ha)
         filtered = gdf.loc[mask].copy()
-        logger.info(
+        log.info(
             "Parcels %s: %d -> %d (%.1f–%.1f ha)",
             path.name,
             len(gdf),
@@ -235,7 +236,7 @@ class FTWFieldBoundaries:
         polygons = out_dir / _POLYGONS_PARQUET
         inference_tif = out_dir / _INFERENCE_OUTPUT_TIF
         if polygons.is_file() and inference_tif.is_file() and not overwrite:
-            logger.info("Skipping ftw inference all; outputs exist in %s", out_dir)
+            log.info("Skipping ftw inference all; outputs exist in %s", out_dir)
             return
 
         cmd = [
@@ -270,7 +271,7 @@ class FTWFieldBoundaries:
 
         lulc_parquet = out_dir / _LULC_FILTERED_PARQUET
         if lulc_parquet.is_file() and not overwrite:
-            logger.info("Skipping ftw inference filter-by-lulc; exists: %s", lulc_parquet)
+            log.info("Skipping ftw inference filter-by-lulc; exists: %s", lulc_parquet)
             return
 
         cmd = [

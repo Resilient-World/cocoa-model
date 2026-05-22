@@ -8,6 +8,8 @@ with inverse-frequency class weights, two-stage backbone freezing, and MLflow lo
 
 from __future__ import annotations
 
+import structlog
+
 import argparse
 import os
 import sys
@@ -23,6 +25,8 @@ from torchmetrics.classification import MulticlassJaccardIndex
 from data.cocoa_dataset import CLASS_NAMES, CLASS_OTHER
 from models.galileo_backbone import DEFAULT_NUM_CLASSES, GalileoSegmentation
 from training.cocoa_galileo_datamodule import CocoaGalileoDataModule
+
+log = structlog.get_logger(__name__)
 
 NUM_CLASSES = len(CLASS_NAMES)
 IGNORE_INDEX = CLASS_OTHER  # presence-only background (FTW-style)
@@ -250,9 +254,10 @@ def main(argv: list[str] | None = None) -> int:
             max_batches=args.class_weight_batches,
         )
     except (FileNotFoundError, RuntimeError) as exc:
-        print(
-            f"Could not estimate class weights from tiles ({exc}); using uniform weights.",
-            file=sys.stderr,
+        log.warning(
+            "class_weight_estimation_failed",
+            error=str(exc),
+            fallback="uniform",
         )
         class_weights = torch.ones(NUM_CLASSES)
 
@@ -313,7 +318,7 @@ def main(argv: list[str] | None = None) -> int:
         enable_progress_bar=True,
     )
 
-    print(
+    log.info(
         f"Training Galileo ({args.model_size}, decoder={args.decoder}) "
         f"with {NUM_CLASSES} classes (ignore_index={IGNORE_INDEX}), "
         f"freeze backbone for {args.freeze_epochs} epochs, {args.epochs} total epochs."
@@ -321,7 +326,7 @@ def main(argv: list[str] | None = None) -> int:
     trainer.fit(task, datamodule=datamodule)
     trainer.test(task, datamodule=datamodule)
 
-    print(f"Best checkpoint: {checkpoint_callback.best_model_path}")
+    log.info(f"Best checkpoint: {checkpoint_callback.best_model_path}")
     return 0
 
 

@@ -11,6 +11,8 @@ for integration tests; it is not a required runtime dependency of this package.
 
 from __future__ import annotations
 
+import structlog
+
 import logging
 import subprocess
 from pathlib import Path
@@ -19,7 +21,7 @@ from typing import TYPE_CHECKING, Protocol, Sequence
 if TYPE_CHECKING:
     import xarray as xr
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 # ERA5 / ingest names requested for counterfactual detrending
 SUPPORTED_VARIABLES: frozenset[str] = frozenset(
@@ -93,7 +95,7 @@ class ATTRICIRunner:
             check=False,
         )
         if result.returncode != 0:
-            logger.warning(
+            log.warning(
                 "attrici --version failed (code %s): %s",
                 result.returncode,
                 result.stderr.strip(),
@@ -241,7 +243,7 @@ class ATTRICIRunner:
         requested = [v for v in variables if v in SUPPORTED_VARIABLES]
         skipped = set(variables) - set(requested)
         if skipped:
-            logger.warning("Ignoring unsupported counterfactual variables: %s", sorted(skipped))
+            log.warning("Ignoring unsupported counterfactual variables: %s", sorted(skipped))
         if not requested:
             raise ValueError(
                 f"No supported variables in {list(variables)}; "
@@ -270,7 +272,7 @@ class ATTRICIRunner:
             tmp_nc = tmp_dir / f"factual_{era5_var}.nc"
             tmp_out_nc = tmp_dir / f"counterfactual_{era5_var}.nc"
 
-            logger.info("ATTRICI detrend %s (%s)", era5_var, _ERA5_TO_ATTRICI[era5_var])
+            log.info("ATTRICI detrend %s (%s)", era5_var, _ERA5_TO_ATTRICI[era5_var])
             self._materialize_variable_nc(factual, era5_var, tmp_nc)
             self._run_attrici_cli(era5_var=era5_var, tmp_nc=tmp_nc, tmp_out_nc=tmp_out_nc)
 
@@ -294,7 +296,7 @@ class ATTRICIRunner:
             root = zarr.open_group(output_zarr, mode="a")
             root.attrs.update(root_attrs)
         except Exception as exc:
-            logger.warning("Could not write root Zarr attrs: %s", exc)
+            log.warning("Could not write root Zarr attrs: %s", exc)
 
         return output_zarr
 
@@ -383,10 +385,10 @@ def main(argv: list[str] | None = None) -> int:
             args.out,
             overwrite=args.overwrite,
         )
-        logger.info("Wrote counterfactual Zarr to %s", args.out)
+        log.info("Wrote counterfactual Zarr to %s", args.out)
         return 0
     except Exception as exc:
-        logger.error("%s", exc)
+        log.error("%s", exc)
         return 1
 
 

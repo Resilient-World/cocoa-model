@@ -7,7 +7,8 @@ Local: optional ERA5 Zarr cache for batch training.
 
 from __future__ import annotations
 
-import logging
+import structlog
+
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -31,7 +32,7 @@ from data.cssvd_strain_atlas import StrainRegion, lookup_strain_region
 from data.era5_ingest import CHIRPS_DAILY, ERA5_DAILY
 from data.gee_auth import initialize_earth_engine
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 ESA_WORLDCOVER = "ESA/WorldCover/v200/10m"
 WORLDCOVER_BAND = "Map"
@@ -359,7 +360,7 @@ def _open_era5_zarr_for_point(lat: float, lon: float) -> xr.Dataset | None:
     try:
         return xr.open_zarr(path, consolidated=True)
     except Exception as exc:
-        logger.debug("ERA5 Zarr open failed: %s", exc)
+        log.debug("ERA5 Zarr open failed: %s", exc)
         return None
 
 

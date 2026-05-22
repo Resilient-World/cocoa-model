@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import logging
+import structlog
+
 from typing import TYPE_CHECKING
 
 from models.cqr import (
@@ -15,7 +16,7 @@ from models.cqr import (
 if TYPE_CHECKING:
     from api.config import APISettings
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 
 def load_cqr_bundle(

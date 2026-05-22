@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import structlog
+
 import os
 import sys
 from pathlib import Path
@@ -9,6 +11,7 @@ from typing import Any
 
 import ee
 
+log = structlog.get_logger(__name__)
 # Kumasi, Ghana — representative cocoa-belt test location (lon, lat)
 GHANA_TEST_POINT: tuple[float, float] = (-1.6244, 6.6885)
 SRTM_ELEVATION_IMAGE = "USGS/SRTMGL1_003"
@@ -209,7 +212,7 @@ def verify_ghana_connection(*, project: str | None = None) -> dict[str, Any]:
         "dem": SRTM_ELEVATION_IMAGE,
     }
 
-    print(
+    log.info(
         f"Earth Engine OK — elevation at {result['location']}\n"
         f"  Coordinates: {lat:.4f}°N, {abs(lon):.4f}°W\n"
         f"  Elevation:   {elevation_m:.1f} m ({SRTM_ELEVATION_IMAGE})"
@@ -222,13 +225,13 @@ def main() -> int:
     try:
         verify_ghana_connection()
     except EarthEngineNotAuthenticatedError as exc:
-        print(exc, file=sys.stderr)
+        log.error("earth_engine_not_authenticated", error=str(exc))
         return 1
     except EarthEngineAuthError as exc:
-        print(exc, file=sys.stderr)
+        log.error("earth_engine_auth_error", error=str(exc))
         return 2
     except ee.EEException as exc:
-        print(f"Earth Engine API error: {exc}", file=sys.stderr)
+        log.error("earth_engine_api_error", error=str(exc))
         return 3
 
     return 0

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import structlog
+
 import argparse
 import json
 import sys
 from pathlib import Path
 
+log = structlog.get_logger(__name__)
 MIN_PRETREND_PVALUE = 0.10
 
 
@@ -34,7 +37,7 @@ def main(argv: list[str] | None = None) -> int:
         report = json.load(handle)
 
     validate_parallel_trends_report(report, min_pvalue=args.min_pvalue)
-    print(f"OK: pretrend_pvalue={float(report['pretrend_pvalue']):.4f} >= {args.min_pvalue:.2f}")
+    log.info(f"OK: pretrend_pvalue={float(report['pretrend_pvalue']):.4f} >= {args.min_pvalue:.2f}")
     return 0
 
 

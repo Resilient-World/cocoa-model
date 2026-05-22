@@ -1,33 +1,5 @@
-"""Barrel exports for online conformal inference."""
+"""Backward-compatible shim; implementation in models.conformal.online_conformal."""
+import importlib as _importlib
 
-from __future__ import annotations
-
-from models.aci import (
-    DEFAULT_SCENARIO_HORIZONS,
-    AdaptiveConformalInference,
-    MultiStepACI,
-    default_multistep_aci,
-)
-from models.conformal_pid import ConformalPID
-from models.eci import ECICutoff, ECIIntegral, ErrorQuantifiedConformalInference
-from models.quantile_yield_surrogate_online import (
-    HorizonOnlineCalibrator,
-    OnlineMethod,
-    QuantileYieldSurrogateOnline,
-    factory_multi_horizon,
-)
-
-__all__ = [
-    "DEFAULT_SCENARIO_HORIZONS",
-    "AdaptiveConformalInference",
-    "ConformalPID",
-    "ECICutoff",
-    "ECIIntegral",
-    "ErrorQuantifiedConformalInference",
-    "HorizonOnlineCalibrator",
-    "MultiStepACI",
-    "OnlineMethod",
-    "QuantileYieldSurrogateOnline",
-    "default_multistep_aci",
-    "factory_multi_horizon",
-]
+_mod = _importlib.import_module("models.conformal.online_conformal")
+globals().update({n: getattr(_mod, n) for n in dir(_mod) if not n.startswith("__")})

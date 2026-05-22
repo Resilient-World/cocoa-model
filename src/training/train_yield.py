@@ -8,6 +8,8 @@ Hydra entrypoint::
 
 from __future__ import annotations
 
+import structlog
+
 import logging
 import sys
 from pathlib import Path
@@ -29,7 +31,7 @@ from data.yield_panel import (
 )
 from models.yield_surrogate import CocoaPINNLoss, YieldSurrogateModel
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _CONFIG_DIR = _REPO_ROOT / "config" / "training"
 
@@ -149,7 +151,7 @@ def train_yield_surrogate(cfg: DictConfig) -> Path:
                     mlflow.log_metric(f"rmse_{iso}", rmse, step=epoch)
                 for cohort, rmse in val_metrics["cohort_rmse"].items():
                     mlflow.log_metric(f"rmse_{cohort}", rmse, step=epoch)
-                logger.info(
+                log.info(
                     "epoch %d/%d loss=%.4f val_rmse=%.4f",
                     epoch + 1,
                     cfg.max_epochs,
@@ -162,12 +164,12 @@ def train_yield_surrogate(cfg: DictConfig) -> Path:
         try:
             mlflow.pytorch.log_model(model, artifact_path="yield_surrogate")
         except Exception as exc:  # noqa: BLE001 — optional MLflow flavor
-            logger.warning("MLflow pytorch log_model skipped: %s", exc)
+            log.warning("MLflow pytorch log_model skipped: %s", exc)
 
         final_val = _evaluate(model, val_rows, loss_fn, device)
         mlflow.log_metric("final_val_rmse", final_val["rmse"])
 
-    logger.info("Saved yield checkpoint to %s", checkpoint_path)
+    log.info("Saved yield checkpoint to %s", checkpoint_path)
     return checkpoint_path
 
 

@@ -7,8 +7,9 @@ FDP/Hansen cross-check, and traceability to source datasets.
 
 from __future__ import annotations
 
+import structlog
+
 import asyncio
-import logging
 import uuid
 from datetime import date
 from typing import Any, Literal
@@ -38,7 +39,7 @@ from data.whisp_client import (
     WhispPlotResult,
 )
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="", tags=["eudr"])
 
@@ -212,7 +213,7 @@ async def run_eudr_due_diligence(
         try:
             gee_result = check_deforestation_free(plot)
         except Exception as exc:
-            logger.warning("GEE/FDP deforestation screening skipped: %s", exc)
+            log.warning("GEE/FDP deforestation screening skipped: %s", exc)
 
     deforestation_post_2020, screening_sources = _merge_deforestation(whisp, gee_result)
 

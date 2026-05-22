@@ -7,6 +7,8 @@ backend (Xee). No raw NetCDF downloads.
 
 from __future__ import annotations
 
+import structlog
+
 from pathlib import Path
 
 import ee

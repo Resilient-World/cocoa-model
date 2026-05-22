@@ -8,7 +8,8 @@ stacks with a leading ``sample`` dimension for stochastic scenario UQ.
 
 from __future__ import annotations
 
-import logging
+import structlog
+
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -21,7 +22,7 @@ from counterfactual.cmip6_scenarios import ScenarioBuilder
 from data.cocoa_exposure import REGIONS, normalize_region_key, region_bounds_dict
 from data.era5_ingest import compute_derived_features
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 ExperimentId = Literal["ssp245", "ssp585"]
 SolverType = Literal["euler", "heun"]
@@ -193,7 +194,7 @@ class CorrDiffCMIP6Downscaler:
             self._load_model()
             merged = self._downscale_horizon_year_gpu(horizon, output_variables)
         except (ImportError, RuntimeError) as exc:
-            logger.info("CorrDiff GPU path unavailable (%s); linear bridge", exc)
+            log.info("CorrDiff GPU path unavailable (%s); linear bridge", exc)
             merged = _downscale_horizon_year_linear_ensemble(
                 horizon=horizon,
                 experiment_id=self.experiment_id,

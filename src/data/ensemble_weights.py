@@ -7,7 +7,8 @@ and stored in ``config/ensemble_weights.yaml``.
 
 from __future__ import annotations
 
-import logging
+import structlog
+
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +16,7 @@ import yaml
 
 from data.cocoa_exposure import normalize_region_key
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ENSEMBLE_WEIGHTS_PATH = _REPO_ROOT / "config" / "ensemble_weights.yaml"
@@ -45,7 +46,7 @@ def load_ensemble_weights_yaml(path: Path | str = DEFAULT_ENSEMBLE_WEIGHTS_PATH)
     """Load raw YAML document."""
     path = Path(path)
     if not path.is_file():
-        logger.warning("Ensemble weights file missing at %s; using built-in defaults", path)
+        log.warning("Ensemble weights file missing at %s; using built-in defaults", path)
         return _builtin_defaults()
     with path.open(encoding="utf-8") as handle:
         return yaml.safe_load(handle) or {}

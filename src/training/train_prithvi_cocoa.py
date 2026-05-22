@@ -8,6 +8,8 @@ with MLflow logging, AdamW, and cosine LR scheduling.
 
 from __future__ import annotations
 
+import structlog
+
 import argparse
 import os
 import sys
@@ -26,6 +28,8 @@ from training.cocoa_prithvi_datamodule import (
     CocoaPrithviDataModule,
     hls_bands_for_input,
 )
+
+log = structlog.get_logger(__name__)
 
 NUM_CLASSES = len(CLASS_NAMES)
 DEFAULT_BACKBONE = "prithvi_eo_v2_100_tl"
@@ -155,10 +159,10 @@ def main(argv: list[str] | None = None) -> int:
     if len(input_bands) == 3:
         input_bands = PRITHVI_RGB_BANDS
     elif len(input_bands) != 6:
-        print(
-            "Expected 6 Prithvi bands "
-            f"{PRITHVI_SENTINEL2_BANDS} or 3 RGB bands {PRITHVI_RGB_BANDS}.",
-            file=sys.stderr,
+        log.error(
+            "invalid_prithvi_bands",
+            expected_6=list(PRITHVI_SENTINEL2_BANDS),
+            expected_3=list(PRITHVI_RGB_BANDS),
         )
         return 1
 
@@ -176,12 +180,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         backbone_bands = hls_bands_for_input(input_bands)
     except ValueError as exc:
-        print(
+        log.info(
             "Unsupported --input-bands. Use 6-band Prithvi S2 stack "
             f"{PRITHVI_SENTINEL2_BANDS} or RGB {PRITHVI_RGB_BANDS}.",
-            file=sys.stderr,
-        )
-        print(exc, file=sys.stderr)
+            )
+        log.error("train_prithvi_failed", error=str(exc))
         return 1
 
     model_args = build_prithvi_model_args(
@@ -245,7 +248,7 @@ def main(argv: list[str] | None = None) -> int:
         enable_progress_bar=True,
     )
 
-    print(
+    log.info(
         f"Training Prithvi ({args.backbone} + {args.decoder}) "
         f"with {len(backbone_bands)} input channels, {NUM_CLASSES} classes, "
         f"{args.epochs} epochs."
@@ -254,13 +257,13 @@ def main(argv: list[str] | None = None) -> int:
     trainer.test(task, datamodule=datamodule)
 
     best_path = checkpoint_callback.best_model_path
-    print(f"Best checkpoint: {best_path}")
+    log.info(f"Best checkpoint: {best_path}")
     if args.out is not None and best_path:
         import shutil
 
         args.out.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(best_path, args.out)
-        print(f"Copied best checkpoint to {args.out}")
+        log.info(f"Copied best checkpoint to {args.out}")
     return 0
 
 

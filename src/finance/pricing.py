@@ -7,7 +7,8 @@ best-effort; stale cache or deterministic fallbacks keep CI and offline runs wor
 
 from __future__ import annotations
 
-import logging
+import structlog
+
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
@@ -16,7 +17,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 CACHE_DIR = _REPO_ROOT / "data" / "cache" / "finance"
@@ -112,7 +113,7 @@ def fetch_icco_daily(*, force: bool = False) -> pd.DataFrame:
                 if len(daily) >= 30:
                     df = daily
     except Exception as exc:
-        logger.warning("ICCO live ingest failed (%s); using synthetic/cache fallback", exc)
+        log.warning("ICCO live ingest failed (%s); using synthetic/cache fallback", exc)
 
     df["date"] = pd.to_datetime(df["date"]).dt.normalize()
     df.to_parquet(ICCO_CACHE, index=False)
@@ -143,7 +144,7 @@ def _fetch_exchangerate_series(
         rate = float(data["rates"][symbol])
         as_of = datetime.strptime(data["date"], "%Y-%m-%d").date()
     except Exception as exc:
-        logger.warning("FX fetch %s failed (%s); using fallback", symbol, exc)
+        log.warning("FX fetch %s failed (%s); using fallback", symbol, exc)
         rate = {"GHS": 15.5, "XOF": 610.0, "EUR": 0.92}.get(symbol, 1.0)
 
     index = _date_range_years(3)

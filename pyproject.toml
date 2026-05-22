@@ -55,6 +55,7 @@ dependencies = [
     "xesmf>=0.8",
     "rpy2>=3.5; platform_system != 'Windows'",
     "segmentation-models-pytorch>=0.3",
+    "structlog>=24.1",
     "galileo @ git+https://github.com/nasaharvest/galileo@main; python_version < '3.12'",
 ]
 
@@ -71,6 +72,12 @@ dev = [
     "pytest-cov>=4.1",
     "httpx>=0.27",
     "ruff>=0.3",
+    "mypy>=1.8",
+    "pandas-stubs>=2.1",
+    "types-PyYAML>=6.0",
+    "types-shapely>=2.0",
+    "scipy-stubs>=2.0",
+    "types-redis>=4.6",
     "ipython>=8.0",
     "jupyter>=1.0",
     "matplotlib>=3.8",
@@ -111,6 +118,7 @@ package-dir = { "" = "src" }
 [tool.setuptools.packages.find]
 where = ["src"]
 include = [
+    "common*",
     "data*",
     "hazards*",
     "models*",
@@ -122,6 +130,74 @@ include = [
     "compliance*",
     "validation*",
 ]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+files = ["src"]
+exclude = ["\\.venv", "^tests/"]
+namespace_packages = true
+explicit_package_bases = true
+mypy_path = "src"
+warn_return_any = true
+warn_unused_ignores = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = [
+    "diskcache.*",
+    "h3.*",
+    "redis.*",
+    "zarr",
+    "zarr.*",
+    "xarray.*",
+    "statsmodels",
+    "statsmodels.*",
+    "lightning.*",
+    "lightning.pytorch.*",
+]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+[[tool.mypy.overrides]]
+module = [
+    "torchgeo.*",
+    "terratorch.*",
+    "attrici.*",
+    "ee.*",
+    "earthengine.*",
+    "geemap.*",
+    "xee.*",
+    "galileo.*",
+    "segmentation_models_pytorch.*",
+    "econml.*",
+    "rpy2.*",
+    "sklearn.*",
+    "cvxpy.*",
+    "linearmodels.*",
+    "shap.*",
+    "torch_geometric.*",
+    "timm.*",
+    "diffusers.*",
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+    "models.*",
+    "models.*.*",
+    "api.*",
+    "analysis.*",
+    "monitoring.*",
+    "compliance.*",
+    "finance.*",
+    "training.*",
+    "data.*",
+    "counterfactual.*",
+    "hazards.*",
+    "validation.*",
+]
+ignore_errors = true
 
 [tool.ruff]
 line-length = 100

@@ -1,4 +1,5 @@
 """
+log = structlog.get_logger(__name__)
 Build a cloud-free Sentinel-2 / Sentinel-1 composite for a cocoa region (dry season).
 
 Creates a median Sentinel-2 SR composite with QA60 cloud masking, NDVI/EVI
@@ -7,6 +8,8 @@ region-tagged multi-band GeoTIFF (``data/processed/s2_s1_<region>.tif``).
 """
 
 from __future__ import annotations
+
+import structlog
 
 import argparse
 import sys
@@ -251,7 +254,7 @@ def export_composite(
     roi = region or ghana_geometry()
 
     if export == "drive":
-        print(f"Exporting composite to Google Drive ({description}) ...")
+        log.info(f"Exporting composite to Google Drive ({description}) ...")
         try:
             return export_to_google_drive(
                 image,
@@ -265,7 +268,7 @@ def export_composite(
             raise SentinelCompositeError(str(exc)) from exc
 
     dest = output_path or Path("data/processed") / f"{description}.tif"
-    print(f"Exporting composite locally to {dest} ...")
+    log.info(f"Exporting composite locally to {dest} ...")
     try:
         return export_local_geotiff(image, dest, region=roi, scale=scale)
     except Era5ExportError as exc:
@@ -375,16 +378,16 @@ def main(argv: list[str] | None = None) -> int:
             project=args.project,
         )
     except EarthEngineNotAuthenticatedError as exc:
-        print(exc, file=sys.stderr)
+        log.error("sentinel_composite_error", error=str(exc))
         return 1
     except (EarthEngineAuthError, SentinelCompositeError) as exc:
-        print(exc, file=sys.stderr)
+        log.error("sentinel_composite_error", error=str(exc))
         return 2
 
     if args.export == "drive" and isinstance(result, ee.batch.Task):
-        print(f"Drive export task id: {result.id}")
+        log.info(f"Drive export task id: {result.id}")
     elif args.export == "local":
-        print(f"Saved local GeoTIFF: {result}")
+        log.info(f"Saved local GeoTIFF: {result}")
 
     return 0
 

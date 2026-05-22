@@ -8,7 +8,8 @@ with bootstrap prediction intervals.
 
 from __future__ import annotations
 
-import logging
+import structlog
+
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -23,7 +24,7 @@ from sksurv.metrics import concordance_index_censored
 from data.cssvd_landscape_features import HORIZON_MONTHS, LandscapeFeatureRow, build_landscape_feature_row
 from data.cssvd_strain_atlas import STRAIN_REGIONS, StrainRegion
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CHECKPOINT = _REPO_ROOT / "models" / "cssvd_landscape.joblib"

@@ -10,9 +10,10 @@ Methodology: Mengel et al. (2021), *Geosci. Model Dev.* 14, 5269–5284.
 
 from __future__ import annotations
 
+import structlog
+
 import hashlib
 import json
-import logging
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -28,7 +29,7 @@ from counterfactual.attrici_runner import (
 )
 from data.attrici_fast_detrend import recompute_derived_counterfactuals
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 MENGEL_2021_REF = "Mengel et al. (2021), Geosci. Model Dev. 14, 5269–5284 (ATTRICI)"
 
@@ -89,7 +90,7 @@ def normalize_variables(variables: Sequence[str]) -> tuple[str, ...]:
         key = v.strip().lower()
         era5 = ISIMIP_ALIASES.get(key, key)
         if era5 not in SUPPORTED_VARIABLES:
-            logger.warning("Variable %s not in ATTRICI runner support; skipping", v)
+            log.warning("Variable %s not in ATTRICI runner support; skipping", v)
             continue
         if era5 == "tmean":
             # Runner detrends tas via tmean if present; prefer tmax+tmin for derived recompute
@@ -230,7 +231,7 @@ class ATTRICICounterfactual:
             vars_norm, region=region, time_range=time_range
         )
         if out_path.exists() and not overwrite:
-            logger.info("Using cached ATTRICI counterfactual %s", out_path)
+            log.info("Using cached ATTRICI counterfactual %s", out_path)
             return out_path
 
         if not self.factual_zarr.is_dir():
@@ -258,7 +259,7 @@ class ATTRICICounterfactual:
 
             # Merge factual + *_cf suffix for downstream 11-channel extraction
             self._finalize_merged_store(factual_subset, out_path, vars_norm)
-            logger.info("ATTRICI counterfactual ready at %s", out_path)
+            log.info("ATTRICI counterfactual ready at %s", out_path)
             return out_path
         finally:
             shutil.rmtree(work, ignore_errors=True)
@@ -280,7 +281,7 @@ class ATTRICICounterfactual:
         try:
             merged = recompute_derived_counterfactuals(merged)
         except Exception as exc:
-            logger.warning("Derived counterfactual recompute skipped: %s", exc)
+            log.warning("Derived counterfactual recompute skipped: %s", exc)
         if cf_zarr.exists():
             shutil.rmtree(cf_zarr)
         merged.attrs["counterfactual_method"] = "ATTRICI v2.0.1 subprocess"

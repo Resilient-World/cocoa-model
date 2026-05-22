@@ -19,7 +19,8 @@ to use :mod:`api.geo_mock` (tests only).
 
 from __future__ import annotations
 
-import logging
+import structlog
+
 import math
 import os
 from collections import OrderedDict
@@ -63,7 +64,7 @@ from models.yield_surrogate import (
     pack_tree_age_static,
 )
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 SEQUENCE_LENGTH = 365
 SITE_STATIC_DIM = N_STATIC_SITE
@@ -316,7 +317,7 @@ class FarmFeatureResolver:
 
             self._disk_cache = Cache(str(self.config.cache_dir))
         except Exception as exc:
-            logger.warning("diskcache unavailable (%s); using in-memory LRU only", exc)
+            log.warning("diskcache unavailable (%s); using in-memory LRU only", exc)
         self._memory_cache = _LRUArrayCache()
         self._teleconnection_cache = _LRUArrayCache()
         self._indices_df: pd.DataFrame | None = None
@@ -326,7 +327,7 @@ class FarmFeatureResolver:
             try:
                 self._feature_store = FeatureStore(self.config.feature_store_root)
             except Exception as exc:
-                logger.warning("Failed to init FeatureStore (%s)", exc)
+                log.warning("Failed to init FeatureStore (%s)", exc)
 
     @property
     def use_real_features(self) -> bool:
@@ -392,7 +393,7 @@ class FarmFeatureResolver:
                 self._cache_set_climate(key, tensor)
                 return tensor
             except Exception as exc:
-                logger.debug("features_cache climate miss: %s", exc)
+                log.debug("features_cache climate miss: %s", exc)
 
         if self._feature_store is not None:
             try:
@@ -401,7 +402,7 @@ class FarmFeatureResolver:
                     self._cache_set_climate(key, tensor)
                     return tensor
             except Exception as exc:
-                logger.info("FeatureStore climate miss (%s)", exc)
+                log.info("FeatureStore climate miss (%s)", exc)
 
         zarr_path = self.config.era5_zarr_path
         if zarr_path.is_dir():
@@ -410,7 +411,7 @@ class FarmFeatureResolver:
                 self._cache_set_climate(key, tensor)
                 return tensor
             except Exception as exc:
-                logger.warning("ERA5 Zarr read failed (%s); trying GEE", exc)
+                log.warning("ERA5 Zarr read failed (%s); trying GEE", exc)
 
         tensor = self._climate_from_gee(lat, lon, year)
         self._cache_set_climate(key, tensor)
@@ -461,7 +462,7 @@ class FarmFeatureResolver:
                 self._cache_set_static(key, vec)
                 return torch.from_numpy(vec).unsqueeze(0)
             except Exception as exc:
-                logger.debug("features_cache static miss: %s", exc)
+                log.debug("features_cache static miss: %s", exc)
 
         if self._feature_store is not None:
             try:
@@ -470,7 +471,7 @@ class FarmFeatureResolver:
                     self._cache_set_static(key, raw.astype(np.float32))
                     return torch.from_numpy(raw.astype(np.float32)).unsqueeze(0)
             except Exception as exc:
-                logger.info("FeatureStore static miss (%s)", exc)
+                log.info("FeatureStore static miss (%s)", exc)
 
         zarr_path = self.config.static_zarr_path
         if zarr_path.is_dir():
@@ -479,7 +480,7 @@ class FarmFeatureResolver:
                 self._cache_set_static(key, vec)
                 return torch.from_numpy(vec).unsqueeze(0)
             except Exception as exc:
-                logger.warning("site_static Zarr failed (%s); trying GEE", exc)
+                log.warning("site_static Zarr failed (%s); trying GEE", exc)
 
         resolved = self._resolve_static_from_gee(lat, lon, year=yr)
         vec = self._pack_model_static_vector(resolved, lat, lon)
@@ -788,10 +789,10 @@ def build_resolver_from_settings(settings: Any) -> FarmFeatureResolver:
             agrifm_checkpoint_path=Path(
                 getattr(settings, "agrifm_checkpoint_path", DEFAULT_AGRIFM_CHECKPOINT)
             ),
-            terramind_checkpoint=Path(
+            terramind_checkpoint_path=Path(
                 getattr(settings, "terramind_checkpoint_path", _REPO_ROOT / "models" / "terramind_cocoa_seg.pt")
             ),
-            terramind_tim_checkpoint=Path(
+            terramind_tim_checkpoint_path=Path(
                 getattr(
                     settings,
                     "terramind_tim_checkpoint_path",

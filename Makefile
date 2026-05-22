@@ -1,4 +1,4 @@
-.PHONY: help train-all benchmark report ingest-gee ci lint test dvc-dag
+.PHONY: help train-all benchmark report ingest-gee ci lint typecheck test dvc-dag
 
 REPO_ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 export PYTHONPATH := $(REPO_ROOT)src
@@ -10,6 +10,7 @@ help:
 	@echo "  make benchmark    - Backbone benchmark → reports/backbones/benchmark_latest.md"
 	@echo "  make report       - Causal PDF report (synthetic panel)"
 	@echo "  make lint         - ruff check"
+	@echo "  make typecheck    - mypy src/"
 	@echo "  make test         - pytest (fast subset)"
 	@echo "  make dvc-dag      - Print DVC pipeline graph"
 	@echo "  make ci           - lint + test + dvc-dag (local CI)"
@@ -29,10 +30,13 @@ report:
 lint:
 	ruff check src tests scripts
 
+typecheck:
+	mypy src
+
 test:
 	pytest tests/test_joint_exposure_yield.py tests/test_api_simulate.py tests/test_feature_resolver.py tests/test_yield_surrogate.py -q
 
 dvc-dag:
 	dvc dag
 
-ci: lint test dvc-dag
+ci: lint typecheck test dvc-dag

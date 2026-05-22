@@ -23,6 +23,9 @@ jobs:
       - name: Ruff check
         run: ruff check src tests scripts
 
+      - name: No bare print in src/
+        run: python scripts/check_no_prints.py
+
       - name: Pytest
         env:
           PYTHONPATH: src

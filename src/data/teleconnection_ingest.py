@@ -14,6 +14,8 @@ References
 
 from __future__ import annotations
 
+import structlog
+
 import argparse
 import logging
 import re
@@ -28,7 +30,7 @@ import requests
 
 from data.cocoa_exposure import REGIONS, normalize_region_key
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PARQUET = _REPO_ROOT / "data" / "external" / "teleconnection_indices.parquet"
@@ -87,7 +89,7 @@ def _fetch_first(urls: tuple[str, ...]) -> str:
             return _fetch_text(url)
         except Exception as exc:
             last_exc = exc
-            logger.debug("Fetch failed for %s: %s", url, exc)
+            log.debug("Fetch failed for %s: %s", url, exc)
     raise RuntimeError(f"All URLs failed: {urls}") from last_exc
 
 
@@ -200,7 +202,7 @@ def build_indices_table(
         except Exception as exc:
             if not allow_proxy:
                 raise
-            logger.warning("Atl3 ingest failed (%s); using ENSO-regressed proxy", exc)
+            log.warning("Atl3 ingest failed (%s); using ENSO-regressed proxy", exc)
             atl3_s, _ = _proxy_atl3_iod_from_nino34(nino34_df)
             atl3_df = pd.DataFrame({"time": atl3_s.index, "atl3": atl3_s.astype(np.float32).values})
 
@@ -210,7 +212,7 @@ def build_indices_table(
         except Exception as exc:
             if not allow_proxy:
                 raise
-            logger.warning("IOD ingest failed (%s); using ENSO-regressed proxy", exc)
+            log.warning("IOD ingest failed (%s); using ENSO-regressed proxy", exc)
             _, iod_s = _proxy_atl3_iod_from_nino34(nino34_df)
             iod_df = pd.DataFrame({"time": iod_s.index, "iod": iod_s.astype(np.float32).values})
 
@@ -235,13 +237,13 @@ def refresh_indices(
     if out_path.is_file() and not force:
         age = time.time() - out_path.stat().st_mtime
         if age < CACHE_MAX_AGE_S:
-            logger.info("Teleconnection cache fresh (%.1f h); skipping download", age / 3600)
+            log.info("Teleconnection cache fresh (%.1f h); skipping download", age / 3600)
             return out_path
 
-    logger.info("Fetching teleconnection indices (NOAA Niño3.4, PSL Atl3, BOM IOD)")
+    log.info("Fetching teleconnection indices (NOAA Niño3.4, PSL Atl3, BOM IOD)")
     table = build_indices_table()
     table.to_parquet(out_path, index=False)
-    logger.info("Wrote %s (%d months)", out_path, len(table))
+    log.info("Wrote %s (%d months)", out_path, len(table))
     return out_path
 
 
