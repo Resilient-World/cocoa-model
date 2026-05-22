@@ -53,7 +53,6 @@ dependencies = [
     "pooch>=1.8",
     "requests>=2.31",
     "xesmf>=0.8",
-    "rpy2>=3.5; platform_system != 'Windows'",
     "segmentation-models-pytorch>=0.3",
     "structlog>=24.1",
     "pandera[pandas]>=0.20",
