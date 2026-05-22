@@ -59,6 +59,8 @@ dependencies = [
     "pandera[pandas]>=0.20",
     "scikit-gstat>=1.0",
     "pyproj>=3.6",
+    "properscoring>=0.1",
+    "scoringrules>=0.5",
     "galileo @ git+https://github.com/nasaharvest/galileo@main; python_version < '3.12'",
 ]
 

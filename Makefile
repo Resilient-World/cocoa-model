@@ -1,4 +1,4 @@
-.PHONY: help train-all benchmark report ingest-gee ci lint typecheck test dvc-dag dvc-repro hpo promote validate-spatial validate-temporal
+.PHONY: help train-all benchmark report ingest-gee ci lint typecheck test dvc-dag dvc-repro hpo promote validate-spatial validate-temporal validate-calibration plot-reliability
 
 REGION ?= ghana
 
@@ -25,6 +25,8 @@ help:
 	@echo "  make dvc-dag      - Print DVC pipeline graph"
 	@echo "  make validate-spatial REGION=ghana - Spatial block CV report"
 	@echo "  make validate-temporal            - Forward-chain temporal CV report"
+	@echo "  make validate-calibration         - CRPS/ECE/PIT/sharpness calibration gate"
+	@echo "  make plot-reliability             - Reliability figure from calibration_latest.json"
 	@echo "  make ci           - lint + test + dvc-dag (local CI)"
 
 ingest-gee:
@@ -65,5 +67,11 @@ validate-spatial:
 
 validate-temporal:
 	python scripts/validate_temporal_holdout.py
+
+validate-calibration:
+	python -m models.conformal.validate_conformal_coverage --calibration-gate --synthetic --cv-strategy spatial_block --out reports/validation
+
+plot-reliability:
+	python scripts/plot_reliability.py --model cqr_yield --scores reports/validation/calibration_latest.json
 
 ci: lint typecheck test dvc-dag

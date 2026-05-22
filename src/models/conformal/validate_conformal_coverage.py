@@ -273,8 +273,8 @@ def write_cv_strategy_report(out_dir: Path, results: dict[str, Any]) -> Path:
         "**Production target:** `spatial_block` coverage in [88%, 92%] at 90% nominal.  ",
         "**Secondary diagnostic:** `random` split (optimistic under spatial autocorrelation).",
         "",
-        "| Strategy | Coverage | Mean width | Production target |",
-        "|----------|----------|------------|-------------------|",
+        "| Strategy | Coverage | CRPS | ECE | PIT p | Sharpness | Production |",
+        "|----------|----------|------|-----|-------|-----------|------------|",
     ]
     for name, stats in results.items():
         if not isinstance(stats, dict) or "coverage" not in stats:
@@ -282,7 +282,10 @@ def write_cv_strategy_report(out_dir: Path, results: dict[str, Any]) -> Path:
         prod = "yes" if stats.get("production_target") else "no (diagnostic)"
         lines.append(
             f"| {name} | {float(stats['coverage']):.3f} | "
-            f"{float(stats.get('mean_width', float('nan'))):.3f} | {prod} |"
+            f"{float(stats.get('crps', float('nan'))):.4f} | "
+            f"{float(stats.get('ece', float('nan'))):.4f} | "
+            f"{float(stats.get('pit_chi2_p', float('nan'))):.4f} | "
+            f"{float(stats.get('sharpness', float('nan'))):.4f} | {prod} |"
         )
     if "gate_message" in results:
         lines.extend(["", f"Gate: {results['gate_message']}"])
@@ -318,7 +321,57 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--T", type=int, default=1000)
     parser.add_argument("--shift-at", type=int, default=500)
     parser.add_argument("--alpha", type=float, default=0.1)
+    parser.add_argument(
+        "--calibration-report",
+        action="store_true",
+        help="Write calibration JSON/Markdown under --out",
+    )
+    parser.add_argument(
+        "--calibration-gate",
+        action="store_true",
+        help="Fail if coverage, PIT chi2, or sharpness regression gates fail",
+    )
+    parser.add_argument(
+        "--baseline-calibration",
+        type=Path,
+        default=Path("tests/fixtures/promotion/baseline_calibration.json"),
+    )
+    parser.add_argument(
+        "--synthetic",
+        action="store_true",
+        help="Use synthetic yield panel when ICCO data unavailable",
+    )
     args = parser.parse_args(argv)
+
+    if args.calibration_report or args.calibration_gate:
+        from validation.calibration_metrics import (
+            evaluate_cqr_calibration,
+            run_calibration_gate,
+            write_calibration_report,
+        )
+        from validation.conformal_cv import _synthetic_panel_rows
+
+        try:
+            rows = build_yield_panel(seed=42)
+        except Exception:
+            rows = _synthetic_panel_rows(400, seed=42)
+        if args.synthetic:
+            rows = _synthetic_panel_rows(400, seed=42)
+        report = evaluate_cqr_calibration(rows, alpha=args.alpha, block_size_km=args.block_size_km)
+        baseline_payload = None
+        if args.baseline_calibration.is_file():
+            baseline_payload = json.loads(args.baseline_calibration.read_text(encoding="utf-8"))
+        out_validation = args.out if args.out.name == "validation" else Path("reports/validation")
+        if args.calibration_report:
+            jpath, mpath = write_calibration_report(report, out_validation)
+            log.info("Wrote calibration report %s and %s", jpath, mpath)
+        if args.calibration_gate:
+            ok, msgs = run_calibration_gate(report, baseline_payload)
+            for m in msgs:
+                log.info(m)
+            if not ok:
+                raise SystemExit(1)
+        return 0
 
     if args.cv_strategy:
         from validation.conformal_cv import evaluate_cv_strategy, run_all_cv_strategies
@@ -347,6 +400,25 @@ def main(argv: list[str] | None = None) -> int:
             COVERAGE_LO <= float(stats["coverage"]) <= COVERAGE_HI
         ):
             raise SystemExit(1)
+        if args.calibration_gate:
+            from validation.calibration_metrics import run_calibration_gate
+
+            baseline_payload = None
+            if args.baseline_calibration.is_file():
+                baseline_payload = json.loads(
+                    args.baseline_calibration.read_text(encoding="utf-8")
+                )
+            gate_data = {
+                "nominal_coverage": 1.0 - args.alpha,
+                "empirical_coverage": stats["coverage"],
+                "pit_chi2_p": stats.get("pit_chi2_p", 1.0),
+                "sharpness": stats.get("sharpness", float("nan")),
+            }
+            ok, msgs = run_calibration_gate(gate_data, baseline_payload)
+            for m in msgs:
+                log.info(m)
+            if not ok:
+                raise SystemExit(1)
         return 0
 
     if args.benchmark_online:
