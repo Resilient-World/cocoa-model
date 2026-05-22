@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, Mapping, NamedTuple
 
-import joblib
+import joblib  # type: ignore[import-untyped]
 import numpy as np
 import structlog
 import torch
@@ -116,20 +116,26 @@ class QuantileYieldSurrogate(nn.Module):
             attn_heads=attn_heads,
             dropout=dropout,
         )
-        self.quantiles = tuple(float(q) for q in quantiles)
-        if len(self.quantiles) != 3:
+        q_tuple = tuple(float(q) for q in quantiles)
+        if len(q_tuple) != 3:
             raise ValueError("QuantileYieldSurrogate expects exactly three quantiles")
+        self.quantiles = (q_tuple[0], q_tuple[1], q_tuple[2])
 
-        fusion_in = self._base.residual_head[0].in_features  # type: ignore[index]
+        residual_linear = self._base.residual_head[0]
+        if not isinstance(residual_linear, nn.Linear):
+            raise TypeError("expected first residual_head layer to be nn.Linear")
+        fusion_in = residual_linear.in_features
         self.quantile_head = nn.Sequential(
             nn.Linear(fusion_in, head_hidden),
             nn.ReLU(),
             nn.Dropout(p=dropout),
             nn.Linear(head_hidden, 3),
         )
-        nn.init.normal_(self.quantile_head[-1].weight, std=0.01)  # type: ignore[index]
-        if self.quantile_head[-1].bias is not None:  # type: ignore[index]
-            nn.init.zeros_(self.quantile_head[-1].bias)  # type: ignore[index]
+        last_linear = self.quantile_head[-1]
+        assert isinstance(last_linear, nn.Linear)
+        nn.init.normal_(last_linear.weight, std=0.01)
+        if last_linear.bias is not None:
+            nn.init.zeros_(last_linear.bias)
         self._replace_mc_dropout_with_standard()
 
     def _replace_mc_dropout_with_standard(self) -> None:
@@ -172,26 +178,33 @@ class QuantileYieldSurrogate(nn.Module):
         """
         fused, y_mech = self._fusion_features(climate, static)
         residual_q = self.quantile_head(fused)
-        return y_mech.unsqueeze(1) + residual_q
+        out: Tensor = y_mech.unsqueeze(1) + residual_q
+        return out
 
     def forward_quantiles(self, climate: Tensor, static: Tensor) -> QuantilePrediction:
         q = self.forward(climate, static)
         return QuantilePrediction(q_lo=q[:, 0], q_med=q[:, 1], q_hi=q[:, 2])
 
-    def state_dict(self, *args: Any, **kwargs: Any) -> dict[str, Tensor]:
+    def state_dict(self, *args: Any, **kwargs: Any) -> dict[str, Any]:  # type: ignore[override]
         base_sd = self._base.state_dict(*args, **kwargs)
         head_sd = {f"quantile_head.{k}": v for k, v in self.quantile_head.state_dict().items()}
         return {**base_sd, **head_sd}
 
-    def load_state_dict(self, state_dict: dict[str, Any], strict: bool = True) -> None:
+    def load_state_dict(
+        self,
+        state_dict: Mapping[str, Any],
+        strict: bool = True,
+        assign: bool = False,
+    ) -> Any:
         head_keys = {k for k in state_dict if k.startswith("quantile_head.")}
         base_dict = {k: v for k, v in state_dict.items() if k not in head_keys}
         head_dict = {
             k.replace("quantile_head.", "", 1): v for k, v in state_dict.items() if k in head_keys
         }
-        self._base.load_state_dict(base_dict, strict=False)
+        self._base.load_state_dict(base_dict, strict=False, assign=assign)
         if head_dict:
-            self.quantile_head.load_state_dict(head_dict, strict=strict)
+            self.quantile_head.load_state_dict(head_dict, strict=strict, assign=assign)
+        return None
 
 
 class ConformalCalibrator:

@@ -1,6 +1,25 @@
 """Backward-compatible shim; implementation in models.conformal.cqr."""
 
-import importlib as _importlib
+from __future__ import annotations
 
-_mod = _importlib.import_module("models.conformal.cqr")
-globals().update({n: getattr(_mod, n) for n in dir(_mod) if not n.startswith("__")})
+from models.conformal.cqr import (
+    CQRInterval,
+    ConformalCalibrator,
+    DEFAULT_CQR_CALIBRATOR,
+    DEFAULT_CQR_CHECKPOINT,
+    DEFAULT_QUANTILES,
+    QuantilePrediction,
+    QuantileYieldSurrogate,
+    pinball_loss,
+)
+
+__all__ = [
+    "CQRInterval",
+    "ConformalCalibrator",
+    "DEFAULT_CQR_CALIBRATOR",
+    "DEFAULT_CQR_CHECKPOINT",
+    "DEFAULT_QUANTILES",
+    "QuantilePrediction",
+    "QuantileYieldSurrogate",
+    "pinball_loss",
+]

@@ -145,7 +145,7 @@ class SimulateInterventionRequest(BaseModel):
 
     # Optional cooperative-level mode: request recommendations for many farms at once.
     # When present, the API can return a per-farm ranking using CATE estimates from tabular covariates.
-    batch_farms: list[dict] | None = Field(
+    batch_farms: list[dict[str, Any]] | None = Field(
         default=None,
         description="Optional list of farm records (cooperative rollouts); used by /rank-interventions",
     )
@@ -154,7 +154,7 @@ class SimulateInterventionRequest(BaseModel):
 class RankInterventionsRequest(BaseModel):
     """Request body for POST /rank-interventions (cooperative-level targeting)."""
 
-    rows: list[dict] = Field(
+    rows: list[dict[str, Any]] = Field(
         ..., description="Tabular rows with outcome, treatment, covariates, and farm metadata"
     )
     outcome: str = Field(..., description="Outcome column name in rows (e.g. yield delta)")
@@ -220,7 +220,9 @@ class PolicyRulebook(BaseModel):
 class LearnPolicyRulesRequest(BaseModel):
     """Request body for POST /learn-policy-rules."""
 
-    rows: list[dict] = Field(..., description="Panel rows with outcome, treatment, and covariates")
+    rows: list[dict[str, Any]] = Field(
+        ..., description="Panel rows with outcome, treatment, and covariates"
+    )
     outcome: str
     treatment: str
     covariates: list[str]

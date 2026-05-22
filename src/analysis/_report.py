@@ -6,15 +6,20 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-import pandas as pd
+import pandas as pd  # type: ignore[import-untyped]
 
 from analysis.did_impact import DiDResult
 from analysis.psm_matching import AIPWResult, BalanceReport
 from analysis.sensitivity import EValueResult
 
 
+def _float_fmt(value: float) -> str:
+    return f"{value:.4f}"
+
+
 def _df_html(df: pd.DataFrame, max_rows: int = 50) -> str:
-    return df.head(max_rows).to_html(index=False, float_format=lambda x: f"{x:.4f}")
+    html = df.head(max_rows).to_html(index=False, float_format=_float_fmt)
+    return str(html)
 
 
 def att_report_html(

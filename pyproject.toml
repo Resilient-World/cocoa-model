@@ -217,10 +217,13 @@ ignore_missing_imports = true
 
 [tool.cocoa.typing]
 strict_enabled = [
+  "analysis._report",
+  "api.config",
+  "api.schemas",
+  "models.conformal.cqr",
 ]
 gradual_modules = [
   "api.causal_sensitivity",
-  "api.config",
   "api.cqr_loader",
   "api.eudr",
   "api.feature_resolver",
@@ -233,9 +236,7 @@ gradual_modules = [
   "api.observability_middleware",
   "api.online_conformal_store",
   "api.scenario_conformal",
-  "api.schemas",
   "api.simulation",
-  "analysis._report",
   "analysis._staggered_did_common",
   "analysis.bjs_imputation",
   "analysis.climate_attribution",
@@ -329,7 +330,6 @@ gradual_modules = [
   "models.backbones.terramind_seg",
   "models.backbones.terramind_tim",
   "models.conformal.conformal",
-  "models.conformal.cqr",
   "models.conformal.validate_conformal_coverage",
   "models.features.pape",
   "models.features.teleconnection_gnn",
@@ -352,7 +352,6 @@ gradual_modules = [
 [[tool.mypy.overrides]]
 module = [
   "api.causal_sensitivity",
-  "api.config",
   "api.cqr_loader",
   "api.eudr",
   "api.feature_resolver",
@@ -365,9 +364,7 @@ module = [
   "api.observability_middleware",
   "api.online_conformal_store",
   "api.scenario_conformal",
-  "api.schemas",
   "api.simulation",
-  "analysis._report",
   "analysis._staggered_did_common",
   "analysis.bjs_imputation",
   "analysis.climate_attribution",
@@ -461,7 +458,6 @@ module = [
   "models.backbones.terramind_seg",
   "models.backbones.terramind_tim",
   "models.conformal.conformal",
-  "models.conformal.cqr",
   "models.conformal.validate_conformal_coverage",
   "models.features.pape",
   "models.features.teleconnection_gnn",
