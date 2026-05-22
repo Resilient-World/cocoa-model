@@ -255,6 +255,32 @@ def predict_yield_samples(
     lon: float = -2.0,
 ) -> Tensor:
     """Run stochastic forward passes; returns ``[num_samples]`` yields."""
+    from api.telemetry import trace_span
+
+    with trace_span("yield_surrogate.forward", num_samples=num_samples):
+        return _predict_yield_samples_impl(
+            model,
+            climate,
+            static,
+            num_samples,
+            region_id=region_id,
+            teleconnection=teleconnection,
+            lat=lat,
+            lon=lon,
+        )
+
+
+def _predict_yield_samples_impl(
+    model: YieldSurrogateModel | YieldSurrogateV2 | YieldSurrogateV2Teleconnection,
+    climate: Tensor,
+    static: Tensor,
+    num_samples: int,
+    *,
+    region_id: Tensor | None = None,
+    teleconnection: dict[str, Any] | None = None,
+    lat: float = 6.0,
+    lon: float = -2.0,
+) -> Tensor:
     was_training = model.training
     model.eval()
     samples = torch.stack(
@@ -619,6 +645,10 @@ def simulate_intervention(
             decompose_mediators=decompose,
             n_bootstrap=n_boot,
         )
+
+    from api import metrics as prom_metrics
+
+    prom_metrics.observe_avoided_loss("simulate_intervention", avoided_loss_tonnes)
 
     return SimulateInterventionResponse(
         baseline_yield_tonnes_per_ha=baseline_yield,
@@ -992,6 +1022,10 @@ def simulate_scenario(
     )
 
     eudr_status = _optional_eudr_status(request, settings) if settings is not None else None
+
+    from api import metrics as prom_metrics
+
+    prom_metrics.observe_avoided_loss("simulate_scenario", float(a_mean))
 
     return SimulateScenarioResponse(
         scenario=request.scenario,

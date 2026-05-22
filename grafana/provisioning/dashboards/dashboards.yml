@@ -1,0 +1,10 @@
+apiVersion: 1
+providers:
+  - name: cocoa
+    orgId: 1
+    folder: Cocoa Model
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

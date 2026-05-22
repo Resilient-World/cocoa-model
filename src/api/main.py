@@ -7,11 +7,15 @@ from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 import pandas as pd
 
 from common.logging import configure_logging
 from api.config import APISettings
+from api import metrics as prom_metrics
+from api import telemetry
+from api.observability_middleware import register_observability_middleware
 from api.cqr_loader import load_cqr_bundle
 from api.drift_monitoring import get_drift_status_for_stratum
 from api.online_conformal_store import build_store_from_settings
@@ -84,6 +88,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.cqr_calibrator = cqr_calibrator
     app.state.scenario_conformal_store = build_store_from_settings(settings)
     app.state.drift_store = build_drift_store_from_settings(settings)
+
+    if settings.otel_enabled:
+        try:
+            from importlib.metadata import version as pkg_version
+
+            svc_ver = settings.otel_service_version or pkg_version("resilient-cocoa-model")
+        except Exception:
+            svc_ver = settings.otel_service_version
+        telemetry.configure_tracing(
+            otlp_endpoint=settings.otel_exporter_otlp_endpoint,
+            service_name=settings.otel_service_name,
+            service_version=svc_ver,
+            environment=settings.otel_deployment_environment,
+        )
+
+    prom_metrics.setup_metrics(app, settings)
+    register_observability_middleware(app)
+    if settings.otel_enabled:
+        telemetry.instrument_fastapi(app)
+
     yield
 
 
@@ -95,6 +119,16 @@ app = FastAPI(
 )
 
 app.include_router(eudr_router)
+
+
+@app.exception_handler(HTTPException)
+async def _http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    endpoint = request.url.path.strip("/") or "root"
+    if exc.status_code >= 500:
+        prom_metrics.inc_simulation_error("http_5xx", endpoint)
+    elif exc.status_code >= 400:
+        prom_metrics.inc_simulation_error("http_4xx", endpoint)
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
 @app.get("/health")
@@ -140,6 +174,7 @@ def simulate_intervention_endpoint(
             settings=settings,
         )
     except ValueError as exc:
+        prom_metrics.inc_simulation_error("ValueError", "simulate-intervention")
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
@@ -241,6 +276,7 @@ def rank_interventions_endpoint(request: RankInterventionsRequest) -> RankInterv
     Estimate heterogeneous uplift using R-learner / tree ensemble methods on tabular data,
     then rank farms by net uplift in USD (cocoa price × avoided tonnes − cost).
     """
+    prom_metrics.inc_policy_endpoint("rank-interventions")
     df = pd.DataFrame(request.rows)
     if request.farm_area_col not in df.columns:
         raise HTTPException(status_code=400, detail=f"Missing farm area column '{request.farm_area_col}'")

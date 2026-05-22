@@ -197,6 +197,33 @@ async def run_eudr_due_diligence(
     whisp_client: WhispClient | None = None,
 ) -> EudrDueDiligenceResponse:
     """Core due diligence: Whisp + optional GEE/FDP deforestation cross-check."""
+    from api import metrics as prom_metrics
+    from api.telemetry import trace_span
+
+    with trace_span("eudr.screen", commodity=request.commodity):
+        try:
+            return await _run_eudr_due_diligence_impl(
+                request, settings=settings, whisp_client=whisp_client
+            )
+        except httpx.TimeoutException:
+            prom_metrics.inc_eudr_status("timeout")
+            raise
+        except httpx.HTTPError:
+            prom_metrics.inc_eudr_status("fail")
+            raise
+        except Exception:
+            prom_metrics.inc_eudr_status("fail")
+            raise
+
+
+async def _run_eudr_due_diligence_impl(
+    request: EudrDueDiligenceRequest,
+    *,
+    settings: APISettings,
+    whisp_client: WhispClient | None = None,
+) -> EudrDueDiligenceResponse:
+    from api import metrics as prom_metrics
+
     plot = _build_plot_geometry(
         request.farm_polygon,
         plot_id=request.plot_id,
@@ -244,6 +271,8 @@ async def run_eudr_due_diligence(
             "baseline_date": gee_result.baseline_date or DEFAULT_BASELINE_DATE,
             "evidence_geotiff_path": gee_result.evidence_geotiff_path,
         }
+
+    prom_metrics.inc_eudr_status("pass" if validation.is_valid else "fail")
 
     return EudrDueDiligenceResponse(
         deforestation_post_2020=deforestation_post_2020,

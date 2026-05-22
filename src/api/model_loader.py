@@ -72,6 +72,13 @@ def _teleconnection_enabled(settings: APISettings | None) -> bool:
 
 
 def _load_yield_from_registry(model_name: str) -> YieldModel | None:
+    from api.telemetry import trace_span
+
+    with trace_span("mlflow.registry.load", model_name=model_name):
+        return _load_yield_from_registry_impl(model_name)
+
+
+def _load_yield_from_registry_impl(model_name: str) -> YieldModel | None:
     try:
         from mlflow.exceptions import MlflowException
         from registry.mlflow_registry import get_champion

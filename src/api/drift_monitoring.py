@@ -68,6 +68,36 @@ def apply_drift_monitoring(
     if drift_store is None or not getattr(settings, "drift_enabled", True):
         return None, None, False
 
+    from api.telemetry import trace_span
+
+    with trace_span("wctm.drift_check", scenario=request.scenario):
+        return _apply_drift_monitoring_impl(
+            request,
+            y_obs=y_obs,
+            y_pred=y_pred,
+            interval_lo=interval_lo,
+            interval_hi=interval_hi,
+            drift_store=drift_store,
+            conformal_store=conformal_store,
+            settings=settings,
+            climate_projected=climate_projected,
+            static_factual=static_factual,
+        )
+
+
+def _apply_drift_monitoring_impl(
+    request: SimulateScenarioRequest,
+    *,
+    y_obs: float,
+    y_pred: float,
+    interval_lo: float,
+    interval_hi: float,
+    drift_store: DriftStore,
+    conformal_store: OnlineConformalStore | None,
+    settings: APISettings | Any,
+    climate_projected: Tensor | None = None,
+    static_factual: Tensor | None = None,
+) -> tuple[DriftAlarmPayload | None, DriftStatus | None, bool]:
     key = stratum_key(
         request.scenario,
         request.horizon_year,
@@ -114,6 +144,13 @@ def apply_drift_monitoring(
 
     status_dict = drift_store.get_drift_status(key, coverage_running_avg=coverage_avg)
     drift_status = DriftStatus.model_validate(status_dict)
+
+    from api import metrics as prom_metrics
+    import math
+
+    region = _region_from_request(request, settings)
+    wealth = math.exp(min(wctm.log_martingale, 50.0))
+    prom_metrics.set_drift_score(model="wctm", region=region, score=wealth)
 
     drift_alarm: DriftAlarmPayload | None = None
     if alarm is not None:

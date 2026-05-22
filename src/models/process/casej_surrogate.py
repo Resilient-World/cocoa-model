@@ -217,6 +217,17 @@ class CASEJSurrogate(nn.Module):
         static: Tensor,
         co2_ppm: Tensor | None = None,
     ) -> Tensor:
+        from api.telemetry import trace_span
+
+        with trace_span("casej_surrogate.forward"):
+            return self._forward_impl(climate, static, co2_ppm)
+
+    def _forward_impl(
+        self,
+        climate: Tensor,
+        static: Tensor,
+        co2_ppm: Tensor | None = None,
+    ) -> Tensor:
         if climate.ndim != 3 or static.ndim != 2:
             raise ValueError(
                 f"Expected climate [B,T,C] and static [B,F]; got {tuple(climate.shape)}, {tuple(static.shape)}"

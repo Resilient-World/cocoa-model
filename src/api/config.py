@@ -221,6 +221,30 @@ class APISettings(BaseSettings):
         validation_alias="DVDS_LAMBDA_GRID",
     )
 
+    otel_enabled: bool = Field(default=False, validation_alias="OTEL_ENABLED")
+    otel_exporter_otlp_endpoint: str = Field(
+        default="http://localhost:4317",
+        validation_alias="OTEL_EXPORTER_OTLP_ENDPOINT",
+    )
+    otel_service_name: str = Field(
+        default="cocoa-model-api",
+        validation_alias="OTEL_SERVICE_NAME",
+    )
+    otel_service_version: str = Field(
+        default="0.3.0",
+        validation_alias="OTEL_SERVICE_VERSION",
+    )
+    otel_deployment_environment: str = Field(
+        default="local",
+        validation_alias="OTEL_DEPLOYMENT_ENVIRONMENT",
+    )
+    prometheus_enabled: bool = Field(default=False, validation_alias="PROMETHEUS_ENABLED")
+    metrics_auth_token: str | None = Field(default=None, validation_alias="METRICS_AUTH_TOKEN")
+    prometheus_metrics_path: str = Field(
+        default="/metrics",
+        validation_alias="PROMETHEUS_METRICS_PATH",
+    )
+
     @field_validator("dvds_lambda_grid", mode="before")
     @classmethod
     def _parse_dvds_lambda_grid(cls, value: object) -> object:

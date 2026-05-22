@@ -1,0 +1,56 @@
+name: Loadtest nightly
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+jobs:
+  k6-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install API + observability extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,observability]"
+
+      - name: Start API (mock features, metrics on)
+        run: |
+          export USE_REAL_FEATURES=false
+          export OTEL_ENABLED=false
+          export PROMETHEUS_ENABLED=true
+          uvicorn api.main:app --host 127.0.0.1 --port 8000 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8000/health && break
+            sleep 2
+          done
+          curl -sf http://127.0.0.1:8000/health
+
+      - name: Install k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg \
+            --keyserver hkp://keyserver.ubuntu.com:80 \
+            --recv-keys C5AD17C747E3415A4302E4F0213F38CD84A35C88
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | \
+            sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install -y k6
+
+      - name: Run k6 smoke
+        run: |
+          chmod +x scripts/run_k6_loadtest.sh
+          K6_SMOKE=1 ./scripts/run_k6_loadtest.sh http://127.0.0.1:8000
+
+      - name: Upload k6 summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-summary
+          path: reports/loadtest/k6_summary_*.json
