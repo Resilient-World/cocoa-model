@@ -234,6 +234,22 @@ class CMIP6Ingest:
         out = xr.concat(by_model, dim="model")
         return out.transpose("time", "latitude", "longitude", "model", "scenario")
 
+    def to_zarr(
+        self,
+        path: str,
+        *,
+        mode: str = "w",
+        validate: bool = True,
+        horizon_year: int = 2030,
+    ) -> None:
+        """Persist ensemble cube; optionally validate index sample against Pandera schema."""
+        ds = self.build_ensemble()
+        ds.to_zarr(path, mode=mode)
+        if validate:
+            from data.cmip6_schema_index import validate_cmip6_dataset
+
+            validate_cmip6_dataset(ds, horizon_year=horizon_year)
+
     def ensemble_statistics(self, ds: xr.Dataset | None = None) -> xr.Dataset:
         """
         Compute model-mean and p10/p50/p90 across model dimension, per scenario.

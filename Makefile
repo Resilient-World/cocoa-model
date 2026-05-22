@@ -1,4 +1,6 @@
-.PHONY: help train-all benchmark report ingest-gee ci lint typecheck test dvc-dag dvc-repro hpo promote
+.PHONY: help train-all benchmark report ingest-gee ci lint typecheck test dvc-dag dvc-repro hpo promote validate-spatial validate-temporal
+
+REGION ?= ghana
 
 REPO_ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 export PYTHONPATH := $(REPO_ROOT)src
@@ -21,6 +23,8 @@ help:
 	@echo "  make typecheck    - mypy src/"
 	@echo "  make test         - pytest (fast subset)"
 	@echo "  make dvc-dag      - Print DVC pipeline graph"
+	@echo "  make validate-spatial REGION=ghana - Spatial block CV report"
+	@echo "  make validate-temporal            - Forward-chain temporal CV report"
 	@echo "  make ci           - lint + test + dvc-dag (local CI)"
 
 ingest-gee:
@@ -42,7 +46,7 @@ typecheck:
 	mypy src
 
 test:
-	pytest tests/test_joint_exposure_yield.py tests/test_api_simulate.py tests/test_feature_resolver.py tests/test_yield_surrogate.py -q
+	pytest tests/test_joint_exposure_yield.py tests/test_api_simulate.py tests/test_feature_resolver.py tests/test_yield_surrogate.py tests/validation/ -q
 
 dvc-dag:
 	dvc dag
@@ -55,5 +59,11 @@ hpo:
 
 promote:
 	scripts/promote_champion.sh $(PROMOTE_MODEL) $(PROMOTE_RUN_ID)
+
+validate-spatial:
+	python scripts/validate_spatial_holdout.py --region $(REGION) --block-size-km 50
+
+validate-temporal:
+	python scripts/validate_temporal_holdout.py
 
 ci: lint typecheck test dvc-dag

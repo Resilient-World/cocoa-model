@@ -314,6 +314,10 @@ class ConfidenceInterval(BaseModel):
         default=None,
         description="Rolling mean coverage over the last 1000 online updates for this stratum",
     )
+    cv_strategy: str | None = Field(
+        default=None,
+        description="CQR calibration CV strategy (e.g. spatial_block); omitted for legacy calibrators",
+    )
 
 
 class ConformalIntervalResponse(BaseModel):

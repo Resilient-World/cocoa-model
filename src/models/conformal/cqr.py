@@ -210,6 +210,9 @@ class ConformalCalibrator:
         self.quantiles: tuple[float, float, float] = DEFAULT_QUANTILES
         self.n_calibration: int = 0
         self.empirical_coverage: float | None = None
+        self.cv_strategy: str | None = None
+        self.fold_coverages: list[float] = []
+        self.recommended_block_km: float | None = None
 
     @staticmethod
     def conformity_scores(
@@ -282,6 +285,90 @@ class ConformalCalibrator:
         )
         return self
 
+    @torch.no_grad()
+    def fit_blocked(
+        self,
+        model: QuantileYieldSurrogate,
+        X: tuple[Tensor, Tensor],
+        y: Tensor | np.ndarray,
+        splitter: object,
+        *,
+        coords: tuple[np.ndarray, np.ndarray] | None = None,
+        years: np.ndarray | None = None,
+        alpha: float = 0.1,
+        fold: int | None = None,
+        device: torch.device | str = "cpu",
+    ) -> ConformalCalibrator:
+        """
+        Calibrate on spatially or temporally held-out folds (not i.i.d. random split).
+
+        Test-fold indices supply calibration scores; ``Q_hat`` is the median across folds
+        unless ``fold`` selects one fold only.
+        """
+        from validation.spatial_cv import BufferedLOO, SpatialBlockSplit
+        from validation.temporal_cv import ForwardChainSplit
+
+        climate, static = X
+        y_np = np.asarray(
+            y.detach().cpu().numpy() if torch.is_tensor(y) else y,
+            dtype=np.float64,
+        ).reshape(-1)
+        n = len(y_np)
+
+        if isinstance(splitter, ForwardChainSplit):
+            if years is None:
+                raise ValueError("years required for ForwardChainSplit calibration")
+            splits = list(splitter.split(years))
+            self.cv_strategy = "temporal_forward"
+        elif isinstance(splitter, (SpatialBlockSplit, BufferedLOO)):
+            if coords is None:
+                raise ValueError("coords (lat, lon) required for spatial calibration")
+            lats, lons = coords
+            splits = list(splitter.split(lats, lons))
+            self.cv_strategy = (
+                "buffered_loo" if isinstance(splitter, BufferedLOO) else "spatial_block"
+            )
+            if isinstance(splitter, SpatialBlockSplit):
+                self.recommended_block_km = splitter.block_size_km
+        else:
+            raise TypeError(f"Unsupported splitter type: {type(splitter)}")
+
+        q_hats: list[float] = []
+        coverages: list[float] = []
+        dev = torch.device(device)
+
+        for fold_i, (_train_idx, test_idx) in enumerate(splits):
+            if fold is not None and fold_i != fold:
+                continue
+            if len(test_idx) == 0:
+                continue
+            cal_climate = climate[test_idx].to(dev)
+            cal_static = static[test_idx].to(dev)
+            y_cal = y_np[test_idx]
+            q = model(cal_climate, cal_static).detach().cpu().numpy()
+            scores = self.conformity_scores(y_cal, q[:, 0], q[:, 2])
+            qh = self._conformal_quantile(scores, alpha)
+            q_hats.append(qh)
+            lo, hi = q[:, 0] - qh, q[:, 2] + qh
+            coverages.append(float(np.mean((y_cal >= lo) & (y_cal <= hi))))
+
+        if not q_hats:
+            raise RuntimeError("fit_blocked produced no valid folds")
+
+        self.alpha = float(alpha)
+        self.Q_hat = float(np.median(q_hats))
+        self.fold_coverages = coverages
+        self.n_calibration = n
+        self.empirical_coverage = float(np.median(coverages))
+        log.info(
+            "CQR fit_blocked strategy=%s folds=%d Q_median=%.4f coverage_median=%.3f",
+            self.cv_strategy,
+            len(q_hats),
+            self.Q_hat,
+            self.empirical_coverage,
+        )
+        return self
+
     def empirical_coverage_on(
         self,
         y_true: np.ndarray,
@@ -345,6 +432,9 @@ class ConformalCalibrator:
             "quantiles": self.quantiles,
             "n_calibration": self.n_calibration,
             "empirical_coverage": self.empirical_coverage,
+            "cv_strategy": self.cv_strategy,
+            "fold_coverages": self.fold_coverages,
+            "recommended_block_km": self.recommended_block_km,
         }
         joblib.dump(payload, path)
         log.info("Saved CQR calibrator to %s", path)
@@ -358,6 +448,10 @@ class ConformalCalibrator:
         obj.quantiles = tuple(payload.get("quantiles", DEFAULT_QUANTILES))
         obj.n_calibration = int(payload.get("n_calibration", 0))
         obj.empirical_coverage = payload.get("empirical_coverage")
+        obj.cv_strategy = payload.get("cv_strategy")
+        obj.fold_coverages = list(payload.get("fold_coverages") or [])
+        rb = payload.get("recommended_block_km")
+        obj.recommended_block_km = float(rb) if rb is not None else None
         return obj
 
 

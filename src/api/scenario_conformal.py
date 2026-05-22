@@ -129,6 +129,12 @@ def apply_scenario_conformal(
             biotic_factual=biotic_fact_frac,
             farm_size_ha=request.farm_size_ha,
         )
+        if cqr_calibrator.cv_strategy:
+            log.info(
+                "scenario_conformal_cqr_cv_strategy",
+                cv_strategy=cqr_calibrator.cv_strategy,
+                recommended_block_km=cqr_calibrator.recommended_block_km,
+            )
         return ScenarioConformalResult(
             ci_lower=ci_lower,
             ci_upper=ci_upper,
@@ -141,6 +147,7 @@ def apply_scenario_conformal(
                 method="cqr",
                 empirical_coverage=cqr_calibrator.empirical_coverage,
                 coverage_running_avg=None,
+                cv_strategy=cqr_calibrator.cv_strategy,
             ),
         )
 

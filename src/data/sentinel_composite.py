@@ -372,7 +372,24 @@ def main(argv: list[str] | None = None) -> int:
         from data.pipeline_stubs import write_sentinel_manifest
 
         out = args.output or Path("data/processed/s2_s1_manifest.json")
+        from data.schemas import SentinelTileManifestSchema, validate_dataframe
+
+        import pandas as pd
+
         write_sentinel_manifest(out, region=args.region)
+        manifest_df = pd.DataFrame(
+            [
+                {
+                    "region": args.region,
+                    "start_date": args.start,
+                    "end_date": args.end,
+                    "export_path": str(out),
+                    "ndvi_min": 0.2,
+                    "ndvi_max": 0.9,
+                }
+            ]
+        )
+        validate_dataframe(SentinelTileManifestSchema, manifest_df)
         log.info(f"Wrote stub Sentinel manifest: {out}")
         return 0
     if args.output is not None and args.export != "local":

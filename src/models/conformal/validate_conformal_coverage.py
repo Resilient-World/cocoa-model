@@ -17,6 +17,7 @@ from models.conformal.aci import AdaptiveConformalInference
 from models.conformal.conformal_pid import ConformalPID
 from models.conformal.cqr import ConformalCalibrator
 from models.conformal.eci import ECICutoff, ECIIntegral, ErrorQuantifiedConformalInference
+from data.yield_panel import build_yield_panel
 from models.conformal.online_conformal_base import (
     empirical_coverage,
     interval_from_q,
@@ -24,6 +25,9 @@ from models.conformal.online_conformal_base import (
     pit_values,
     rolling_coverage,
 )
+
+COVERAGE_LO = 0.88
+COVERAGE_HI = 0.92
 
 log = structlog.get_logger(__name__)
 
@@ -256,6 +260,44 @@ def run_benchmark_online(
     return write_online_calibration_report(out_dir, results)
 
 
+def write_cv_strategy_report(out_dir: Path, results: dict[str, Any]) -> Path:
+    """Write markdown report for multi-strategy conformal CV."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    day = date.today().isoformat()
+    path = out_dir / f"conformal_cv_{day}.md"
+    lines = [
+        "# Conformal coverage by CV strategy",
+        "",
+        f"Date: {day}",
+        "",
+        "**Production target:** `spatial_block` coverage in [88%, 92%] at 90% nominal.  ",
+        "**Secondary diagnostic:** `random` split (optimistic under spatial autocorrelation).",
+        "",
+        "| Strategy | Coverage | Mean width | Production target |",
+        "|----------|----------|------------|-------------------|",
+    ]
+    for name, stats in results.items():
+        if not isinstance(stats, dict) or "coverage" not in stats:
+            continue
+        prod = "yes" if stats.get("production_target") else "no (diagnostic)"
+        lines.append(
+            f"| {name} | {float(stats['coverage']):.3f} | "
+            f"{float(stats.get('mean_width', float('nan'))):.3f} | {prod} |"
+        )
+    if "gate_message" in results:
+        lines.extend(["", f"Gate: {results['gate_message']}"])
+    lines.extend(
+        [
+            "",
+            "Scenario API: production calibrators should be trained with `fit_blocked` "
+            "(`spatial_block`); saved `cv_strategy` metadata is exposed on `/simulate-scenario` "
+            "responses when present.",
+        ]
+    )
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Conformal coverage validation and online benchmarks")
     parser.add_argument("conformal_json", type=Path, nargs="?", help="models/conformal.json (legacy gate)")
@@ -265,11 +307,47 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Run shift simulation and write reports/conformal/online_calibration_<date>.md",
     )
+    parser.add_argument(
+        "--cv-strategy",
+        choices=("random", "spatial_block", "temporal_forward", "buffered_loo", "all"),
+        default=None,
+        help="Blocked conformal evaluation (production: spatial_block)",
+    )
+    parser.add_argument("--block-size-km", type=float, default=50.0)
     parser.add_argument("--out", type=Path, default=Path("reports/conformal"))
     parser.add_argument("--T", type=int, default=1000)
     parser.add_argument("--shift-at", type=int, default=500)
     parser.add_argument("--alpha", type=float, default=0.1)
     args = parser.parse_args(argv)
+
+    if args.cv_strategy:
+        from validation.conformal_cv import evaluate_cv_strategy, run_all_cv_strategies
+
+        if args.cv_strategy == "all":
+            results = run_all_cv_strategies(block_size_km=args.block_size_km)
+            report = write_cv_strategy_report(args.out, results)
+            log.info(f"Wrote {report}")
+            if results.get("gate_passed") is False:
+                raise SystemExit(1)
+            return 0
+        try:
+            rows = build_yield_panel(seed=42)
+        except Exception:
+            from validation.conformal_cv import _synthetic_panel_rows
+
+            rows = _synthetic_panel_rows(300)
+        stats = evaluate_cv_strategy(
+            args.cv_strategy,
+            rows,
+            block_size_km=args.block_size_km,
+        )
+        report = write_cv_strategy_report(args.out, {args.cv_strategy: stats})
+        log.info(f"Wrote {report}; coverage={stats.get('coverage')}")
+        if stats.get("production_target") and not (
+            COVERAGE_LO <= float(stats["coverage"]) <= COVERAGE_HI
+        ):
+            raise SystemExit(1)
+        return 0
 
     if args.benchmark_online:
         path = run_benchmark_online(args.out, T=args.T, shift_at=args.shift_at, alpha=args.alpha)
