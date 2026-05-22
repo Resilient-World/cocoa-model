@@ -140,6 +140,12 @@ scenario_ml = [
     "xarray>=2024.1",
     "netcdf4>=1.6",
 ]
+aurora = [
+    "microsoft-aurora>=1.5",
+    "huggingface_hub>=0.24",
+    "peft>=0.11",
+    "safetensors>=0.4",
+]
 
 # Optional extensions:
 # differences>=0.2.0
@@ -280,6 +286,8 @@ gradual_modules = [
   "counterfactual.corrdiff_downscaler",
   "counterfactual.delta_downscaler",
   "counterfactual.neuralgcm_runner",
+  "counterfactual.aurora_runner",
+  "models.aurora_backbone",
   "hazards.composite",
   "hazards.cssvd_landscape",
   "training.cocoa_agrifm_datamodule",
@@ -408,6 +416,8 @@ module = [
   "counterfactual.corrdiff_downscaler",
   "counterfactual.delta_downscaler",
   "counterfactual.neuralgcm_runner",
+  "counterfactual.aurora_runner",
+  "models.aurora_backbone",
   "hazards.composite",
   "hazards.cssvd_landscape",
   "training.cocoa_agrifm_datamodule",
@@ -569,6 +579,7 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 markers = [
     "integration: tests that call Google Earth Engine (require credentials)",
+    "aurora: Aurora 1.5 forward / cache tests (install [aurora] extra)",
     "slow: downloads Galileo weights or runs encoder forward pass",
     "slow: AgriFM Video Swin forward (depth-18 stage)",
     "terramind: TerraMind / TerraTorch registry forward or HF download",
