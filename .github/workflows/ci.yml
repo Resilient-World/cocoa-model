@@ -23,6 +23,9 @@ jobs:
       - name: Ruff check
         run: ruff check src tests scripts
 
+      - name: Mypy ratchet (strict-enabled modules)
+        run: make typecheck-strict
+
       - name: No bare print in src/
         run: python scripts/check_no_prints.py
 
