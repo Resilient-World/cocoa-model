@@ -415,7 +415,30 @@ def main(argv: list[str] | None = None) -> int:
         help="Output Zarr directory (default: data/processed/era5_<region>.zarr)",
     )
     parser.add_argument("--project", default=None, help="Earth Engine GCP project")
+    parser.add_argument(
+        "--stub",
+        action="store_true",
+        help="Write minimal offline Zarr (no Earth Engine)",
+    )
     args = parser.parse_args(argv)
+
+    if args.stub:
+        from data.pipeline_stubs import write_era5_zarr
+
+        out_path = args.out
+        if out_path is None and args.region is not None:
+            start_y = int(args.start[:4])
+            end_y = int(args.end[:4])
+            out_path = processed_era5_zarr_path(
+                normalize_region_key(args.region),
+                start_year=start_y,
+                end_year=end_y,
+            )
+        if out_path is None:
+            out_path = Path("data/processed/era5_2020_2024.zarr")
+        write_era5_zarr(Path(out_path), start=args.start)
+        logging.getLogger(__name__).info("Wrote stub ERA5 Zarr to %s", out_path)
+        return 0
 
     if args.aoi is None and args.region is None:
         parser.error("Provide --region or --aoi")

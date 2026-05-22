@@ -122,7 +122,30 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--agrifm-checkpoint", type=Path, default=DEFAULT_AGRIFM_CKPT)
     parser.add_argument("--terramind-checkpoint", type=Path, default=DEFAULT_TERRAMIND_CKPT)
     parser.add_argument("--out", type=Path, default=DEFAULT_ENSEMBLE_V3_WEIGHTS_PATH)
+    parser.add_argument(
+        "--synthetic",
+        action="store_true",
+        help="Write uniform default weights without tile forwards",
+    )
     args = parser.parse_args(argv)
+
+    if args.synthetic:
+        equal = 1.0 / len(V3_BACKEND_KEYS)
+        doc = {
+            "schema_version": 1,
+            "fitted_date": date.today().isoformat(),
+            "synthetic": True,
+            "default": {k: equal for k in V3_BACKEND_KEYS},
+            "global": {k: equal for k in V3_BACKEND_KEYS if k != "fdp"},
+            "global_f1": 0.0,
+            "regions": {
+                rk: {"weights": {k: equal for k in V3_BACKEND_KEYS}, "f1": 0.0, "n_tiles": 0}
+                for rk in REGIONS
+            },
+        }
+        save_ensemble_weights_yaml(doc, args.out)
+        logger.info("Wrote synthetic ensemble v3 weights → %s", args.out)
+        return 0
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     n_tiles = 200 if args.quick else args.n_tiles

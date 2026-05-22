@@ -226,11 +226,56 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--mlflow-run-name", type=str, default="galileo-cocoa-seg")
     parser.add_argument("--checkpoint-dir", type=Path, default=Path("models/checkpoints"))
     parser.add_argument("--class-weight-batches", type=int, default=50)
+    parser.add_argument("--synthetic", action="store_true", help="Smoke training without tile files")
+    parser.add_argument("--quick", action="store_true", help="Few epochs / nano model for CI")
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="Copy best weights to this path (e.g. models/galileo_cocoa_seg.pt)",
+    )
+    parser.add_argument(
+        "--metrics-out",
+        type=Path,
+        default=None,
+        help="Write training metrics JSON for DVC",
+    )
     return parser.parse_args(argv)
+
+
+def _write_smoke_galileo_checkpoint(out: Path, *, model_size: str = "nano") -> None:
+    """Save minimal Galileo seg weights for offline DVC repro."""
+    from models.galileo_seg import GalileoCocoaSegmentation
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    model = GalileoCocoaSegmentation(model_size=model_size, freeze_backbone=True)
+    torch.save({"state_dict": model.state_dict(), "smoke": True, "model_size": model_size}, out)
+    log.info("smoke_galileo_checkpoint", path=str(out))
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.quick:
+        args.epochs = min(args.epochs, 2)
+        args.freeze_epochs = 0
+        args.model_size = "nano"
+        args.train_length = min(args.train_length, 32)
+        args.batch_size = min(args.batch_size, 2)
+        args.class_weight_batches = 2
+
+    if args.synthetic:
+        out = args.out or Path("models/galileo_cocoa_seg.pt")
+        _write_smoke_galileo_checkpoint(out, model_size=args.model_size)
+        if args.metrics_out:
+            import json
+
+            args.metrics_out.parent.mkdir(parents=True, exist_ok=True)
+            args.metrics_out.write_text(
+                json.dumps({"smoke": True, "val_mIoU": 0.0}),
+                encoding="utf-8",
+            )
+        return 0
+
     pl.seed_everything(args.seed, workers=True)
 
     datamodule = CocoaGalileoDataModule(
@@ -327,6 +372,22 @@ def main(argv: list[str] | None = None) -> int:
     trainer.test(task, datamodule=datamodule)
 
     log.info(f"Best checkpoint: {checkpoint_callback.best_model_path}")
+    if args.out is not None:
+        import shutil
+
+        best = checkpoint_callback.best_model_path
+        if best:
+            args.out.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(best, args.out)
+            log.info("copied_galileo_checkpoint", dest=str(args.out))
+    if args.metrics_out is not None:
+        import json
+
+        args.metrics_out.parent.mkdir(parents=True, exist_ok=True)
+        args.metrics_out.write_text(
+            json.dumps({"best_checkpoint": checkpoint_callback.best_model_path}),
+            encoding="utf-8",
+        )
     return 0
 
 

@@ -69,12 +69,17 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Write all reports even when a gate fails",
     )
+    parser.add_argument(
+        "--mock",
+        action="store_true",
+        help="Skip GEE-backed Kalischek (heuristic reference only)",
+    )
     args = parser.parse_args(argv)
 
     try:
         run_all(
             reports_dir=args.reports_dir,
-            use_gee=args.use_gee,
+            use_gee=args.use_gee and not args.mock,
             segmentation_ckpt=args.segmentation_ckpt,
             fail_fast=not args.no_fail_fast,
         )

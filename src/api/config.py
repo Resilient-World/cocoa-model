@@ -46,6 +46,15 @@ class APISettings(BaseSettings):
         default=None,
         validation_alias="MODEL_CHECKPOINT_PATH",
     )
+    mlflow_registry_enabled: bool = Field(
+        default=False,
+        validation_alias="MLFLOW_REGISTRY_ENABLED",
+        description="Load yield surrogate from models:/<name>@champion when set",
+    )
+    mlflow_registry_model_name: str = Field(
+        default="yield_surrogate_v2",
+        validation_alias="MLFLOW_REGISTRY_MODEL_NAME",
+    )
     allow_v1_fallback: bool = Field(
         default=True,
         validation_alias="YIELD_SURROGATE_ALLOW_V1_FALLBACK",

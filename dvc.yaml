@@ -1,114 +1,62 @@
-# DVC pipeline — https://dvc.org/doc/user-guide/project-structure/pipelines
-# Core MLOps stages: GEE ingest markers → model training → backbone benchmark.
+# DVC pipeline — production MLOps (mock_gee smoke + full GEE path via params.yaml)
+# https://dvc.org/doc/user-guide/project-structure/pipelines
+
+vars:
+  - params.yaml
 
 stages:
-  stage_ingest_teleconnection:
-    cmd: python -m data.teleconnection_ingest --refresh
-    deps:
-      - src/data/teleconnection_ingest.py
-    outs:
-      - data/external/teleconnection_indices.parquet
-
-  stage_train_cssvd_landscape:
-    cmd: >
-      python scripts/train_cssvd_landscape.py
-      --synthetic
-      --n-synthetic 500
-      --checkpoint models/cssvd_landscape.joblib
-    deps:
-      - scripts/train_cssvd_landscape.py
-      - src/hazards/cssvd_landscape.py
-      - src/data/dumont_supplement.py
-      - src/data/cssvd_landscape_features.py
-      - src/data/cssvd_strain_atlas.py
-      - data/external/dumont_cssvd_plots_synthetic.csv
-      - data/external/muller2018_wa_strain_atlas.geojson
-    outs:
-      - models/cssvd_landscape.joblib
-      - reports/cssvd_landscape_metrics.json
-
   stage_ingest_gee:
-    cmd: python scripts/ingest_gee.py
+    cmd: python scripts/ingest_gee.py --write-era5-stub
     deps:
       - scripts/ingest_gee.py
+      - params.yaml
     outs:
       - data/raw/ingest_manifest.json
       - data/raw/cocoa_aoi.geojson
 
-  stage_train_aef_head:
+  stage_ingest_era5:
     cmd: >
-      python scripts/train_aef_head.py
-      --synthetic
-      --epochs 5
-      --checkpoint models/aef_head.pt
+      python -m data.era5_ingest
+      --region ${region}
+      --start ${era5.start}
+      --end ${era5.end}
+      --out ${era5.out}
+      --stub
     deps:
-      - scripts/train_aef_head.py
-      - src/models/aef_cocoa_head.py
-      - src/data/alphaearth_embeddings.py
+      - src/data/era5_ingest.py
+      - src/data/pipeline_stubs.py
+      - params.yaml
+      - data/raw/cocoa_aoi.geojson
     outs:
-      - models/aef_head.pt
+      - ${era5.out}
 
-  stage_train_casej_surrogate:
+  stage_ingest_s2:
     cmd: >
-      python scripts/train_casej_surrogate.py
-      --generate
-      --n-generate 200
-      --epochs 5
-      --checkpoint models/casej_surrogate.pt
+      python -m data.sentinel_composite
+      --region ${region}
+      --start ${sentinel.start}
+      --end ${sentinel.end}
+      --stub
+      --output ${sentinel.manifest}
     deps:
-      - scripts/train_casej_surrogate.py
-      - scripts/generate_casej_training_set.py
-      - src/models/casej_surrogate.py
-      - src/models/casej_process.py
-      - config/casej/params.yaml
+      - src/data/sentinel_composite.py
+      - src/data/pipeline_stubs.py
+      - params.yaml
     outs:
-      - models/casej_surrogate.pt
-      - data/simulations/casej_lhs.parquet
+      - ${sentinel.manifest}
 
-  stage_train_joint:
+  stage_ingest_fdp:
     cmd: >
-      python scripts/train_joint.py
-      --synthetic
-      --max-epochs 5
-      --checkpoint models/joint.pt
+      python -m data.cocoa_exposure
+      --region ${region}
+      --write-manifest ${fdp.manifest}
+      --stub
     deps:
-      - scripts/train_joint.py
-      - src/models/joint_exposure_yield.py
-      - src/models/cqr.py
+      - src/data/cocoa_exposure.py
+      - src/data/pipeline_stubs.py
+      - params.yaml
     outs:
-      - models/joint.pt
-
-  stage_train_agrifm_cocoa:
-    cmd: >
-      python scripts/train_agrifm_cocoa.py
-      --synthetic
-      --max-tiles 100
-      --quick
-      --out models/agrifm_cocoa_seg.pt
-    deps:
-      - scripts/train_agrifm_cocoa.py
-      - src/training/train_agrifm_cocoa.py
-      - src/training/cocoa_agrifm_datamodule.py
-      - src/models/agrifm_seg.py
-    outs:
-      - models/agrifm_cocoa_seg.pt
-
-  stage_train_terramind_cocoa:
-    cmd: >
-      python scripts/train_terramind_cocoa.py
-      --synthetic
-      --max-tiles 100
-      --quick
-      --out models/terramind_cocoa_seg.pt
-    deps:
-      - scripts/train_terramind_cocoa.py
-      - src/training/train_terramind_cocoa.py
-      - src/training/cocoa_terramind_datamodule.py
-      - src/models/terramind_seg.py
-      - src/models/terramind_backbone.py
-      - src/models/terramind_cocoa_head.py
-    outs:
-      - models/terramind_cocoa_seg.pt
+      - ${fdp.manifest}
 
   stage_download_agrifm:
     cmd: python scripts/download_agrifm_weights.py
@@ -118,61 +66,200 @@ stages:
       - models/agrifm/agrifm_s2_pretrained.pt
       - models/agrifm/agrifm_s2_pretrained.pt.sha256
 
+  stage_train_aef_head:
+    cmd: >
+      python scripts/train_aef_head.py
+      --synthetic
+      --epochs ${train.epochs}
+      --checkpoint models/aef_cocoa_head.pt
+    wdir: .dvc/tmp
+    deps:
+      - scripts/train_aef_head.py
+      - src/models/aef_cocoa_head.py
+      - params.yaml
+    outs:
+      - models/aef_cocoa_head.pt
+
+  stage_train_galileo_seg:
+    cmd: >
+      python -m training.train_galileo_cocoa
+      --synthetic
+      --quick
+      --out models/galileo_cocoa_seg.pt
+      --metrics-out reports/train/galileo_seg_metrics.json
+    wdir: .dvc/tmp
+    deps:
+      - src/training/train_galileo_cocoa.py
+      - src/models/galileo_seg.py
+      - params.yaml
+    outs:
+      - models/galileo_cocoa_seg.pt
+    metrics:
+      - reports/train/galileo_seg_metrics.json
+
+  stage_train_agrifm:
+    cmd: >
+      python scripts/train_agrifm_cocoa.py
+      --synthetic
+      --max-tiles 100
+      --quick
+      --out models/agrifm_cocoa_seg.pt
+    wdir: .dvc/tmp
+    deps:
+      - scripts/train_agrifm_cocoa.py
+      - src/training/train_agrifm_cocoa.py
+      - models/agrifm/agrifm_s2_pretrained.pt
+      - params.yaml
+    outs:
+      - models/agrifm_cocoa_seg.pt
+
+  stage_train_terramind:
+    cmd: >
+      python scripts/train_terramind_cocoa.py
+      --synthetic
+      --max-tiles 100
+      --quick
+      --out models/terramind_cocoa_seg.pt
+    wdir: .dvc/tmp
+    deps:
+      - scripts/train_terramind_cocoa.py
+      - src/training/train_terramind_cocoa.py
+      - params.yaml
+    outs:
+      - models/terramind_cocoa_seg.pt
+
+  stage_fit_ensemble_v3:
+    cmd: >
+      python scripts/fit_ensemble_v3_weights.py
+      --synthetic
+      --out config/ensemble_weights_v3.yaml
+    deps:
+      - scripts/fit_ensemble_v3_weights.py
+      - models/aef_cocoa_head.pt
+      - models/galileo_cocoa_seg.pt
+      - models/agrifm_cocoa_seg.pt
+      - models/terramind_cocoa_seg.pt
+      - params.yaml
+    outs:
+      - config/ensemble_weights_v3.yaml
+
+  stage_train_yield_v2:
+    cmd: >
+      python scripts/train_yield_surrogate_v2.py
+      --synthetic
+      --epochs ${train.epochs}
+      --era5-dir data/era5
+      --metrics-out reports/train/yield_v2_metrics.json
+    wdir: .dvc/tmp
+    deps:
+      - scripts/train_yield_surrogate_v2.py
+      - ${era5.out}
+      - params.yaml
+    outs:
+      - models/yield_surrogate_v2.pt
+      - data/simulations/case2_lhs.parquet
+      - data/simulations/almanac_lhs.parquet
+    metrics:
+      - reports/train/yield_v2_metrics.json
+
+  stage_train_casej:
+    cmd: >
+      python scripts/train_casej_surrogate.py
+      --generate
+      --n-generate 200
+      --epochs ${train.epochs}
+      --checkpoint models/casej_surrogate.pt
+    deps:
+      - scripts/train_casej_surrogate.py
+      - scripts/generate_casej_training_set.py
+      - params.yaml
+    outs:
+      - models/casej_surrogate.pt
+      - data/simulations/casej_lhs.parquet
+
+  stage_calibrate_cqr:
+    cmd: >
+      python scripts/train_cqr.py
+      --synthetic
+      --max-epochs ${train.epochs}
+    deps:
+      - scripts/train_cqr.py
+      - ${era5.out}
+      - params.yaml
+    outs:
+      - models/cqr_yield.pt
+      - models/cqr_calibrator.joblib
+
+  stage_train_cssvd_landscape:
+    cmd: >
+      python scripts/train_cssvd_landscape.py
+      --synthetic
+      --n-synthetic 500
+      --checkpoint models/cssvd_landscape.joblib
+    deps:
+      - scripts/train_cssvd_landscape.py
+      - data/external/dumont_cssvd_plots_synthetic.csv
+      - data/external/muller2018_wa_strain_atlas.geojson
+    outs:
+      - models/cssvd_landscape.joblib
+      - reports/cssvd_landscape_metrics.json
+
+  stage_validate:
+    cmd: >
+      python -m validation.run_validate
+      --mock
+      --no-fail-fast
+    deps:
+      - src/validation/run_validate.py
+      - models/galileo_cocoa_seg.pt
+      - models/yield_surrogate_v2.pt
+      - params.yaml
+    outs:
+      - reports/validation/summary.md
+    metrics:
+      - reports/validation/summary.md:
+          cache: false
+
+  stage_eval_e2e:
+    cmd: >
+      python scripts/demo_end_to_end.py
+      --mock-gee
+      --out reports/demo/e2e_civ_v5.json
+    deps:
+      - scripts/demo_end_to_end.py
+      - models/yield_surrogate_v2.pt
+      - config/ensemble_weights_v3.yaml
+      - params.yaml
+    outs:
+      - reports/demo/e2e_civ_v5.json
+
+  # Optional extras (not in default repro graph tail)
+  stage_ingest_teleconnection:
+    cmd: python -m data.teleconnection_ingest --refresh
+    deps:
+      - src/data/teleconnection_ingest.py
+    outs:
+      - data/external/teleconnection_indices.parquet
+
   stage_benchmark:
     cmd: >
       python scripts/benchmark_backbones.py
       --quick
       --n-tiles 50
-      --aef-checkpoint models/aef_head.pt
+      --aef-checkpoint models/aef_cocoa_head.pt
       --latest-out reports/backbones/benchmark_latest.md
     deps:
       - scripts/benchmark_backbones.py
-      - src/validation/kalischek_benchmark.py
-      - models/aef_head.pt
+      - models/aef_cocoa_head.pt
     outs:
       - reports/backbones/benchmark_latest.md
-
-  # Extended pipeline (optional repro)
-  era5_ingest:
-    cmd: >
-      python -m data.era5_ingest
-      --aoi data/raw/cocoa_aoi.geojson
-      --start 2015-01-01
-      --end 2024-12-31
-      --out data/processed/era5_2020_2024.zarr
-    deps:
-      - data/raw/cocoa_aoi.geojson
-      - src/data/era5_ingest.py
-    outs:
-      - data/processed/era5_2020_2024.zarr
-
-  train_yield:
-    cmd: >
-      python -m training.train_yield --config-name yield
-    deps:
-      - config/training/yield.yaml
-      - src/training/train_yield.py
-      - src/models/yield_surrogate.py
-    outs:
-      - models/yield_surrogate_v1.pt
 
   causal_evaluation:
     cmd: >
       python -m analysis.run_evaluation
-      --panel data/raw/farm_panel.parquet
       --out reports/causal_eval.json
+      --synthetic-n 200
     deps:
       - src/analysis/run_evaluation.py
-      - src/analysis/did_impact.py
-      - src/analysis/psm_matching.py
     metrics:
       - reports/causal_eval.json
-
-  # Manual HPC stage — CorrDiff-CMIP6 scenario ensembles (~190 GPU-hours for 48 strata)
-  stage_corrdiff_scenario_bulk:
-    cmd: python scripts/run_corrdiff_scenario_bulk.py
-    deps:
-      - scripts/run_corrdiff_scenario_bulk.py
-      - src/counterfactual/corrdiff_downscaler.py
-    outs:
-      - data/processed/corrdiff_bulk_manifest.json

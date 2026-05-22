@@ -218,6 +218,23 @@ def train(args: argparse.Namespace) -> Path:
     torch.manual_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() and not args.cpu else "cpu")
 
+    if args.synthetic:
+        from data.pipeline_stubs import (
+            write_era5_zarr,
+            write_lhs_parquets,
+            write_per_farm_era5_zarrs,
+        )
+
+        write_lhs_parquets(
+            n_farms=args.n_synthetic_farms,
+            seed=args.seed,
+            case2_path=args.case2_parquet,
+            almanac_path=args.almanac_parquet,
+        )
+        zarr_path = _REPO_ROOT / "data" / "processed" / "era5_2020_2024.zarr"
+        write_era5_zarr(zarr_path)
+        write_per_farm_era5_zarrs(args.case2_parquet, args.era5_dir)
+
     merged = load_lhs_table(args.case2_parquet, args.almanac_parquet)
     train_df, val_df, test_df = stratified_split(merged, seed=args.seed)
 
@@ -300,6 +317,13 @@ def train(args: argparse.Namespace) -> Path:
         }
         torch.save(checkpoint, out_path)
         logger.info("Saved %s (test_rmse=%.4f)", out_path, test_metrics["rmse"])
+        if args.metrics_out:
+            from data.pipeline_stubs import write_metrics_json
+
+            write_metrics_json(
+                args.metrics_out,
+                {**{f"test_{k}": v for k, v in test_metrics.items()}, "epochs": args.epochs},
+            )
 
     return out_path
 
@@ -326,6 +350,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--cpu", action="store_true")
     p.add_argument("--mlflow-experiment", default="resilient-cocoa-yield-v2")
     p.add_argument("--mlflow-run-name", default="yield-surrogate-v2")
+    p.add_argument("--synthetic", action="store_true", help="Generate LHS + ERA5 stubs")
+    p.add_argument("--n-synthetic-farms", type=int, default=60)
+    p.add_argument(
+        "--metrics-out",
+        type=Path,
+        default=None,
+        help="JSON metrics for DVC (e.g. reports/train/yield_v2_metrics.json)",
+    )
     return p.parse_args()
 
 

@@ -66,14 +66,9 @@ def spatial_holdout_mask(
     seed: int = 42,
 ) -> np.ndarray:
     """Deterministic spatial block holdout (~10% of 0.5° cells)."""
-    cell_ids = (np.floor(lats * 2.0).astype(np.int64) * 10_000) + np.floor(lons * 2.0).astype(
-        np.int64
-    )
-    unique = np.unique(cell_ids)
-    rng = np.random.default_rng(seed)
-    n_test = max(1, int(len(unique) * fraction))
-    test_cells = set(rng.choice(unique, size=n_test, replace=False).tolist())
-    return np.isin(cell_ids, list(test_cells))
+    from data.spatial_splits import spatial_holdout_mask as _mask
+
+    return _mask(lats, lons, fraction=fraction, seed=seed)
 
 
 def segmentation_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:

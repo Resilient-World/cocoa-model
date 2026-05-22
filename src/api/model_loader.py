@@ -71,6 +71,27 @@ def _teleconnection_enabled(settings: APISettings | None) -> bool:
     return settings.teleconnection_checkpoint_path.is_file()
 
 
+def _load_yield_from_registry(model_name: str) -> YieldModel | None:
+    try:
+        from mlflow.exceptions import MlflowException
+        from registry.mlflow_registry import get_champion
+    except ImportError:
+        return None
+    try:
+        pyfunc = get_champion(model_name)
+    except MlflowException as exc:
+        log.warning("mlflow_registry_miss", model=model_name, error=str(exc))
+        return None
+    impl = getattr(pyfunc, "_model_impl", None)
+    inner = getattr(impl, "_model", None) if impl is not None else None
+    if inner is not None:
+        log.info("Loaded yield model from MLflow registry", model_name=model_name)
+        inner.eval()
+        return inner
+    log.warning("mlflow_registry_unwrap_failed", model=model_name)
+    return None
+
+
 def load_yield_model(
     checkpoint_path: str | None = None,
     *,
@@ -82,6 +103,11 @@ def load_yield_model(
     When ``ENABLE_TELECONNECTION`` is true and the teleconnection checkpoint exists,
     returns :class:`~models.yield_surrogate_v2_teleconnection.YieldSurrogateV2Teleconnection`.
     """
+    if settings is not None and settings.mlflow_registry_enabled:
+        reg = _load_yield_from_registry(settings.mlflow_registry_model_name)
+        if reg is not None:
+            return reg
+
     if _teleconnection_enabled(settings):
         assert settings is not None
         sur_path = settings.model_checkpoint_path or _V2_DEFAULT
