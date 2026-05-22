@@ -64,25 +64,16 @@ jobs:
           PYTHONPATH: src
         run: python -m analysis.validate_parallel_trends reports/causal_eval.json
 
-      - name: Conformal coverage gate
+      - name: Probabilistic calibration gate (CRPS/ECE/PIT/sharpness)
         env:
           PYTHONPATH: src
         run: |
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          from models.conformal import SplitConformalYield, save_conformal
-
-          p = SplitConformalYield(
-              quantile=1.2,
-              alpha=0.1,
-              validation={"empirical_coverage": 0.91, "nominal_coverage": 0.9, "n_holdout": 200.0},
-          )
-          path = Path("models/conformal.json")
-          path.parent.mkdir(parents=True, exist_ok=True)
-          save_conformal(p, path)
-          PY
-          python -m models.validate_conformal_coverage models/conformal.json
+          python -m models.conformal.validate_conformal_coverage \
+            --calibration-gate --calibration-report --synthetic \
+            --cv-strategy spatial_block \
+            --baseline-calibration tests/fixtures/promotion/baseline_calibration.json \
+            --out reports/validation
+          python scripts/plot_reliability.py --model cqr_yield --out-dir reports/validation
 
       - name: External validation suite
         env:

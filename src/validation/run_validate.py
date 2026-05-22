@@ -6,6 +6,7 @@ import structlog
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -19,6 +20,32 @@ log = structlog.get_logger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_REPORTS_DIR = _REPO_ROOT / "reports" / "validation"
+
+
+def _run_calibration_artifacts(reports_dir: Path) -> None:
+    """Probabilistic calibration report + reliability figure for MODEL_CARD."""
+    import subprocess
+    import sys
+
+    cmd_report = [
+        sys.executable,
+        "-m",
+        "models.conformal.validate_conformal_coverage",
+        "--calibration-report",
+        "--synthetic",
+        "--cv-strategy",
+        "spatial_block",
+        "--out",
+        str(reports_dir),
+    ]
+    subprocess.run(cmd_report, check=False, cwd=str(_REPO_ROOT), env={**os.environ, "PYTHONPATH": "src"})
+    plot = _REPO_ROOT / "scripts" / "plot_reliability.py"
+    if plot.is_file():
+        subprocess.run(
+            [sys.executable, str(plot), "--model", "cqr_yield", "--out-dir", str(reports_dir)],
+            check=False,
+            cwd=str(_REPO_ROOT),
+        )
 
 
 def run_all(
@@ -46,6 +73,8 @@ def run_all(
 
     summary_path = reports_dir / "summary.md"
     summary_path.write_text(combine_summary(results), encoding="utf-8")
+
+    _run_calibration_artifacts(reports_dir)
 
     failed = [r for r in results if not r.passed]
     if failed:

@@ -1,0 +1,26 @@
+{
+  "nominal_coverage": 0.9,
+  "empirical_coverage": 0.91,
+  "crps": 0.12,
+  "ece": 0.03,
+  "sharpness": 0.45,
+  "pit_chi2_p": 0.15,
+  "pit_shape": "uniform",
+  "crpss_climatology": 0.05,
+  "crpss_persistence": 0.08,
+  "crpss_fdp_mean": 0.02,
+  "by_stratum": {
+    "ssp245:2024:ghana": {
+      "crps": 0.11,
+      "ece": 0.028,
+      "empirical_coverage": 0.9,
+      "sharpness": 0.44
+    },
+    "ssp245:2024:civ": {
+      "crps": 0.13,
+      "ece": 0.032,
+      "empirical_coverage": 0.92,
+      "sharpness": 0.46
+    }
+  }
+}

@@ -8,7 +8,21 @@ import numpy as np
 import torch
 
 from data.yield_panel import COUNTRY_CENTROIDS, PanelRow, build_yield_panel
-from models.conformal.cqr import ConformalCalibrator, QuantileYieldSurrogate, pinball_loss
+from models.conformal.cqr import (
+    DEFAULT_QUANTILES,
+    ConformalCalibrator,
+    QuantileYieldSurrogate,
+    pinball_loss,
+)
+from validation.baselines import evaluate_with_baselines, group_indices_by_stratum
+from validation.forecast_scoring import (
+    crps_ensemble,
+    crps_quantile,
+    pit_histogram,
+    pit_values_from_intervals,
+    reliability_diagram,
+    sharpness,
+)
 from validation.spatial_cv import BufferedLOO, SpatialBlockSplit
 from validation.temporal_cv import ForwardChainSplit
 
@@ -19,11 +33,61 @@ COVERAGE_HI = 0.92
 NOMINAL = 0.90
 
 
-def _interval_pit(y: np.ndarray, lowers: np.ndarray, uppers: np.ndarray) -> np.ndarray:
-    """PIT values from fixed prediction intervals (uniform under correct calibration)."""
-    width = np.maximum(uppers - lowers, 1e-6)
-    pit = (y - lowers) / width
-    return np.clip(pit, 0.0, 1.0)
+def _scoring_extras(
+    rows: list[PanelRow],
+    test_idx: np.ndarray,
+    y_test: np.ndarray,
+    lowers: np.ndarray,
+    uppers: np.ndarray,
+    model: QuantileYieldSurrogate,
+    climate: torch.Tensor,
+    static: torch.Tensor,
+    device: torch.device,
+    *,
+    seed: int,
+) -> dict[str, Any]:
+    """CRPS, ECE, PIT diagnostics, CRPSS, per-stratum blocks."""
+    with torch.no_grad():
+        q_raw = model(climate[test_idx].to(device), static[test_idx].to(device)).cpu().numpy()
+    spread = (q_raw[:, 2] - q_raw[:, 0]).reshape(-1, 1)
+    model_ens = q_raw[:, 1:2] + np.linspace(-1, 1, 11) * spread
+    _, _, _, pit_diag = pit_histogram(y_test, lowers=lowers, uppers=uppers)
+    _, _, ece, _ = reliability_diagram(y_test, q_raw, DEFAULT_QUANTILES)
+    width = sharpness((lowers, uppers))
+    assert isinstance(width, float)
+    baseline_stats = evaluate_with_baselines(y_test, model_ens, rows, test_idx, seed=seed)
+    by_stratum: dict[str, dict[str, Any]] = {}
+    pos_map = {int(test_idx[k]): k for k in range(len(test_idx))}
+    for key, idx in group_indices_by_stratum(rows, test_idx).items():
+        local = np.array([pos_map[int(i)] for i in idx if int(i) in pos_map], dtype=np.int64)
+        if local.size == 0:
+            continue
+        _, _, _, sub_pit = pit_histogram(
+            y_test[local], lowers=lowers[local], uppers=uppers[local]
+        )
+        _, _, sub_ece, _ = reliability_diagram(y_test[local], q_raw[local], DEFAULT_QUANTILES)
+        by_stratum[key] = {
+            "ece": sub_ece,
+            "empirical_coverage": float(
+                np.mean((y_test[local] >= lowers[local]) & (y_test[local] <= uppers[local]))
+            ),
+            "crps": float(np.nanmean(crps_ensemble(y_test[local], model_ens[local]))),
+            "pit_chi2_p": sub_pit["pit_chi2_p"],
+            "sharpness": float(sharpness((lowers[local], uppers[local]))),
+        }
+    return {
+        "crps": float(np.nanmean(crps_ensemble(y_test, model_ens))),
+        "crps_quantile": float(np.nanmean(crps_quantile(y_test, q_raw, DEFAULT_QUANTILES))),
+        "ece": ece,
+        "sharpness": width,
+        "pit_chi2_p": pit_diag["pit_chi2_p"],
+        "pit_shape": pit_diag["shape"],
+        "crpss_climatology": baseline_stats["crpss_climatology"],
+        "crpss_persistence": baseline_stats["crpss_persistence"],
+        "crpss_fdp_mean": baseline_stats["crpss_fdp_mean"],
+        "by_stratum": by_stratum,
+        "pit": pit_values_from_intervals(y_test, lowers, uppers).tolist(),
+    }
 
 
 def _panel_coords(rows: list[PanelRow]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -120,14 +184,16 @@ def evaluate_cv_strategy(
         )
         y_test = y[test_idx].cpu().numpy()
         coverage = float(np.mean((y_test >= lowers) & (y_test <= uppers)))
-        pit = _interval_pit(y_test, lowers, uppers).tolist()
+        extras = _scoring_extras(
+            rows, test_idx, y_test, lowers, uppers, model, climate, static, dev, seed=seed
+        )
         return {
             "strategy": strategy,
             "coverage": coverage,
             "mean_width": float(np.mean(uppers - lowers)),
-            "pit": pit,
             "production_target": False,
             "diagnostic_only": True,
+            **extras,
         }
 
     if strategy == "spatial_block":
@@ -157,16 +223,18 @@ def evaluate_cv_strategy(
         )
         y_test = y[test_idx].cpu().numpy()
         coverage = float(np.mean((y_test >= lowers) & (y_test <= uppers)))
-        pit = _interval_pit(y_test, lowers, uppers).tolist()
+        extras = _scoring_extras(
+            rows, test_idx, y_test, lowers, uppers, model, climate, static, dev, seed=seed
+        )
         return {
             "strategy": strategy,
             "coverage": coverage,
             "mean_width": float(np.mean(uppers - lowers)),
-            "pit": pit,
             "block_size_km": block_size_km,
             "fold_coverages": calibrator.fold_coverages,
             "production_target": True,
             "diagnostic_only": False,
+            **extras,
         }
 
     if strategy == "buffered_loo":
@@ -214,14 +282,16 @@ def evaluate_cv_strategy(
         )
         y_test = y[test_idx].cpu().numpy()
         coverage = float(np.mean((y_test >= lowers) & (y_test <= uppers)))
-        pit = _interval_pit(y_test, lowers, uppers).tolist()
+        extras = _scoring_extras(
+            rows, test_idx, y_test, lowers, uppers, model, climate, static, dev, seed=seed
+        )
         return {
             "strategy": strategy,
             "coverage": coverage,
             "mean_width": float(np.mean(uppers - lowers)),
-            "pit": pit,
             "production_target": False,
             "diagnostic_only": True,
+            **extras,
         }
 
     raise ValueError(f"Unknown strategy: {strategy}")

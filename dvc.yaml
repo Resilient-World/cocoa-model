@@ -206,16 +206,23 @@ stages:
 
   stage_validate:
     cmd: >
-      python -m validation.run_validate
-      --mock
-      --no-fail-fast
+      python -m validation.run_validate --mock --no-fail-fast &&
+      python -m models.conformal.validate_conformal_coverage
+      --calibration-report --synthetic --cv-strategy spatial_block
+      --out reports/validation &&
+      python scripts/plot_reliability.py --model cqr_yield --out-dir reports/validation
     deps:
       - src/validation/run_validate.py
+      - src/validation/forecast_scoring.py
+      - src/validation/baselines.py
+      - src/validation/calibration_metrics.py
+      - scripts/plot_reliability.py
       - models/galileo_cocoa_seg.pt
       - models/yield_surrogate_v2.pt
       - params.yaml
     outs:
       - reports/validation/summary.md
+      - reports/validation/calibration_latest.json
     metrics:
       - reports/validation/summary.md:
           cache: false

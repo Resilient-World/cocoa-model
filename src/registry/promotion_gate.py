@@ -41,18 +41,10 @@ class GateResult:
 
 def crps_1d(obs: np.ndarray, ensemble: np.ndarray) -> float:
     """CRPS for 1-D observations vs ensemble members."""
-    obs = np.asarray(obs, dtype=np.float64)
-    ens = np.asarray(ensemble, dtype=np.float64)
-    if ens.ndim == 1:
-        ens = ens.reshape(-1, 1)
-    n = ens.shape[0]
-    term1 = np.mean(np.abs(ens - obs[:, None]), axis=1)
-    term2 = 0.0
-    for i in range(n):
-        for j in range(i + 1, n):
-            term2 += np.abs(ens[i] - ens[j])
-    term2 /= max(n * (n - 1) / 2, 1)
-    return float(np.mean(term1 - term2))
+    from validation.forecast_scoring import crps_ensemble
+
+    scores = crps_ensemble(obs, ensemble)
+    return float(np.nanmean(scores))
 
 
 def gate_crps_regression(

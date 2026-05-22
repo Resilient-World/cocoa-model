@@ -197,6 +197,25 @@ Produced by `python -m analysis.run_evaluation` → `reports/causal_eval.json`:
 
 CI conformal gate example: empirical 0.91 vs nominal 0.90 (pass).
 
+### 4.7 Probabilistic calibration (CRPS / reliability)
+
+Primary probabilistic metrics for yield uncertainty (spatial-block holdout, synthetic/ICCO panel in CI). See [`docs/CALIBRATION_GUIDE.md`](CALIBRATION_GUIDE.md).
+
+| Model | CRPS | CRPSS (clim) | ECE | PIT χ² p | Sharpness |
+|-------|------|--------------|-----|----------|-----------|
+| **CQR yield** (`cqr_yield`) | See `reports/validation/calibration_latest.json` | `crpss_climatology` | `ece` | `pit_chi2_p` | Mean interval width |
+| **ECI-Integral** (scenario API) | Per-stratum in online store | — | — | — | Rolling interval width |
+| **YieldSurrogateV2** | Promotion gate vs `baseline_crps.json` | — | N/A (point) | N/A | MC interval width |
+
+![Reliability diagnostics](../reports/validation/reliability_cqr_yield_latest.png) *(regenerate via `make plot-reliability`)*
+
+**Per-stratum keys:** `{scenario}:{horizon_year}:{region}` (e.g. `ssp245:2024:ghana`) — aligned with online conformal store.
+
+```bash
+make validate-calibration
+python -m models.conformal.validate_conformal_coverage --calibration-report --synthetic
+```
+
 ---
 
 ## 5. Causal identification assumptions
