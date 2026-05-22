@@ -14,7 +14,7 @@ SRC = REPO_ROOT / "src"
 SCRIPTS = REPO_ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-from mypy_typing_config import load_typing_config  # noqa: E402
+from mypy_typing_config import load_typing_config
 
 EXPECTED_STRICT = frozenset(
     {
@@ -30,7 +30,7 @@ def test_strict_enabled_registry() -> None:
     cfg = load_typing_config()
     enabled = set(cfg["strict_enabled"])
     assert enabled, "strict_enabled must be non-empty"
-    assert EXPECTED_STRICT <= enabled
+    assert enabled >= EXPECTED_STRICT
     overlap = enabled & set(cfg["gradual_modules"])
     assert not overlap, f"modules must not be both strict and gradual: {overlap}"
 
@@ -45,6 +45,4 @@ def test_mypy_strict_module(module: str) -> None:
         capture_output=True,
         text=True,
     )
-    assert proc.returncode == 0, (
-        f"mypy --strict -p {module} failed:\n{proc.stdout}\n{proc.stderr}"
-    )
+    assert proc.returncode == 0, f"mypy --strict -p {module} failed:\n{proc.stdout}\n{proc.stderr}"

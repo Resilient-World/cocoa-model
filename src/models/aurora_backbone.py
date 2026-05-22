@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-import torch
 from torch import Tensor, nn
 
 log = structlog.get_logger(__name__)

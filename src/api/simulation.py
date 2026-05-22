@@ -23,11 +23,11 @@ from api.schemas import (
     ConformalConfidenceInterval,
     ConformalIntervalResponse,
     InterventionType,
+    ScenarioSourceAttribution,
     SimulateClimateAttributionRequest,
     SimulateClimateAttributionResponse,
     SimulateInterventionRequest,
     SimulateInterventionResponse,
-    ScenarioSourceAttribution,
     SimulateScenarioRequest,
     SimulateScenarioResponse,
     YieldUncertaintyBand,
@@ -246,7 +246,9 @@ def _apply_process_bma_to_means(
         if isinstance(model, CASEJSurrogate):
             return None
         region_id = _region_id_tensor(model, climate, lat=lat, lon=lon, country_code=country_code)
-        teleconnection = feature_resolver.resolve_teleconnection(lat, lon, horizon)
+        teleconnection = _resolve_teleconnection_features(
+            model, feature_resolver, lat, lon, horizon
+        )
         return float(
             predict_yield_samples(
                 model,
@@ -386,6 +388,18 @@ def yield_model_forward(
     if isinstance(model, YieldSurrogateV2):
         return model(climate, static, region_id)
     return model(climate, static)
+
+
+def _resolve_teleconnection_features(
+    model: YieldSurrogateModel | YieldSurrogateV2 | YieldSurrogateV2Teleconnection,
+    feature_resolver: FarmFeatureResolver,
+    lat: float,
+    lon: float,
+    year: int,
+) -> dict[str, Any] | None:
+    if not isinstance(model, YieldSurrogateV2Teleconnection):
+        return None
+    return feature_resolver.resolve_teleconnection(lat, lon, year)
 
 
 @torch.no_grad()
@@ -650,7 +664,7 @@ def simulate_intervention(
         lon=lon,
         country_code=request.country_code,
     )
-    teleconnection = feature_resolver.resolve_teleconnection(lat, lon, year)
+    teleconnection = _resolve_teleconnection_features(model, feature_resolver, lat, lon, year)
     if not use_cqr:
         samples_cf = predict_yield_samples(
             model,
@@ -877,7 +891,7 @@ def simulate_climate_attribution(
         lon=lon,
         country_code=request.country_code,
     )
-    teleconnection = feature_resolver.resolve_teleconnection(lat, lon, year)
+    teleconnection = _resolve_teleconnection_features(model, feature_resolver, lat, lon, year)
     samples_f = predict_yield_samples(
         model,
         climate_factual_tensor,
@@ -1119,7 +1133,9 @@ def simulate_scenario(
                 lon=lon,
                 country_code=request.country_code,
             )
-            teleconnection = feature_resolver.resolve_teleconnection(lat, lon, horizon)
+            teleconnection = _resolve_teleconnection_features(
+                model, feature_resolver, lat, lon, horizon
+            )
             samples_cf = predict_yield_samples(
                 model,
                 climate_b,

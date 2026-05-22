@@ -55,4 +55,9 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
 
 
 def register_observability_middleware(app: Any) -> None:
+    if getattr(app.state, "observability_middleware_registered", False):
+        return
+    if app.middleware_stack is not None:
+        return
     app.add_middleware(ObservabilityMiddleware)
+    app.state.observability_middleware_registered = True

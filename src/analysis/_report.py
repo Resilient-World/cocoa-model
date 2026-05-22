@@ -6,7 +6,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-import pandas as pd  # type: ignore[import-untyped]
+import pandas as pd
 
 from analysis.did_impact import DiDResult
 from analysis.psm_matching import AIPWResult, BalanceReport

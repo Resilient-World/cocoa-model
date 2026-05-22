@@ -13,7 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC = REPO_ROOT / "src"
 
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
-from mypy_typing_config import load_typing_config  # noqa: E402
+from mypy_typing_config import load_typing_config
 
 
 def main(argv: list[str] | None = None) -> int:
