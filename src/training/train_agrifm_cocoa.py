@@ -9,6 +9,8 @@ and MLflow experiment ``agrifm_cocoa_finetune``.
 from __future__ import annotations
 
 import argparse
+
+import structlog
 import os
 import sys
 from pathlib import Path
@@ -27,6 +29,8 @@ from training.cocoa_agrifm_datamodule import (
     SyntheticAgriFMDataModule,
 )
 from training.hard_example_mining import HardExampleMiningCallback
+
+log = structlog.get_logger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUT = _REPO_ROOT / "models" / "agrifm_cocoa_seg.pt"
@@ -277,13 +281,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         trainer.fit(task, datamodule=datamodule)
     except FileNotFoundError as exc:
-        print(f"Tile data missing ({exc}); re-run with --synthetic", file=sys.stderr)
+        log.info(f"Tile data missing ({exc}); re-run with --synthetic", )
         return 1
 
     export_checkpoint(task, args.out, extra={"epochs": args.epochs, "patch_size": args.patch_size})
-    print(f"Exported AgriFM cocoa segmentation → {args.out}")
+    log.info(f"Exported AgriFM cocoa segmentation → {args.out}")
     if checkpoint_callback.best_model_path:
-        print(f"Best Lightning checkpoint: {checkpoint_callback.best_model_path}")
+        log.info(f"Best Lightning checkpoint: {checkpoint_callback.best_model_path}")
     return 0
 
 

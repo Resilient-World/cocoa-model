@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import logging
+import structlog
+
 from typing import TYPE_CHECKING, Any
 
 from torch import Tensor
@@ -20,7 +21,7 @@ if TYPE_CHECKING:
     from api.config import APISettings
     from api.schemas import SimulateScenarioRequest
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 FEATURE_DIM = 64
 

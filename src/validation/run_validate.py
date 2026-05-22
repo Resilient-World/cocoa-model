@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import structlog
+
 import argparse
 import logging
 import sys
@@ -13,7 +15,7 @@ from validation.giews_drought_validation import run_giews_validation
 from validation.icco_yield_backtest import run_icco_backtest
 from validation.kalischek_benchmark import run_kalischek_benchmark
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_REPORTS_DIR = _REPO_ROOT / "reports" / "validation"
@@ -47,7 +49,7 @@ def run_all(
 
     failed = [r for r in results if not r.passed]
     if failed:
-        logger.error("Validation failed: %s", ", ".join(r.name for r in failed))
+        log.error("Validation failed: %s", ", ".join(r.name for r in failed))
         if fail_fast:
             raise SystemExit(1)
     return results

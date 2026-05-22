@@ -215,6 +215,10 @@ def test_api_returns_conformal_when_json_present(tmp_path: Path) -> None:
         def resolve_static_with_galileo(self, lat: float, lon: float, year: int) -> torch.Tensor:
             return self.resolve_static(lat, lon)
 
+        def resolve_teleconnection(self, lat: float, lon: float, year: int) -> None:
+            del lat, lon, year
+            return None
+
     with TestClient(app) as client:
         app.state.feature_resolver = StubResolver()
         app.state.yield_model = YieldSurrogateModel()

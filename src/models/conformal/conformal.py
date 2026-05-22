@@ -13,6 +13,8 @@ quantiles per Kalischek (2023) West African cocoa agroecological zone.
 
 from __future__ import annotations
 
+import structlog
+
 import argparse
 import json
 import logging
@@ -27,9 +29,9 @@ import torch
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
-from models.yield_surrogate import YieldSurrogateModel, predict_with_uncertainty
+from models.surrogate.yield_surrogate import YieldSurrogateModel, predict_with_uncertainty
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 DEFAULT_EPSILON = 1e-6
 DEFAULT_NUM_MC_SAMPLES = 50
@@ -288,7 +290,7 @@ class SplitConformalYield:
         }
         self.num_mc_samples = mc
         self.epsilon = eps
-        logger.info(
+        log.info(
             "Split conformal calibrated: n=%d, q_hat=%.4f, holdout coverage=%.3f",
             scores.size,
             self.quantile,
@@ -413,7 +415,7 @@ class MondrianConformalYield:
                     alpha,
                 )
             else:
-                logger.warning(
+                log.warning(
                     "Zone %s has only %d calibration points; using global fallback",
                     zone,
                     len(zone_scores),
@@ -561,7 +563,7 @@ def _cmd_calibrate(args: argparse.Namespace) -> int:
     out_path = Path(args.out)
 
     if not calib_path.is_file():
-        logger.error("Calibration file not found: %s", calib_path)
+        log.error("Calibration file not found: %s", calib_path)
         return 1
 
     df = pd.read_parquet(calib_path)
@@ -595,7 +597,7 @@ def _cmd_calibrate(args: argparse.Namespace) -> int:
         )
 
     save_conformal(predictor, out_path)
-    logger.info("Wrote conformal calibration to %s", out_path)
+    log.info("Wrote conformal calibration to %s", out_path)
     return 0
 
 

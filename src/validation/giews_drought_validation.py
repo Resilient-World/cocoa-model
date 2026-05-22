@@ -7,6 +7,8 @@ years in the cocoa belt (2015–16 El Niño, 2023–24 dryness).
 
 from __future__ import annotations
 
+import structlog
+
 import json
 import logging
 from pathlib import Path
@@ -16,7 +18,7 @@ import pandas as pd
 
 from validation._report import ValidationResult, write_report
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_GIEWS_JSON = _REPO_ROOT / "data" / "external" / "giews_cocoa_drought_briefs.json"
@@ -127,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
 
     result = run_giews_validation(args.giews_json, args.causal_json)
     write_report(result, args.report)
-    print(
+    log.info(
         f"GIEWS validation: {'PASS' if result.passed else 'FAIL'} "
         f"(consistency={result.metrics['consistency_rate']:.1%})"
     )

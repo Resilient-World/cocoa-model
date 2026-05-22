@@ -7,6 +7,8 @@ anomaly directions in the Barometer (positive / negative / neutral).
 
 from __future__ import annotations
 
+import structlog
+
 import json
 import logging
 from pathlib import Path
@@ -21,7 +23,7 @@ from validation.icco_yield_backtest import (
     predict_national_production,
 )
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_BAROMETER_JSON = _REPO_ROOT / "data" / "external" / "cocoa_barometer_2024_anomalies.json"
@@ -116,7 +118,7 @@ def main(argv: list[str] | None = None) -> int:
 
     result = run_barometer_check(args.barometer_json, args.icco_csv)
     write_report(result, args.report)
-    print(
+    log.info(
         f"Barometer check: {'PASS' if result.passed else 'FAIL'} "
         f"(agreement={result.metrics['directional_agreement']:.1%})"
     )

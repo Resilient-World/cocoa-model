@@ -28,7 +28,8 @@ lazy Xarray/Zarr materialization (Xee).
 
 from __future__ import annotations
 
-import logging
+import structlog
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -42,7 +43,7 @@ import xee  # noqa: F401
 
 from data.gee_auth import initialize_earth_engine
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 FDP_COCOA_COLLECTION = "projects/forestdatapartnership/assets/cocoa/model_2025a"
 PROBABILITY_BAND = "probability"
@@ -347,7 +348,7 @@ class CocoaExposureIngest:
                 self.galileo_checkpoint, device="cpu"
             )
         else:
-            logger.warning(
+            log.warning(
                 "Galileo checkpoint missing at %s; using uninitialized GalileoCocoaSegmentation",
                 self.galileo_checkpoint,
             )
@@ -394,7 +395,7 @@ class CocoaExposureIngest:
         if self.aef_checkpoint.is_file():
             self._aef_head = load_aef_cocoa_head(self.aef_checkpoint, device="cpu")
         else:
-            logger.warning(
+            log.warning(
                 "AEF head checkpoint missing at %s; using uninitialized AEFCocoaHead",
                 self.aef_checkpoint,
             )
@@ -411,7 +412,7 @@ class CocoaExposureIngest:
             ingest = AlphaEarthIngest(point_aoi, year=self.year, project=self.project)
             return ingest.sample_point(lat, lon)
         except Exception as exc:
-            logger.debug("AEF embedding sample failed (%s); using location prior", exc)
+            log.debug("AEF embedding sample failed (%s); using location prior", exc)
             return None
 
     def _location_prior_embedding(self, lat: float, lon: float) -> np.ndarray:
@@ -441,7 +442,7 @@ class CocoaExposureIngest:
         else:
             from models.agrifm_seg import AgriFMCocoaSegmentation
 
-            logger.warning(
+            log.warning(
                 "AgriFM checkpoint missing at %s; using uninitialized segmentation",
                 self.agrifm_checkpoint,
             )
@@ -470,7 +471,7 @@ class CocoaExposureIngest:
             if path.is_file():
                 self._terramind_tim_model = load_terramind_seg_checkpoint(path, use_tim=True)
             else:
-                logger.warning("TerraMind TiM checkpoint missing at %s; random init", path)
+                log.warning("TerraMind TiM checkpoint missing at %s; random init", path)
                 self._terramind_tim_model = TerraMindTiMCocoaSegmentation()
                 self._terramind_tim_model.eval()
             return self._terramind_tim_model
@@ -482,7 +483,7 @@ class CocoaExposureIngest:
         if path.is_file():
             self._terramind_model = load_terramind_seg_checkpoint(path, use_tim=False)
         else:
-            logger.warning("TerraMind checkpoint missing at %s; random init", path)
+            log.warning("TerraMind checkpoint missing at %s; random init", path)
             self._terramind_model = TerraMindCocoaSegmentation(freeze_backbone=True)
             self._terramind_model.eval()
         return self._terramind_model
@@ -812,7 +813,7 @@ def sample_cocoa_probability_at_point(
             if p is not None:
                 return p
         except Exception as exc:
-            logger.debug("FDP-region sample failed (%s); trying global fallback", exc)
+            log.debug("FDP-region sample failed (%s); trying global fallback", exc)
         return _cocoa_belt_probability(lat, lon)
 
     return _global_aef_galileo_agrifm_probability(

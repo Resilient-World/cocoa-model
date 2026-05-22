@@ -9,7 +9,8 @@ Lange 2019).
 
 from __future__ import annotations
 
-import logging
+import structlog
+
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -26,7 +27,7 @@ from data.era5_ingest import (
     compute_derived_features,
 )
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 _KELVIN_THRESHOLD = 150.0
 
@@ -117,7 +118,7 @@ class DeltaDownscaler:
         combined = xr.merge([self._delta_additive, self._ratio_multiplicative], compat="override")
         combined.attrs["method_additive"] = list(additive_vars.keys())
         combined.attrs["method_multiplicative"] = list(ratio_vars.keys())
-        logger.info(
+        log.info(
             "Built delta: %d additive, %d multiplicative variables",
             len(additive_vars),
             len(ratio_vars),

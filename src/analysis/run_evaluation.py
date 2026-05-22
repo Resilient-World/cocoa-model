@@ -7,6 +7,8 @@ Output schema is consumed by :mod:`analysis.validate_smd` and
 
 from __future__ import annotations
 
+import structlog
+
 import argparse
 import json
 import logging
@@ -21,7 +23,7 @@ from analysis.did_comparison_harness import compare_did_methods
 from analysis.did_impact import calculate_did_att, event_study
 from analysis.psm_matching import propensity_score_match, standardized_mean_differences
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 DEFAULT_COVARIATES = (
     "farm_size_ha",
@@ -130,7 +132,7 @@ def run_causal_evaluation(panel: pd.DataFrame) -> dict[str, Any]:
         n_placebo=100,
         write_report=True,
     )
-    logger.info("DiD method comparison:\n%s", did_comparison.to_string(index=False))
+    log.info("DiD method comparison:\n%s", did_comparison.to_string(index=False))
 
     return {
         "max_smd": float(balance.max_smd_matched),
@@ -155,16 +157,16 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.panel.is_file():
         panel = pd.read_parquet(args.panel)
-        logger.info("Loaded panel from %s (%d rows)", args.panel, len(panel))
+        log.info("Loaded panel from %s (%d rows)", args.panel, len(panel))
     else:
-        logger.warning("Panel %s not found; using synthetic balanced panel", args.panel)
+        log.warning("Panel %s not found; using synthetic balanced panel", args.panel)
         panel = _synthetic_panel(args.synthetic_n, seed=42)
 
     report = run_causal_evaluation(panel)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("w", encoding="utf-8") as handle:
         json.dump(report, handle, indent=2)
-    logger.info("Wrote causal evaluation to %s", args.out)
+    log.info("Wrote causal evaluation to %s", args.out)
     return 0
 
 

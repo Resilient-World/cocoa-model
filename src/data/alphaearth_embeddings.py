@@ -11,7 +11,8 @@ See ``NOTICE.md`` for commercial-use notes.
 
 from __future__ import annotations
 
-import logging
+import structlog
+
 from pathlib import Path
 
 import ee
@@ -22,7 +23,7 @@ import xee  # noqa: F401 — registers the ``ee`` Xarray backend
 
 from data.gee_auth import initialize_earth_engine
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 # Verified against Earth Engine Data Catalog (Satellite Embedding V1 Annual)
 AEF_ANNUAL_COLLECTION = "GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL"

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import structlog
+
 import argparse
 import json
 import sys
 from pathlib import Path
 
+log = structlog.get_logger(__name__)
 MAX_SMD_THRESHOLD = 0.10
 
 
@@ -28,7 +31,7 @@ def main(argv: list[str] | None = None) -> int:
         report = json.load(handle)
 
     validate_smd_report(report, threshold=args.threshold)
-    print(f"OK: max_smd={float(report.get('max_smd', 0)):.4f} < {args.threshold:.2f}")
+    log.info(f"OK: max_smd={float(report.get('max_smd', 0)):.4f} < {args.threshold:.2f}")
     return 0
 
 

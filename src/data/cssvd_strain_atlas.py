@@ -6,7 +6,8 @@ Simplified polygons for point lookup; replace with full atlas vectors when avail
 
 from __future__ import annotations
 
-import logging
+import structlog
+
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -14,7 +15,7 @@ from typing import Literal
 from shapely.geometry import Point, shape
 from shapely.strtree import STRtree
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 StrainRegion = Literal["1A", "1B", "1C", "2"]
 STRAIN_REGIONS: tuple[StrainRegion, ...] = ("1A", "1B", "1C", "2")
@@ -66,14 +67,14 @@ def lookup_strain_region(
     pt = Point(float(lon), float(lat))
     hits = tree.query(pt)
     if len(hits) == 0:
-        logger.debug("No strain polygon for (%.4f, %.4f); default=%s", lat, lon, default)
+        log.debug("No strain polygon for (%.4f, %.4f); default=%s", lat, lon, default)
         return default
 
     for idx in hits:
         if geoms[int(idx)].contains(pt):
             return labels[int(idx)]
 
-    logger.debug("Strain atlas miss for (%.4f, %.4f); default=%s", lat, lon, default)
+    log.debug("Strain atlas miss for (%.4f, %.4f); default=%s", lat, lon, default)
     return default
 
 

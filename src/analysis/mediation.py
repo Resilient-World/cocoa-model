@@ -182,9 +182,32 @@ def mediation_analysis(
     n_folds: int = 5,
 ) -> MediationResult:
     """
-    Estimate NDE and NIE under sequential ignorability via cross-fitted g-computation.
+    Estimate natural direct and indirect effects via cross-fitted g-computation.
 
-    Bootstrap percentile CIs for NDE, NIE, and total effect.
+    Parameters
+    ----------
+    df
+        Panel with binary treatment, outcome, mediator, and covariates.
+    treatment_col, outcome_col, mediator_col
+        Column names for ``T``, ``Y``, and ``M``.
+    covariate_cols
+        Confounders ``X`` (may be empty).
+    n_bootstrap
+        Percentile bootstrap replications for CIs.
+    random_state
+        RNG seed for folds and bootstrap.
+    n_folds
+        Cross-fitting folds for nuisance models.
+
+    Returns
+    -------
+    MediationResult
+        Point estimates, bootstrap CIs, and rho sensitivity curve.
+
+    Notes
+    -----
+    Implements the Imai, Keele and Yamamoto (2010) g-computation estimator with
+    HistGradientBoosting nuisances (VanderWeele 2015 for rho sensitivity).
     """
     cols = list(covariate_cols)
     for c in (treatment_col, outcome_col, mediator_col, *cols):

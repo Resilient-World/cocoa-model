@@ -10,13 +10,14 @@ Reference: Open Foris Whisp; EU Regulation (EU) 2023/1115 (EUDR), as amended Oct
 
 from __future__ import annotations
 
-import logging
+import structlog
+
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import httpx
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 DEFAULT_WHISP_BASE_URL = "https://whisp.openforis.org"
 EUDR_FOREST_CUTOFF_DATE = "2020-12-31"

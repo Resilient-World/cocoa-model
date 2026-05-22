@@ -6,8 +6,9 @@ Mirrors :mod:`api.online_conformal_store` (Redis ``drift_monitoring_state`` or J
 
 from __future__ import annotations
 
+import structlog
+
 import json
-import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,7 +18,7 @@ from api.online_conformal_store import stratum_key
 from monitoring.conformal_cusum import ConformalCUSUM, ConformalCUSUMState
 from monitoring.wctm import CompositeJumperState, WeightedConformalTestMartingale
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 SCORE_WINDOW_MAX = 500
 FEATURE_EMA_MAX = 128
@@ -102,7 +103,7 @@ class DriftStore:
 
                 self._redis_client = redis.from_url(redis_url, decode_responses=True)
             except ImportError:
-                logger.warning("redis not installed; drift store uses JSON only")
+                log.warning("redis not installed; drift store uses JSON only")
 
     def _read_all_json(self) -> dict[str, Any]:
         if not self.state_path.is_file():

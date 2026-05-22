@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import logging
+import structlog
+
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -55,7 +56,7 @@ if TYPE_CHECKING:
 else:
     from api.schemas import UQMethod
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 # Static feature indices (must match feature_resolver + simulation encoding)
 AWC_STATIC_IDX = 0
@@ -440,7 +441,7 @@ def simulate_intervention(
     and paired Monte Carlo samples for a 90% confidence interval on avoided loss.
     """
     if yield_blend_weight > 0.0:
-        logger.warning(
+        log.warning(
             "yield_blend_weight=%.2f is a demo crutch; set to 0.0 once a trained "
             "checkpoint is loaded.",
             yield_blend_weight,
@@ -788,7 +789,7 @@ def simulate_scenario(
     the usual mechanistic intervention deltas on the adjusted climate tensor.
     """
     if yield_blend_weight > 0.0:
-        logger.warning(
+        log.warning(
             "yield_blend_weight=%.2f is a demo crutch; set to 0.0 once a trained "
             "checkpoint is loaded.",
             yield_blend_weight,

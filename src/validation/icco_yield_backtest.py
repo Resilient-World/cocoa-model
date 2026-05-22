@@ -7,6 +7,8 @@ planted area to national production totals and compares against ICCO statistics.
 
 from __future__ import annotations
 
+import structlog
+
 import logging
 from pathlib import Path
 
@@ -16,7 +18,7 @@ import torch
 
 from validation._report import ValidationResult, write_report
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ICCO_CSV = _REPO_ROOT / "data" / "external" / "icco_cocoa_production.csv"
@@ -232,7 +234,7 @@ def main(argv: list[str] | None = None) -> int:
 
     result = run_icco_backtest(args.icco_csv, checkpoint_path=args.checkpoint)
     write_report(result, args.report)
-    print(
+    log.info(
         f"ICCO backtest: {'PASS' if result.passed else 'FAIL'} "
         f"(mode={result.metrics['evaluation_mode']}, "
         f"R²={result.metrics['r2']:.3f}, MAPE={result.metrics['mape']:.1%})"

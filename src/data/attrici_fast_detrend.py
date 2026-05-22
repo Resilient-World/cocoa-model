@@ -12,6 +12,8 @@ state variables — never detrended directly.
 
 from __future__ import annotations
 
+import structlog
+
 import argparse
 import logging
 import sys
@@ -34,7 +36,7 @@ from data.era5_ingest import (
     WIND10_TO_WIND2_FACTOR,
 )
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 MENGEL_2021_REF = "Mengel et al. 2021, Earth Syst. Dynam. (ATTRICI)"
 
@@ -97,14 +99,14 @@ def load_gistemp_loti(
     if GISTEMP_CACHE_FILE.is_file():
         age = time.time() - GISTEMP_CACHE_FILE.stat().st_mtime
         if age > GISTEMP_CACHE_MAX_AGE_S:
-            logger.info("GISTEMP cache stale (%.0fh); re-downloading", age / 3600)
+            log.info("GISTEMP cache stale (%.0fh); re-downloading", age / 3600)
         else:
             raw = GISTEMP_CACHE_FILE.read_text(encoding="utf-8")
     else:
         raw = None
 
     if raw is None:
-        logger.info("Downloading GISTEMP LOTI from %s", GISTEMP_URL)
+        log.info("Downloading GISTEMP LOTI from %s", GISTEMP_URL)
         response = requests.get(GISTEMP_URL, timeout=60)
         response.raise_for_status()
         raw = response.text
@@ -144,7 +146,7 @@ def load_gistemp_loti(
         series = pd.Series(smoothed, index=series.index, name="gmt_loti")
     else:
         if savgol_filter is None:
-            logger.warning(
+            log.warning(
                 "scipy not available; using rolling mean instead of Savitzky–Golay for GISTEMP"
             )
         series = series.rolling(window=smooth_window, center=True, min_periods=1).mean()
@@ -296,7 +298,7 @@ class FastATTRICICounterfactual:
         if missing:
             raise KeyError(f"Dataset missing variables for fit: {missing}")
         self._fitted = True
-        logger.info(
+        log.info(
             "FastATTRICICounterfactual fit: gmt_pi=%.3f°C, variables=%s",
             self._gmt_preindustrial,
             self.variables,
@@ -324,7 +326,7 @@ class FastATTRICICounterfactual:
 
         for var in self.variables:
             if var not in ds.data_vars:
-                logger.warning("Skipping missing variable %s", var)
+                log.warning("Skipping missing variable %s", var)
                 continue
             da = ds[var]
             is_precip = var == "precip"
@@ -476,15 +478,15 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_cli_args(argv)
     variables = tuple(v.strip() for v in args.variables.split(",") if v.strip())
     if not variables:
-        print("No variables specified.", file=sys.stderr)
+        log.error("no_variables_specified")
         return 1
 
     if not args.era5_zarr.exists():
-        print(f"Input Zarr not found: {args.era5_zarr}", file=sys.stderr)
+        log.error("era5_zarr_not_found", path=str(args.era5_zarr))
         return 1
 
     gmt = load_gistemp_loti()
-    logger.info("Loaded smoothed GISTEMP LOTI (%d years)", len(gmt))
+    log.info("Loaded smoothed GISTEMP LOTI (%d years)", len(gmt))
 
     ds = xr.open_zarr(args.era5_zarr, consolidated=True)
     model = ATTRICICounterfactual(gmt, variables=variables, )  # type: ignore[arg-type]
@@ -498,11 +500,11 @@ def main(argv: list[str] | None = None) -> int:
         try:
             out = recompute_derived_counterfactuals(out)
         except KeyError as exc:
-            logger.warning("Skipping derived counterfactual recompute: %s", exc)
+            log.warning("Skipping derived counterfactual recompute: %s", exc)
 
     args.out_zarr.parent.mkdir(parents=True, exist_ok=True)
     out.to_zarr(args.out_zarr, mode="w")
-    logger.info("Wrote counterfactual stack to %s", args.out_zarr)
+    log.info("Wrote counterfactual stack to %s", args.out_zarr)
     return 0
 
 

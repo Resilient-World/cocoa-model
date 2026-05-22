@@ -8,6 +8,8 @@ BCE+Dice loss, hard-example mining, MLflow logging (experiment ``terramind_cocoa
 from __future__ import annotations
 
 import argparse
+
+import structlog
 import os
 import sys
 from pathlib import Path
@@ -31,6 +33,8 @@ from training.cocoa_terramind_datamodule import (
     SyntheticTerraMindDataModule,
 )
 from training.hard_example_mining import HardExampleMiningCallback
+
+log = structlog.get_logger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUT = _REPO_ROOT / "models" / "terramind_cocoa_seg.pt"
@@ -199,10 +203,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         trainer.fit(task, datamodule=dm)
     except FileNotFoundError as exc:
-        print(f"Missing tiles ({exc}); use --synthetic", file=sys.stderr)
+        log.info(f"Missing tiles ({exc}); use --synthetic", )
         return 1
     export_checkpoint(task, out_path)
-    print(f"Exported TerraMind checkpoint → {out_path}")
+    log.info(f"Exported TerraMind checkpoint → {out_path}")
     return 0
 
 

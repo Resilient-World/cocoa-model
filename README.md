@@ -610,6 +610,10 @@ Body matches `/simulate-intervention` plus `scenario` (`ssp245` \| `ssp585`) and
 
 ---
 
+## Architecture and development
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the `models/` subpackage layout, structlog conventions, and `make typecheck` (mypy strict on `src/`).
+
 ## Testing
 
 ```bash

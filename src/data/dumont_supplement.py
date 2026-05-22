@@ -7,7 +7,8 @@ Expected supplement: ~2,847 plots with coordinates and survival outcomes
 
 from __future__ import annotations
 
-import logging
+import structlog
+
 from pathlib import Path
 
 import numpy as np
@@ -25,7 +26,7 @@ from hazards.cssvd_landscape import (
     features_to_dataframe,
 )
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SUPPLEMENT_PATH = _REPO_ROOT / "data" / "external" / "dumont_cssvd_plots.csv"

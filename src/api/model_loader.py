@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import logging
+import structlog
+
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
@@ -17,7 +18,7 @@ from models.yield_surrogate_v2_teleconnection import YieldSurrogateV2Teleconnect
 if TYPE_CHECKING:
     from api.config import APISettings
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 _V1_DEFAULT = "models/yield_surrogate_v1.pt"
 _V2_DEFAULT = "models/yield_surrogate_v2.pt"
@@ -90,7 +91,7 @@ def load_yield_model(
             sur_path,
             settings.teleconnection_checkpoint_path,
         )
-        logger.info(
+        log.info(
             "Loaded YieldSurrogateV2 + teleconnection from %s",
             settings.teleconnection_checkpoint_path,
         )
@@ -109,19 +110,19 @@ def load_yield_model(
     if v2_path is not None and v2_path.is_file():
         try:
             model = YieldSurrogateV2.from_checkpoint(v2_path)
-            logger.info("Loaded YieldSurrogateV2 from %s", v2_path)
+            log.info("Loaded YieldSurrogateV2 from %s", v2_path)
             model.eval()
             return model
         except Exception as exc:
-            logger.warning("Failed to load v2 checkpoint %s (%s)", v2_path, exc)
+            log.warning("Failed to load v2 checkpoint %s (%s)", v2_path, exc)
 
     allow_fallback = settings is None or settings.allow_v1_fallback
     fallback = Path(_V1_DEFAULT) if Path(_V1_DEFAULT).is_file() else v2_path
     if allow_fallback and fallback is not None and fallback.is_file():
-        logger.warning("Using v1 weights via YieldSurrogateV2.from_v1_checkpoint (%s)", fallback)
+        log.warning("Using v1 weights via YieldSurrogateV2.from_v1_checkpoint (%s)", fallback)
         return YieldSurrogateV2.from_v1_checkpoint(fallback)
 
-    logger.warning("No checkpoint found; returning uninitialized YieldSurrogateV2")
+    log.warning("No checkpoint found; returning uninitialized YieldSurrogateV2")
     model = YieldSurrogateV2(galileo_dim=galileo_dim)
     model.eval()
     return model
@@ -136,9 +137,9 @@ def _load_v1(path: Path | None, *, galileo_dim: int) -> YieldSurrogateModel:
         if isinstance(state, dict) and is_v1_static_checkpoint(state):
             state = migrate_v1_static_to_v2(state)
         model.load_state_dict(state, strict=False)
-        logger.info("Loaded yield model v1 weights from %s", path)
+        log.info("Loaded yield model v1 weights from %s", path)
     else:
-        logger.warning("No v1 checkpoint at %s; using uninitialized weights", path)
+        log.warning("No v1 checkpoint at %s; using uninitialized weights", path)
     model.eval()
     return model
 
