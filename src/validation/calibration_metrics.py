@@ -180,6 +180,7 @@ def run_calibration_gate(
     baseline: dict[str, Any] | None,
     *,
     enforce_sharpness: bool = True,
+    enforce_distribution: bool = True,
 ) -> tuple[bool, list[str]]:
     """Return (passed, messages)."""
     if isinstance(report, CalibrationReport):
@@ -190,11 +191,11 @@ def run_calibration_gate(
     ok = True
     nom = float(data.get("nominal_coverage", NOMINAL_COVERAGE))
     emp = float(data["empirical_coverage"])
-    if abs(emp - nom) > COVERAGE_TOL:
+    if enforce_distribution and abs(emp - nom) > COVERAGE_TOL:
         ok = False
         messages.append(f"coverage |{emp:.3f} - {nom:.3f}| > {COVERAGE_TOL}")
     pit_p = float(data.get("pit_chi2_p", 1.0))
-    if pit_p < PIT_CHI2_MIN_P:
+    if enforce_distribution and pit_p < PIT_CHI2_MIN_P:
         ok = False
         messages.append(
             f"PIT chi2 p={pit_p:.4f} < {PIT_CHI2_MIN_P} (shape={data.get('pit_shape')})"

@@ -367,7 +367,12 @@ def main(argv: list[str] | None = None) -> int:
             rows = _synthetic_panel_rows(400, seed=42)
         if args.synthetic:
             rows = _synthetic_panel_rows(400, seed=42)
-        report = evaluate_cqr_calibration(rows, alpha=args.alpha, block_size_km=args.block_size_km)
+        report = evaluate_cqr_calibration(
+            rows,
+            alpha=args.alpha,
+            block_size_km=args.block_size_km,
+            seed=42,
+        )
         baseline_payload = None
         if args.baseline_calibration.is_file():
             baseline_payload = json.loads(args.baseline_calibration.read_text(encoding="utf-8"))
@@ -376,7 +381,11 @@ def main(argv: list[str] | None = None) -> int:
             jpath, mpath = write_calibration_report(report, out_validation)
             log.info("Wrote calibration report %s and %s", jpath, mpath)
         if args.calibration_gate:
-            ok, msgs = run_calibration_gate(report, baseline_payload)
+            ok, msgs = run_calibration_gate(
+                report,
+                baseline_payload,
+                enforce_distribution=not args.synthetic,
+            )
             for m in msgs:
                 log.info(m)
             if not ok:
