@@ -61,7 +61,7 @@ dependencies = [
     "pyproj>=3.6",
     "properscoring>=0.1",
     "scoringrules>=0.5",
-    "galileo @ git+https://github.com/nasaharvest/galileo@main; python_version < '3.12'",
+    "galileo @ git+https://github.com/nasaharvest/galileo@main ; python_version < '3.12'",
 ]
 
 [project.optional-dependencies]
@@ -93,7 +93,7 @@ dev = [
     "pandas-stubs>=2.1",
     "types-PyYAML>=6.0",
     "types-shapely>=2.0",
-    "scipy-stubs>=2.0",
+    "scipy-stubs>=1.17.1.4",
     "types-redis>=4.6",
     "ipython>=8.0",
     "jupyter>=1.0",
@@ -111,7 +111,7 @@ ftw = [
 ]
 # Upstream Galileo (Python >=3.10,<3.12 only); on 3.12+ use vendored models.vendor.*
 galileo = [
-    "galileo @ git+https://github.com/nasaharvest/galileo@main",
+    "galileo @ git+https://github.com/nasaharvest/galileo@main ; python_version < '3.12'",
 ]
 # AgriFM Video Swin backbone (timm in core deps; weights via scripts/download_agrifm_weights.py)
 agrifm = []

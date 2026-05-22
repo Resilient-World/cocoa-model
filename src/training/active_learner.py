@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from pyproj import Transformer
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier  # type: ignore[import-untyped]
 
 EPS = 1e-12
 
@@ -40,7 +40,7 @@ def vote_entropy(votes: np.ndarray, *, n_classes: int | None = None) -> np.ndarr
     safe_log = np.zeros_like(probs, dtype=np.float64)
     np.log(probs, out=safe_log, where=probs > 0)
     entropy = -(probs * safe_log).sum(axis=1)
-    return entropy / max(np.log(classes), EPS)
+    return cast(np.ndarray, entropy / max(np.log(classes), EPS))
 
 
 def utm_epsg_for_lonlat(lon: float, lat: float) -> int:
@@ -146,7 +146,7 @@ class BSSALCocoaLearner:
         """Average committee class probabilities."""
         X_arr = np.asarray(X, dtype=np.float64)
         probs = [member.predict_proba(X_arr) for member in self.committee]
-        return np.mean(probs, axis=0)
+        return cast(np.ndarray, np.mean(probs, axis=0))
 
     def vote_entropy(self, X: np.ndarray) -> np.ndarray:
         """Rank uncertainty from two-member QBC vote entropy."""
@@ -172,7 +172,7 @@ class BSSALCocoaLearner:
         xy = project_lonlat_to_utm(coords)
         ranges: list[float] = []
         try:
-            from skgstat import Variogram
+            from skgstat import Variogram  # type: ignore[import-untyped]
         except ImportError:
             Variogram = None
         for month in range(12):
@@ -219,6 +219,8 @@ class BSSALCocoaLearner:
                 if monthly_ndvi is None:
                     raise ValueError("monthly_ndvi or range_m is required before querying")
                 self.fit_monthly_variogram_ranges(candidate_lonlat, monthly_ndvi)
+            if self.spatial_range_m_ is None:
+                raise ValueError("Unable to determine spatial range")
             range_m = float(self.spatial_range_m_)
         keep = spatial_uncorrelation_mask(candidate_lonlat, labeled_lonlat, float(range_m))
         entropy = self.vote_entropy(candidate_arr)
@@ -291,7 +293,7 @@ class BayesianHead(nn.Module):
         return features
 
     def forward(self, x: torch.Tensor | dict[str, Any]) -> torch.Tensor:
-        return self.head(self._features(x))
+        return cast(torch.Tensor, self.head(self._features(x)))
 
     @torch.no_grad()
     def predict_proba(

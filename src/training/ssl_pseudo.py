@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, cast
 
 import torch
 import torch.nn.functional as F
@@ -160,11 +160,11 @@ def build_pseudo_label_dataset(
 
 
 def combine_labeled_and_pseudo(
-    labeled_dataset: Dataset,
-    pseudo_dataset: Dataset,
-) -> ConcatDataset:
+    labeled_dataset: Dataset[tuple[Tensor, Tensor]],
+    pseudo_dataset: Dataset[tuple[Tensor, Tensor]],
+) -> ConcatDataset[tuple[Tensor, Tensor]]:
     """Combine human labels and gated pseudo-labels for self-training."""
-    return ConcatDataset([labeled_dataset, pseudo_dataset])
+    return cast(ConcatDataset[tuple[Tensor, Tensor]], ConcatDataset([labeled_dataset, pseudo_dataset]))
 
 
 def should_run_self_training(iteration: int, *, every_k: int) -> bool:
