@@ -89,6 +89,10 @@ class MediationDecomposition(BaseModel):
     """Optional mediation block on simulate-intervention responses."""
 
     per_mediator: list[MediatorEffect]
+    dag_source: Literal["assumed", "discovered"] = Field(
+        default="assumed",
+        description="Mediator chain source used for ordered path decomposition",
+    )
     path_table: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Ordered multi-mediator path effects when len(mediators) > 1",

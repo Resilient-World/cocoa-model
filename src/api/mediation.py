@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import os
 from collections.abc import Sequence
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -29,6 +32,9 @@ MEDIATOR_COLUMN: dict[MediatorId, str] = {
     "soil_moisture": "soil_moisture_delta",
     "cssvd_prevalence": "cssvd_prevalence_delta",
 }
+
+_COLUMN_MEDIATOR: dict[str, MediatorId] = {v: k for k, v in MEDIATOR_COLUMN.items()}
+_DISCOVERED_DAG_PATH = Path("reports/causal/discovered_dag_latest.json")
 
 
 def _annual_mean_delta(ds_factual: xr.Dataset, ds_cf: xr.Dataset, var: str) -> float:
@@ -90,6 +96,34 @@ def resolve_mediator_scalars(
     return cf_vals, fact_vals
 
 
+def _use_discovered_dag() -> bool:
+    return os.getenv("MEDIATION_USE_DISCOVERED_DAG", "").lower() in {"1", "true", "yes", "on"}
+
+
+def _ordered_mediators_from_discovered_dag(
+    requested: Sequence[MediatorId],
+    path: Path = _DISCOVERED_DAG_PATH,
+) -> list[MediatorId] | None:
+    if not path.is_file():
+        return None
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    raw_edges = payload.get("edges", payload)
+    requested_set = set(requested)
+    ordered: list[MediatorId] = []
+    for edge in raw_edges:
+        if isinstance(edge, dict):
+            dst = str(edge.get("target") or edge.get("dst") or edge.get("to"))
+        else:
+            dst = str(edge[1])
+        med = _COLUMN_MEDIATOR.get(dst)
+        if med in requested_set and med not in ordered:
+            ordered.append(med)
+    for med in requested:
+        if med not in ordered:
+            ordered.append(med)
+    return ordered
+
+
 def compute_intervention_mediation(
     request: SimulateInterventionRequest,
     *,
@@ -136,6 +170,13 @@ def _compute_intervention_mediation_impl(
 ) -> MediationDecomposition:
     lat = request.farm_location.lat
     lon = request.farm_location.lon
+    dag_source = "assumed"
+    ordered_mediators = list(decompose_mediators)
+    if _use_discovered_dag():
+        discovered_order = _ordered_mediators_from_discovered_dag(decompose_mediators)
+        if discovered_order is not None:
+            ordered_mediators = discovered_order
+            dag_source = "discovered"
     cf_vals, fact_vals = resolve_mediator_scalars(
         ds_cf,
         ds_factual,
@@ -151,7 +192,7 @@ def _compute_intervention_mediation_impl(
     per_mediator: list[MediatorEffect] = []
     frames: list[pd.DataFrame] = []
 
-    for med_id in decompose_mediators:
+    for med_id in ordered_mediators:
         col = MEDIATOR_COLUMN[med_id]
         med_cf = {col: cf_vals[col]}
         med_fact = {col: fact_vals[col]}
@@ -195,8 +236,8 @@ def _compute_intervention_mediation_impl(
         frames.append(full_frame)
 
     path_table: list[dict[str, Any]] = []
-    if len(decompose_mediators) > 1:
-        cols = [MEDIATOR_COLUMN[m] for m in decompose_mediators]
+    if len(ordered_mediators) > 1:
+        cols = [MEDIATOR_COLUMN[m] for m in ordered_mediators]
         combined = frames[-1] if frames else pd.DataFrame()
         if not combined.empty and all(c in combined.columns for c in cols):
             table = multi_mediator_decomposition(
@@ -220,7 +261,11 @@ def _compute_intervention_mediation_impl(
                 float(first.nie / first.nde) if first.nie is not None else 0.0,
             )
 
-    return MediationDecomposition(per_mediator=per_mediator, path_table=path_table)
+    return MediationDecomposition(
+        per_mediator=per_mediator,
+        dag_source=dag_source,
+        path_table=path_table,
+    )
 
 
 __all__ = [
