@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - BSSAL active learning + FixMatch SSL added for cocoa exposure label expansion in sparse-label regions (Xu et al. 2024 ISPRS-J; Kaijage et al. 2024 Sensors; Huang et al. 2025 arXiv:2511.18058).
 - Causal discovery (PC, NOTEARS-MLP, GES via causal-learn/gCastle) and PCMCI+ teleconnection discovery (Tigramite subprocess) added to validate the mediation DAG and teleconnection-GNN structure.
 - GEDI L4A + L3 canopy 3D features added; HuggingFace PEFT LoRA per-region adapters replace full fine-tunes (default for new region onboarding); new `/exposure-canopy` endpoint.
+- Cocoa quality model (premium-pricing layer), CMIP7-readiness factory, and parametric-insurance pricing math added; new `/price-parametric` endpoint exposes basis-risk and DVDS-loaded premiums.
 - Aurora 1.5 (Bodnar et al., Nature 2025) added as opt-in scenario backend; LoRA per-region adapters supported via `models/aurora_lora_<region>.safetensors`.
 - `downscaling_method=aurora` on `POST /simulate-scenario` with `source_attributions` (`aurora_model_version`, `aurora_lora_id`); optional extra `[aurora]` (`microsoft-aurora`, `peft`).
 - `scripts/validate_aurora_scenario.py` and `reports/scenario/aurora_vs_neuralgcm_vs_corrdiff.md` benchmark template.

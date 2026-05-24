@@ -14,11 +14,16 @@ from torch import Tensor
 
 from analysis.climate_attribution import extract_daily_climate_11ch
 from api.feature_resolver import climate_tensor_from_dataset_point
-from api.financial import calculate_financial_impact, financial_impact_to_schema
+from api.financial import (
+    calculate_financial_impact,
+    financial_impact_to_schema,
+    quality_price_premium_usd_per_t,
+)
 from api.scenario_conformal import apply_scenario_conformal, resolve_region
 from api.schemas import (
     AvoidedLossInterval,
     AvoidedLossUncertaintyBand,
+    CocoaQualityResponse,
     ConfidenceInterval,
     ConformalConfidenceInterval,
     ConformalIntervalResponse,
@@ -32,7 +37,7 @@ from api.schemas import (
     SimulateScenarioResponse,
     YieldUncertaintyBand,
 )
-from counterfactual.cmip6_scenarios import ScenarioBuilder
+from counterfactual.cmip_factory import build_cmip_scenario_builder, cmip_version_from_env
 from counterfactual.corrdiff_downscaler import (
     DEFAULT_OUTPUT_VARIABLES,
     CorrDiffCMIP6Downscaler,
@@ -44,8 +49,9 @@ from hazards import apply_biotic_losses
 from hazards.black_pod import ShadeSpecies
 from models.casej_process import co2_ppm_for_ssp
 from models.casej_surrogate import CASEJSurrogate
+from models.cocoa_quality import CocoaQualityInputs, CocoaQualityModel, CocoaQualityPrediction
 from models.cqr import ConformalCalibrator, QuantileYieldSurrogate
-from models.yield_surrogate import CLIMATE_IDX, YieldSurrogateModel
+from models.yield_surrogate import CLIMATE_IDX, STATIC_IDX, YieldSurrogateModel
 from models.yield_surrogate_v2 import (
     YieldSurrogateV2,
     region_id_from_country_code,
@@ -91,6 +97,51 @@ INTERVENTION_STATIC_DELTAS: dict[InterventionType, dict[str, float]] = {
     InterventionType.agroforestry: {"awc_mm": 20.0},
     InterventionType.drought_resistant_variety: {"stress_tolerance": 1.0},
 }
+
+
+def _quality_from_simulation(
+    *,
+    projected_yield: float,
+    climate: Tensor,
+    static: Tensor,
+    intervention_type: InterventionType,
+) -> CocoaQualityPrediction:
+    precip = climate[..., CLIMATE_IDX["precip"]].squeeze(0)
+    tmax = climate[..., CLIMATE_IDX["tmax"]].squeeze(0)
+    q3 = slice(181, 273)
+    q4 = slice(273, min(365, tmax.numel()))
+    harvest_window_precip = float(precip[q4].sum().item())
+    heat_q3 = float((tmax[q3] >= 32.0).sum().item())
+    heat_q4 = float((tmax[q4] >= 32.0).sum().item())
+    canopy_idx = STATIC_IDX.get("canopy_height_norm", 10)
+    tree_age_idx = STATIC_IDX.get("tree_age_years_norm", 12)
+    canopy_height_norm = (
+        float(static[0, canopy_idx].item()) if static.shape[1] > canopy_idx else 0.0
+    )
+    shade_cover = min(90.0, max(0.0, canopy_height_norm * 100.0))
+    if intervention_type in {InterventionType.shade_trees, InterventionType.agroforestry}:
+        shade_cover = min(95.0, shade_cover + 15.0)
+    tree_age_norm = float(static[0, tree_age_idx].item()) if static.shape[1] > tree_age_idx else 0.3
+    inputs = CocoaQualityInputs(
+        yield_t_per_ha=projected_yield,
+        harvest_window_precip_mm=harvest_window_precip,
+        heat_stress_days_q3=heat_q3,
+        heat_stress_days_q4=heat_q4,
+        shade_cover_pct=shade_cover,
+        fermentation_practice="controlled"
+        if intervention_type == InterventionType.agroforestry
+        else "traditional",
+        drying_method="mixed" if harvest_window_precip > 250.0 else "sun",
+        farm_age_years=max(1.0, tree_age_norm * 40.0),
+    )
+    prediction = CocoaQualityModel().predict_one(inputs)
+    premium = quality_price_premium_usd_per_t(prediction)
+    return CocoaQualityPrediction(
+        fermentation_index=prediction.fermentation_index,
+        defect_rate=prediction.defect_rate,
+        fine_flavor_probability=prediction.fine_flavor_probability,
+        price_premium_usd_per_t=premium,
+    )
 
 
 def _encode_static(
@@ -732,6 +783,17 @@ def simulate_intervention(
 
     avoided_loss_tonnes = max(0.0, (projected_yield - baseline_yield) * request.farm_size_ha)
 
+    quality_prediction: CocoaQualityPrediction | None = None
+    quality_premium = 0.0
+    if request.include_quality:
+        quality_prediction = _quality_from_simulation(
+            projected_yield=projected_yield,
+            climate=climate_factual,
+            static=static_factual,
+            intervention_type=request.intervention_type,
+        )
+        quality_premium = quality_prediction.price_premium_usd_per_t
+
     fin = calculate_financial_impact(
         avoided_loss_tonnes,
         currency=request.currency,
@@ -743,6 +805,7 @@ def simulate_intervention(
         cocoa_price_usd=request.cocoa_price_usd,
         ci_low_tonnes=ci_lower,
         ci_high_tonnes=ci_upper,
+        quality_premium_usd_per_t=quality_premium,
     )
     financial_impact_usd = fin.usd.point
 
@@ -808,6 +871,15 @@ def simulate_intervention(
 
     prom_metrics.observe_avoided_loss("simulate_intervention", avoided_loss_tonnes)
 
+    quality_block = None
+    if quality_prediction is not None:
+        quality_block = CocoaQualityResponse(
+            fermentation_index=quality_prediction.fermentation_index,
+            defect_rate=quality_prediction.defect_rate,
+            fine_flavor_probability=quality_prediction.fine_flavor_probability,
+            price_premium_usd_per_t=quality_prediction.price_premium_usd_per_t,
+        )
+
     return SimulateInterventionResponse(
         baseline_yield_tonnes_per_ha=baseline_yield,
         projected_yield_tonnes_per_ha=projected_yield,
@@ -831,6 +903,7 @@ def simulate_intervention(
         eudr_status=eudr_status,
         sensitivity_bounds=sensitivity_bounds,
         mediation=mediation_block,
+        quality=quality_block,
     )
 
 
@@ -977,7 +1050,7 @@ def simulate_scenario(
     drift_store: Any = None,
 ) -> SimulateScenarioResponse:
     """
-    Future-climate avoided loss using CMIP6 delta-change on ERA5 (`ScenarioBuilder`) +
+    Future-climate avoided loss using CMIP delta-change on ERA5 (`ScenarioBuilder`) +
     paired Monte Carlo forwards through :class:`~models.casej_surrogate.CASEJSurrogate`
     with SSP-specific CO2 (ppm).
 
@@ -991,15 +1064,24 @@ def simulate_scenario(
             yield_blend_weight,
         )
 
+    cmip_version = cmip_version_from_env()
+    cmip7_zarr_path = Path(getattr(settings, "cmip7_zarr_path", cmip6_zarr_path))
+    active_cmip_path = cmip7_zarr_path if cmip_version == "cmip7" else cmip6_zarr_path
+    if cmip_version == "cmip7" and not active_cmip_path.is_dir():
+        raise ValueError(
+            f"CMIP7 ensemble not yet published on the configured path: {active_cmip_path}. "
+            "Set CMIP_VERSION=cmip6 until the ensemble Zarr is available."
+        )
     if not historical_zarr_path.is_dir():
         raise ValueError(
             f"Historical ERA5 Zarr not found at {historical_zarr_path}. "
             "Export ERA5-Land to that path or set ERA5_ZARR_PATH."
         )
-    if not cmip6_zarr_path.is_dir():
+    if not active_cmip_path.is_dir():
+        label = cmip_version.upper()
         raise ValueError(
-            f"CMIP6 Zarr store not found at {cmip6_zarr_path}. "
-            "Build an ensemble Zarr or set CMIP6_ZARR_PATH."
+            f"{label} Zarr store not found at {active_cmip_path}. "
+            f"Build an ensemble Zarr or set {label}_ZARR_PATH."
         )
 
     lat = request.farm_location.lat
@@ -1026,9 +1108,11 @@ def simulate_scenario(
     scenario_co2 = co2_ppm_for_ssp(request.scenario, horizon)
 
     if downscaling == "linear_delta":
-        builder = ScenarioBuilder(
-            str(historical_zarr_path.resolve()),
-            str(cmip6_zarr_path.resolve()),
+        builder = build_cmip_scenario_builder(
+            historical_zarr_path=historical_zarr_path.resolve(),
+            cmip6_zarr_path=cmip6_zarr_path.resolve(),
+            cmip7_zarr_path=cmip7_zarr_path.resolve(),
+            version=cmip_version,
         )
         ds_scenario = builder.build_scenario(request.scenario, window)
         climate_ensemble = [climate_tensor_from_dataset_point(ds_scenario, lat, lon, year)]

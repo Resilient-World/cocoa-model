@@ -113,6 +113,10 @@ class SimulateInterventionRequest(BaseModel):
         default=False,
         description="Attach cooperative DVDS sensitivity bounds (requires farm panel parquet or synthetic fallback)",
     )
+    include_quality: bool = Field(
+        default=False,
+        description="Attach cocoa quality and premium-pricing block to intervention simulation",
+    )
     farm_location: FarmLocation
     farm_size_ha: float = Field(..., gt=0.0, description="Farm area in hectares")
     current_yield: float = Field(
@@ -193,6 +197,31 @@ class ExposureCanopyResponse(BaseModel):
     height_uncertainty_m: float = Field(..., ge=0.0)
     gedi_n_shots: int = Field(..., ge=0)
     source_attributions: list[str]
+
+
+class PriceParametricRequest(BaseModel):
+    """Request body for POST /price-parametric."""
+
+    farm_location: FarmLocation
+    farm_size_ha: float = Field(..., gt=0.0)
+    strike_t_per_ha: float = Field(..., gt=0.0)
+    coverage_horizon_years: int = Field(default=1, ge=1, le=10)
+    scenario: str = Field(default="baseline")
+    cocoa_price_usd: float = Field(default=3000.0, ge=0.0)
+
+
+class PriceParametricResponse(BaseModel):
+    """Parametric insurance pricing report."""
+
+    fair_premium_usd: float = Field(..., ge=0.0)
+    loaded_premium_usd: float = Field(..., ge=0.0)
+    expected_payout_usd: float = Field(..., ge=0.0)
+    basis_risk_r2: float = Field(..., ge=0.0, le=1.0)
+    lambda_sensitivity: dict[str, float]
+    conformal_adjusted_volatility: float = Field(..., ge=0.0)
+    strike_t_per_ha: float = Field(..., gt=0.0)
+    scenario: str
+    coverage_horizon_years: int
 
 
 class RankedFarmRecommendation(BaseModel):
@@ -584,6 +613,15 @@ class ScenarioBioticLosses(BaseModel):
     loss_attribution: BioticLossAttribution
 
 
+class CocoaQualityResponse(BaseModel):
+    """Cocoa quality and premium-pricing outputs."""
+
+    fermentation_index: float = Field(..., ge=0.0, le=1.0)
+    defect_rate: float = Field(..., ge=0.0, description="Bean defect rate (%)")
+    fine_flavor_probability: float = Field(..., ge=0.0, le=1.0)
+    price_premium_usd_per_t: float = Field(..., description="Quality premium/penalty in USD/t")
+
+
 class SimulateInterventionResponse(BaseModel):
     """Response from POST /simulate-intervention."""
 
@@ -635,6 +673,10 @@ class SimulateInterventionResponse(BaseModel):
     mediation: MediationDecomposition | None = Field(
         default=None,
         description="Present when request.decompose_mediators is non-empty",
+    )
+    quality: CocoaQualityResponse | None = Field(
+        default=None,
+        description="Present when include_quality=true",
     )
 
     @field_validator("avoided_loss_tonnes", "financial_impact_usd", mode="before")

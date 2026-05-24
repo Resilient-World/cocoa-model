@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
+
+import yaml
 
 if TYPE_CHECKING:
     from api.schemas import FinancialImpactResponse
+    from models.cocoa_quality import CocoaQualityPrediction
 
 from finance.pricing import (
     PricingBasis,
@@ -16,6 +20,7 @@ from finance.pricing import (
 )
 
 CurrencyCode = Literal["USD", "GHS", "XOF", "EUR"]
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 @dataclass(frozen=True)
@@ -61,6 +66,7 @@ def calculate_financial_impact(
     cocoa_price_usd: float | None = None,
     ci_low_tonnes: float | None = None,
     ci_high_tonnes: float | None = None,
+    quality_premium_usd_per_t: float = 0.0,
 ) -> FinancialImpactMulti:
     """
     Value avoided loss using ICCO / forward / trailing avg and FX conversion.
@@ -94,6 +100,7 @@ def calculate_financial_impact(
         country_code=country_code,
         price_override_usd=cocoa_price_usd,
     )
+    price_usd = max(0.0, price_usd + quality_premium_usd_per_t)
 
     tonnes_low = ci_low_tonnes if ci_low_tonnes is not None else avoided_loss_tonnes
     tonnes_high = ci_high_tonnes if ci_high_tonnes is not None else avoided_loss_tonnes
@@ -121,6 +128,37 @@ def calculate_financial_impact(
     primary = _pack(usd_point, usd_low, usd_high, currency)
 
     return FinancialImpactMulti(primary=primary, usd=usd, ghs=ghs, xof=xof)
+
+
+def load_quality_premium_map(path: Path | None = None) -> dict[str, float]:
+    premium_path = path or _REPO_ROOT / "config" / "quality_premiums.yaml"
+    if not premium_path.is_file():
+        return {
+            "fine_flavor_probability_threshold": 0.7,
+            "fine_flavor_usd_per_t": 1200.0,
+            "controlled_fermentation_usd_per_t": 150.0,
+            "defect_rate_penalty_threshold_pct": 5.0,
+            "defect_rate_penalty_usd_per_t": -400.0,
+        }
+    with premium_path.open(encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    return {str(key): float(value) for key, value in data.items()}
+
+
+def quality_price_premium_usd_per_t(
+    quality: CocoaQualityPrediction,
+    *,
+    premium_map: dict[str, float] | None = None,
+) -> float:
+    premiums = premium_map or load_quality_premium_map()
+    premium = 0.0
+    if quality.fine_flavor_probability >= premiums.get("fine_flavor_probability_threshold", 0.7):
+        premium += premiums.get("fine_flavor_usd_per_t", 1200.0)
+    if quality.fermentation_index >= 0.65:
+        premium += premiums.get("controlled_fermentation_usd_per_t", 150.0)
+    if quality.defect_rate > premiums.get("defect_rate_penalty_threshold_pct", 5.0):
+        premium += premiums.get("defect_rate_penalty_usd_per_t", -400.0)
+    return float(premium)
 
 
 def financial_impact_to_schema(block: FinancialImpactMulti) -> FinancialImpactResponse:
