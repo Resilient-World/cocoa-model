@@ -135,6 +135,12 @@ clay = [
 causal = [
     "ngboost>=0.5",
 ]
+discovery = [
+    "causal-learn>=0.1.3",
+    # gCastle requires Python <=3.9; install in legacy scenario ML envs only.
+    "gcastle>=1.0.4; python_version < '3.10'",
+    "tigramite>=5.2",
+]
 scenario_ml = [
     "xarray>=2024.1",
     "netcdf4>=1.6",

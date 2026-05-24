@@ -1,0 +1,24 @@
+{
+  "edges": [
+    {
+      "source": "cssvd_prevalence_delta",
+      "target": "yield",
+      "confidence": 1.0
+    },
+    {
+      "source": "microclimate_index",
+      "target": "cssvd_prevalence_delta",
+      "confidence": 1.0
+    },
+    {
+      "source": "microclimate_index",
+      "target": "yield",
+      "confidence": 0.6666666666666666
+    },
+    {
+      "source": "shade_trees",
+      "target": "microclimate_index",
+      "confidence": 1.0
+    }
+  ]
+}
