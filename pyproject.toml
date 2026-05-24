@@ -172,6 +172,7 @@ include = [
     "analysis*",
     "counterfactual*",
     "compliance*",
+    "finance*",
     "validation*",
     "registry*",
 ]

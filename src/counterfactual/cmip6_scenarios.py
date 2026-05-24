@@ -14,6 +14,7 @@ import numpy as np
 import xarray as xr
 
 from api.telemetry import trace_span
+from counterfactual.cmip_scenarios_base import CMIPScenarioBuilderBase
 from counterfactual.delta_downscaler import (
     _apply_monthly_additive,
     _apply_monthly_multiplicative,
@@ -23,9 +24,16 @@ from data.era5_ingest import compute_derived_features
 
 
 @dataclass
-class ScenarioBuilder:
+class ScenarioBuilder(CMIPScenarioBuilderBase):
     historical_zarr_path: str
     cmip6_zarr_path: str
+
+    def __post_init__(self) -> None:
+        self.ensemble_zarr_path = self.cmip6_zarr_path
+
+    @property
+    def version(self) -> str:
+        return "cmip6"
 
     def _open_hist(self) -> xr.Dataset:
         return xr.open_zarr(self.historical_zarr_path)

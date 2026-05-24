@@ -1,0 +1,5 @@
+fine_flavor_probability_threshold: 0.7
+fine_flavor_usd_per_t: 1200.0
+controlled_fermentation_usd_per_t: 150.0
+defect_rate_penalty_threshold_pct: 5.0
+defect_rate_penalty_usd_per_t: -400.0

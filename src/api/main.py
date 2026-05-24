@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
+import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -40,6 +41,8 @@ from api.schemas import (
     LearnPolicyRulesResponse,
     PolicyRule,
     PolicyRulebook,
+    PriceParametricRequest,
+    PriceParametricResponse,
     RankInterventionsRequest,
     RankInterventionsResponse,
     SimulateClimateAttributionRequest,
@@ -62,6 +65,7 @@ from compliance.eudr import (
     generate_dds,
     validate_geolocation,
 )
+from finance.parametric_insurance import price_parametric_trigger
 from models.conformal import load_conformal_if_exists
 from models.yield_surrogate import YieldSurrogateModel
 from monitoring.drift_store import build_drift_store_from_settings
@@ -157,6 +161,38 @@ def exposure_canopy_endpoint(request: ExposureCanopyRequest) -> ExposureCanopyRe
     loc = request.farm_location
     sample = app.state.feature_resolver.resolve_canopy(loc.lat, loc.lon, request.year)
     return ExposureCanopyResponse(**sample.as_dict())
+
+
+@app.post(
+    "/price-parametric",
+    response_model=PriceParametricResponse,
+    summary="Price a farm-level parametric yield trigger",
+)
+def price_parametric_endpoint(request: PriceParametricRequest) -> PriceParametricResponse:
+    """Return fair and DVDS-loaded premium plus basis-risk metrics."""
+    loc = request.farm_location
+    resolver = app.state.feature_resolver
+    climate = resolver.resolve_climate(loc.lat, loc.lon, 2023)
+    precip = climate[..., 3].detach().cpu().numpy().reshape(-1)
+    annual_precip = float(np.sum(precip))
+    drought_index = np.clip((1200.0 - annual_precip) / 1200.0, -0.4, 0.8)
+    seed = abs(hash((round(loc.lat, 3), round(loc.lon, 3), request.scenario))) % (2**32)
+    rng = np.random.default_rng(seed)
+    mean_yield = max(0.2, request.strike_t_per_ha * (1.08 - 0.35 * drought_index))
+    samples = rng.normal(mean_yield, max(0.08, 0.18 * mean_yield), 256)
+    samples = np.clip(samples, 0.05, None)
+    width = max(0.1, float(np.std(samples)) * 3.29)
+    report = price_parametric_trigger(
+        request.strike_t_per_ha,
+        samples,
+        {"lower": mean_yield - width / 2.0, "upper": mean_yield + width / 2.0},
+        farm_size_ha=request.farm_size_ha,
+        price_usd_per_t=request.cocoa_price_usd,
+    )
+    payload = report.as_dict()
+    payload["scenario"] = request.scenario
+    payload["coverage_horizon_years"] = request.coverage_horizon_years
+    return PriceParametricResponse(**payload)
 
 
 @app.post(

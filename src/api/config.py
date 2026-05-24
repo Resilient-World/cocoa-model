@@ -110,6 +110,10 @@ class APISettings(BaseSettings):
     attrici_gmt_file: Path = _REPO_ROOT / "data" / "raw" / "gmt" / "ssa_gmt.nc"
     attrici_cache_dir: Path = _REPO_ROOT / "data" / "cache" / "attrici_counterfactual"
     cmip6_zarr_path: Path = _REPO_ROOT / "data" / "processed" / "cmip6_ensemble.zarr"
+    cmip7_zarr_path: Path = Field(
+        default=_REPO_ROOT / "data" / "processed" / "cmip7_ensemble.zarr",
+        validation_alias="CMIP7_ZARR_PATH",
+    )
     corrdiff_processed_dir: Path = Field(
         default=_REPO_ROOT / "data" / "processed",
         validation_alias="CORRDIFF_PROCESSED_DIR",

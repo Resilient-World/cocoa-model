@@ -262,6 +262,36 @@ def test_exposure_canopy_endpoint(client: TestClient) -> None:
     assert data["gedi_n_shots"] == 8
 
 
+def test_price_parametric_endpoint(client: TestClient) -> None:
+    response = client.post(
+        "/price-parametric",
+        json={
+            "farm_location": VALID_PAYLOAD["farm_location"],
+            "farm_size_ha": 5.0,
+            "strike_t_per_ha": 1.2,
+            "coverage_horizon_years": 1,
+            "scenario": "baseline",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["loaded_premium_usd"] >= data["fair_premium_usd"] >= 0.0
+    assert 0.0 <= data["basis_risk_r2"] <= 1.0
+
+
+def test_simulate_intervention_quality_block(client: TestClient) -> None:
+    response = client.post(
+        "/simulate-intervention",
+        json={**VALID_PAYLOAD, "include_quality": True},
+    )
+    assert response.status_code == 200
+    quality = response.json()["quality"]
+    assert 0.0 <= quality["fermentation_index"] <= 1.0
+    assert quality["defect_rate"] >= 0.0
+    assert 0.0 <= quality["fine_flavor_probability"] <= 1.0
+    assert "price_premium_usd_per_t" in quality
+
+
 def test_validation_invalid_latitude(client: TestClient) -> None:
     payload = {**VALID_PAYLOAD, "farm_location": {"lat": 95.0, "lon": -1.2}}
     response = client.post("/simulate-intervention", json=payload)

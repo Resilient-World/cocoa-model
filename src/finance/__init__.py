@@ -5,6 +5,11 @@ from finance.insurance import (
     parametric_payout,
     reinsurance_layer,
 )
+from finance.parametric_insurance import (
+    compute_basis_risk,
+    price_parametric_trigger,
+    smile_corrected_pricing,
+)
 from finance.pricing import (
     COUNTRY_PASS_THROUGH,
     PricingBasis,
@@ -22,12 +27,15 @@ __all__ = [
     "PricingBasis",
     "SupportedCurrency",
     "aggregate_portfolio_var",
+    "compute_basis_risk",
     "farm_gate_price_usd",
     "fetch_forward_curve",
     "fetch_fx_rates",
     "fetch_icco_daily",
     "parametric_payout",
+    "price_parametric_trigger",
     "price_per_tonne_usd",
     "reinsurance_layer",
     "resolve_price_usd_per_tonne",
+    "smile_corrected_pricing",
 ]
