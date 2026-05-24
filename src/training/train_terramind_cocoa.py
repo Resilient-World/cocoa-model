@@ -30,6 +30,7 @@ from training.cocoa_terramind_datamodule import (
     SyntheticTerraMindDataModule,
 )
 from training.hard_example_mining import HardExampleMiningCallback
+from training.lora_adapter import apply_lora_to_backbone, save_lora_for_region
 
 log = structlog.get_logger(__name__)
 
@@ -146,6 +147,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--quick", action="store_true")
     p.add_argument("--mlflow-experiment", type=str, default="terramind_cocoa_finetune")
     p.add_argument("--checkpoint-dir", type=Path, default=Path("models/checkpoints/terramind"))
+    p.add_argument("--region", type=str, default="ghana")
+    p.add_argument("--lora", action="store_true", help="Train PEFT LoRA adapter + cocoa head")
     return p.parse_args(argv)
 
 
@@ -182,6 +185,9 @@ def main(argv: list[str] | None = None) -> int:
     else:
         seg = TerraMindCocoaSegmentation(freeze_backbone=True)
         out_path = args.out
+    if args.lora and not args.tim:
+        seg.backbone.encoder = apply_lora_to_backbone(seg.backbone.encoder, "terramind")
+        args.freeze_epochs = args.epochs + 1
 
     task = TerraMindCocoaTask(seg, max_epochs=args.epochs, use_tim=args.tim)
     logger = MLFlowLogger(experiment_name=args.mlflow_experiment, run_name="terramind-cocoa-seg")
@@ -207,6 +213,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
     export_checkpoint(task, out_path)
+    if args.lora and not args.tim:
+        adapter_path = save_lora_for_region(
+            seg.backbone.encoder,
+            args.region,
+            Path("models"),
+            backbone_name="terramind",
+        )
+        log.info("saved_terramind_lora_adapter", path=str(adapter_path))
     log.info(f"Exported TerraMind checkpoint → {out_path}")
     return 0
 

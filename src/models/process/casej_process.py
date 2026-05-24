@@ -273,19 +273,20 @@ def weather_to_climate_tensor(weather: pd.DataFrame, co2_ppm: float) -> np.ndarr
 
 
 def site_to_static_vector(site: CASEJSite) -> np.ndarray:
-    """Pack site into 13-d static vector (yield_surrogate layout)."""
+    """Pack site into static vector (yield_surrogate layout)."""
     from models.surrogate.yield_surrogate import (
+        N_STATIC_SITE,
         cohort_phase_from_age,
         planting_density_norm,
         tree_age_years_norm,
     )
 
-    static = np.zeros(13, dtype=np.float32)
+    static = np.zeros(N_STATIC_SITE, dtype=np.float32)
     static[0] = site.awc_mm
     static[1] = 0.4
     static[5] = 0.3
-    static[10] = tree_age_years_norm(site.tree_age_y)
-    static[11] = cohort_phase_from_age(site.tree_age_y)
-    static[12] = planting_density_norm(1100.0)
+    static[12] = tree_age_years_norm(site.tree_age_y)
+    static[13] = cohort_phase_from_age(site.tree_age_y)
+    static[14] = planting_density_norm(1100.0)
     static[9] = 0.7
     return static

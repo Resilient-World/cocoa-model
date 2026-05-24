@@ -3,7 +3,7 @@ Resolve farm-level climate, static site, and optional Galileo features for API i
 
 Climate: ``ERA5_ZARR_PATH`` daily stack ``[365, 11]`` (or ``features_cache.zarr``).
 
-Static (resolved source indices 0–9, mapped into the 13-d site vector for
+Static (resolved source indices 0–11, mapped into the 15-d site vector for
 :class:`~models.yield_surrogate.YieldSurrogateModel`):
 
 - 0–4: SoilGrids 2.0 clay %, sand %, SOC (g/kg), CEC (cmol/kg), pH (ISRIC / GEE)
@@ -12,6 +12,8 @@ Static (resolved source indices 0–9, mapped into the 13-d site vector for
 - 7: CHIRPS long-term mean annual precipitation (mm)
 - 8: distance to nearest protected area (WDPA, km)
 - 9: FDP / AEF cocoa probability
+- 10: GEDI L3 / ATL08 canopy height (m)
+- 11: GEDI L4A aboveground biomass (Mg/ha)
 
 LRU cache keys use ``(lat, lon, year)`` rounded to 0.05°. Set ``USE_REAL_FEATURES=false``
 to use :mod:`api.geo_mock` (tests only).
@@ -48,6 +50,7 @@ from data.ensemble_weights import (
 )
 from data.era5_ingest import ERA5Ingest
 from data.feature_store import FeatureStore
+from data.gedi_canopy import CanopyPointSample, sample_canopy_at_point
 from data.gee_auth import initialize_earth_engine
 from data.teleconnection_ingest import (
     DEFAULT_PARQUET as DEFAULT_TELECONNECTION_PARQUET,
@@ -134,6 +137,8 @@ class ResolvedStaticFeatures:
     chirps_annual_mm: float
     protected_dist_km: float
     cocoa_prob: float
+    canopy_height_m: float = 0.0
+    agb_mg_ha: float = 0.0
 
     def as_vector(self) -> np.ndarray:
         return np.array(
@@ -148,6 +153,8 @@ class ResolvedStaticFeatures:
                 self.chirps_annual_mm,
                 self.protected_dist_km,
                 self.cocoa_prob,
+                self.canopy_height_m,
+                self.agb_mg_ha,
             ],
             dtype=np.float32,
         )
@@ -176,6 +183,7 @@ class FeatureResolverConfig:
     terramind_tim_checkpoint_path: Path = _REPO_ROOT / "models" / "terramind_tim_cocoa_seg.pt"
     grid_step_deg: float = GRID_ROUND_STEP
     teleconnection_parquet_path: Path = DEFAULT_TELECONNECTION_PARQUET
+    canopy_year: int = 2023
 
 
 def _env_use_real_features() -> bool:
@@ -450,7 +458,7 @@ class FarmFeatureResolver:
         return indices
 
     def resolve_static(self, lat: float, lon: float, year: int | None = None) -> Tensor:
-        """Site static ``[1, 13]`` for the yield surrogate."""
+        """Site static ``[1, 15]`` for the yield surrogate."""
         with trace_span("feature_resolver.resolve_static", lat=lat, lon=lon):
             return self._resolve_static_impl(lat, lon, year)
 
@@ -517,6 +525,15 @@ class FarmFeatureResolver:
         _, static = fetch_climate_and_soil(lat, lon)
         return np.asarray(static.squeeze(0).numpy(), dtype=np.float32)
 
+    def resolve_canopy(self, lat: float, lon: float, year: int) -> CanopyPointSample:
+        return sample_canopy_at_point(
+            lat,
+            lon,
+            year,
+            project=self.config.gee_project,
+            use_mock=not self.use_real_features,
+        )
+
     def _climate_from_features_cache(self, path: Path, lat: float, lon: float, year: int) -> Tensor:
         ds = xr.open_zarr(path, consolidated=True)
         lat_name, lon_name = _lat_lon_coord_names(ds)
@@ -550,6 +567,8 @@ class FarmFeatureResolver:
             chirps_annual_mm=float(point["chirps_annual_mm"]),
             protected_dist_km=float(point["protected_dist_km"]),
             cocoa_prob=float(point["cocoa_prob"]),
+            canopy_height_m=float(point.get("canopy_height_m", 0.0)),
+            agb_mg_ha=float(point.get("agb_mg_ha", 0.0)),
         )
         return self._pack_model_static_vector(resolved, lat, lon)
 
@@ -602,6 +621,8 @@ class FarmFeatureResolver:
             chirps_annual_mm=float(point.get("chirps_annual_mm", 1200.0)),
             protected_dist_km=float(point.get("protected_dist_km", 50.0)),
             cocoa_prob=float(point.get("cocoa_prob", 0.5)),
+            canopy_height_m=float(point.get("canopy_height_m", 0.0)),
+            agb_mg_ha=float(point.get("agb_mg_ha", 0.0)),
         )
         return self._pack_model_static_vector(resolved, lat, lon, tree_age, density)
 
@@ -667,6 +688,7 @@ class FarmFeatureResolver:
             ensemble_weights_path=self.config.ensemble_weights_path,
             ensemble_v3_weights_path=self.config.ensemble_v3_weights_path,
         )
+        canopy = self.resolve_canopy(lat, lon, year)
 
         return ResolvedStaticFeatures(
             clay_pct=float(sample.get("clay", 25.0)),
@@ -679,6 +701,8 @@ class FarmFeatureResolver:
             chirps_annual_mm=float(sample.get("chirps_annual", 1200.0)) * 365.0,
             protected_dist_km=float(np.clip(protected_km, 0.0, 500.0)),
             cocoa_prob=float(np.clip(cocoa_prob, 0.0, 1.0)),
+            canopy_height_m=canopy.canopy_height_m,
+            agb_mg_ha=canopy.agb_mg_ha,
         )
 
     def _pack_model_static_vector(
@@ -691,7 +715,7 @@ class FarmFeatureResolver:
     ) -> np.ndarray:
         """
         Map resolved static (SoilGrids / terrain / CHIRPS / WDPA / cocoa) into the
-        13-d yield-surrogate layout (AWC at 0; simulation encodings at 2–4).
+        15-d yield-surrogate layout (AWC at 0; simulation encodings at 2–4).
         """
         if tree_age_years is None or planting_density_trees_ha is None:
             tree_age_years, planting_density_trees_ha = _lookup_farm_registry(
@@ -706,13 +730,15 @@ class FarmFeatureResolver:
         vec[7] = np.clip(resolved.ph / 14.0, 0.0, 1.0)
         vec[8] = np.clip(resolved.chirps_annual_mm / 3000.0, 0.0, 1.0)
         vec[9] = np.clip(resolved.cocoa_prob, 0.0, 1.0)
+        vec[10] = np.clip(resolved.canopy_height_m / 45.0, 0.0, 1.0)
+        vec[11] = np.clip(resolved.agb_mg_ha / 500.0, 0.0, 1.0)
         age_norm, cohort, dens_norm = pack_tree_age_static(
             tree_age_years,
             planting_density_trees_ha=planting_density_trees_ha,
         )
-        vec[10] = age_norm
-        vec[11] = cohort
-        vec[12] = dens_norm
+        vec[12] = age_norm
+        vec[13] = cohort
+        vec[14] = dens_norm
         return vec
 
     def _resolve_galileo_embedding(self, lat: float, lon: float, year: int) -> Tensor:
@@ -769,9 +795,31 @@ def resolve_static(
     *,
     resolver: FarmFeatureResolver | None = None,
 ) -> Tensor:
-    """Module-level helper: static site vector ``[1, 13]``."""
+    """Module-level helper: static site vector ``[1, 15]``."""
     res = resolver or FarmFeatureResolver()
     return res.resolve_static(lat, lon, year=year)
+
+
+def sample_canopy_height_at_point(
+    lat: float,
+    lon: float,
+    year: int,
+    *,
+    resolver: FarmFeatureResolver | None = None,
+) -> float:
+    res = resolver or FarmFeatureResolver()
+    return res.resolve_canopy(lat, lon, year).canopy_height_m
+
+
+def sample_agb_at_point(
+    lat: float,
+    lon: float,
+    year: int,
+    *,
+    resolver: FarmFeatureResolver | None = None,
+) -> float:
+    res = resolver or FarmFeatureResolver()
+    return res.resolve_canopy(lat, lon, year).agb_mg_ha
 
 
 def build_resolver_from_settings(settings: Any) -> FarmFeatureResolver:
@@ -796,6 +844,7 @@ def build_resolver_from_settings(settings: Any) -> FarmFeatureResolver:
                 getattr(settings, "cocoa_exposure_threshold", DEFAULT_THRESHOLD)
             ),
             cocoa_exposure_backend=_resolve_exposure_backend(settings),
+            canopy_year=int(getattr(settings, "canopy_year", 2023)),
             ensemble_weights_path=Path(
                 getattr(settings, "ensemble_weights_path", DEFAULT_ENSEMBLE_WEIGHTS_PATH)
             ),
@@ -854,4 +903,6 @@ __all__ = [
     "resolve_static",
     "resolve_teleconnection",
     "round_to_grid",
+    "sample_agb_at_point",
+    "sample_canopy_height_at_point",
 ]

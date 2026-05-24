@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from api.config import APISettings
 from api.feature_resolver import FarmFeatureResolver, FeatureResolverConfig
 from api.main import app
+from data.gedi_canopy import CanopyPointSample
 from models.yield_surrogate import N_CLIMATE_CHANNELS, YieldSurrogateModel
 
 VALID_PAYLOAD = {
@@ -21,7 +22,7 @@ VALID_PAYLOAD = {
     "cocoa_price_usd": 3200.0,
 }
 
-SITE_STATIC_DIM = 13
+SITE_STATIC_DIM = 15
 SEQUENCE_LENGTH = 365
 
 
@@ -58,6 +59,17 @@ class StubFeatureResolver:
     def resolve_static_with_galileo(self, lat: float, lon: float, year: int) -> torch.Tensor:
         return self.resolve_static(lat, lon)
 
+    def resolve_canopy(self, lat: float, lon: float, year: int) -> CanopyPointSample:
+        del lat, lon, year
+        return CanopyPointSample(
+            canopy_height_m=12.0,
+            canopy_cover_pct=40.0,
+            agb_mg_ha=150.0,
+            height_uncertainty_m=1.2,
+            gedi_n_shots=8,
+            source_attributions=["test"],
+        )
+
 
 def _write_minimal_features_cache(path, *, lat: float = 6.5, lon: float = -1.2) -> None:
     """Tiny features_cache.zarr for real-feature API tests."""
@@ -89,6 +101,8 @@ def _write_minimal_features_cache(path, *, lat: float = 6.5, lon: float = -1.2) 
             "chirps_annual_mm": (("latitude", "longitude"), np.array([[1400.0]], dtype=np.float32)),
             "protected_dist_km": (("latitude", "longitude"), np.array([[12.0]], dtype=np.float32)),
             "cocoa_prob": (("latitude", "longitude"), np.array([[0.82]], dtype=np.float32)),
+            "canopy_height_m": (("latitude", "longitude"), np.array([[12.0]], dtype=np.float32)),
+            "agb_mg_ha": (("latitude", "longitude"), np.array([[150.0]], dtype=np.float32)),
             "climate": (
                 ("latitude", "longitude", "day", "channel"),
                 climate.reshape(1, 1, SEQUENCE_LENGTH, N_CLIMATE_CHANNELS),
@@ -235,6 +249,19 @@ def test_shade_trees_intervention_response_schema(client: TestClient) -> None:
     }.issubset(set(data.keys()))
 
 
+def test_exposure_canopy_endpoint(client: TestClient) -> None:
+    response = client.post(
+        "/exposure-canopy",
+        json={"farm_location": {"lat": 6.5, "lon": -1.2}, "year": 2023},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["canopy_height_m"] == pytest.approx(12.0)
+    assert data["canopy_cover_pct"] == pytest.approx(40.0)
+    assert data["agb_mg_ha"] == pytest.approx(150.0)
+    assert data["gedi_n_shots"] == 8
+
+
 def test_validation_invalid_latitude(client: TestClient) -> None:
     payload = {**VALID_PAYLOAD, "farm_location": {"lat": 95.0, "lon": -1.2}}
     response = client.post("/simulate-intervention", json=payload)
@@ -264,7 +291,7 @@ def test_simulate_with_overridden_model(client: TestClient) -> None:
     app.state.yield_model = YieldSurrogateModel(
         sequence_length=365,
         climate_features=11,
-        static_features=13,
+        static_features=SITE_STATIC_DIM,
         galileo_dim=0,
     )
     response = client.post("/simulate-intervention", json=VALID_PAYLOAD)
@@ -273,11 +300,11 @@ def test_simulate_with_overridden_model(client: TestClient) -> None:
 
 
 def test_yield_surrogate_galileo_dim_backward_compat() -> None:
-    model = YieldSurrogateModel(static_features=13, galileo_dim=0)
-    assert model.static_features == 13
-    model_g = YieldSurrogateModel(static_features=13, galileo_dim=32)
-    assert model_g.static_features == 45
+    model = YieldSurrogateModel(static_features=SITE_STATIC_DIM, galileo_dim=0)
+    assert model.static_features == SITE_STATIC_DIM
+    model_g = YieldSurrogateModel(static_features=SITE_STATIC_DIM, galileo_dim=32)
+    assert model_g.static_features == SITE_STATIC_DIM + 32
     climate = torch.randn(2, 365, 11)
-    static = torch.randn(2, 45)
+    static = torch.randn(2, SITE_STATIC_DIM + 32)
     out = model_g(climate, static)
     assert out.shape == (2,)

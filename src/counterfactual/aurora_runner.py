@@ -67,6 +67,7 @@ def normalize_region_key(name: str) -> str:
         return "civ"
     raise KeyError(f"Unknown region {name!r}; choose from {sorted(COCOA_BELT_REGIONS)}")
 
+
 ModelSize = Literal["small", "medium"]
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_LORA_DIR = _REPO_ROOT / "models"
@@ -117,7 +118,9 @@ def write_cached_forecast(cache_dir: Path, key: str, ds: xr.Dataset) -> Path:
     return path
 
 
-def region_lat_lon_grid(preset: RegionBBox, n_lat: int = 17, n_lon: int = 32) -> tuple[np.ndarray, np.ndarray]:
+def region_lat_lon_grid(
+    preset: RegionBBox, n_lat: int = 17, n_lon: int = 32
+) -> tuple[np.ndarray, np.ndarray]:
     """Evenly spaced lat/lon inside a cocoa-belt ``RegionPreset`` bounding box."""
     lats = np.linspace(preset.south, preset.north, n_lat, dtype=np.float64)
     lons = np.linspace(preset.west, preset.east, n_lon, dtype=np.float64)
@@ -289,7 +292,9 @@ class AuroraScenarioRunner:
         if size not in ("small", "medium"):
             size = "small"
         return cls(
-            cache_dir=Path(getattr(settings, "aurora_cache_dir", _REPO_ROOT / "data/processed/aurora_scenario")),
+            cache_dir=Path(
+                getattr(settings, "aurora_cache_dir", _REPO_ROOT / "data/processed/aurora_scenario")
+            ),
             model_size=size,  # type: ignore[arg-type]
             mock=bool(getattr(settings, "aurora_mock", False)),
         )
@@ -304,6 +309,10 @@ class AuroraScenarioRunner:
 
     def _lora_path(self, region: str) -> Path:
         reg = normalize_region_key(region)
+        for backbone in ("aurora", "galileo", "agrifm", "terramind", "olmoearth", "aef"):
+            path = self.lora_dir / f"{backbone}_lora_{reg}.safetensors"
+            if path.is_file():
+                return path
         return self.lora_dir / f"aurora_lora_{reg}.safetensors"
 
     def _ensure_model(self, region: str | None = None) -> Any:
@@ -325,10 +334,11 @@ class AuroraScenarioRunner:
             if region is not None:
                 lora_path = self._lora_path(region)
                 if lora_path.is_file():
-                    from models.aurora_backbone import AuroraBackboneAdapter
+                    if lora_path.name.startswith("aurora_lora_"):
+                        from models.aurora_backbone import AuroraBackboneAdapter
 
-                    adapter = AuroraBackboneAdapter(model)
-                    adapter.load_region_adapter(normalize_region_key(region), lora_path)
+                        adapter = AuroraBackboneAdapter(model)
+                        adapter.load_region_adapter(normalize_region_key(region), lora_path)
                     self._lora_id = normalize_region_key(region)
                 else:
                     self._lora_id = "base"

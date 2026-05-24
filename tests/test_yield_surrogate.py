@@ -258,9 +258,11 @@ def test_invalid_static_features_raises() -> None:
         model(climate, static)
 
 
-def test_static_feature_count_is_13() -> None:
-    assert len(STATIC_FEATURE_NAMES) == 13
-    assert YieldSurrogateModel().site_static_features == 13
+def test_static_feature_count_includes_canopy_features() -> None:
+    assert len(STATIC_FEATURE_NAMES) == 15
+    assert "canopy_height_norm" in STATIC_FEATURE_NAMES
+    assert "agb_norm" in STATIC_FEATURE_NAMES
+    assert YieldSurrogateModel().site_static_features == 15
 
 
 def test_age_curve_peaks_at_12y() -> None:
