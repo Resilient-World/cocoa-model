@@ -54,7 +54,7 @@ def fetch_climate_and_soil(lat: float, lon: float) -> tuple[Tensor, Tensor]:
         tmax, tmin, tmean, precip (mm/d), srad (MJ/m²/d), vpd (kPa), et0 (mm/d),
         sm_root (m³/m³), wind10m (m/s), rh_mean (%), co2_ppm.
     static:
-        ``[1, 13]`` — index 0 = AWC (mm); indices 10–12 = tree-age cohort features.
+        ``[1, 15]`` — index 0 = AWC (mm); indices 12–14 = tree-age cohort features.
     """
     rng = np.random.default_rng(_location_seed(lat, lon))
 
@@ -98,10 +98,12 @@ def fetch_climate_and_soil(lat: float, lon: float) -> tuple[Tensor, Tensor]:
     static[0] = DEFAULT_AWC_MM
     static[1] = np.clip((lat + 10.0) / 50.0, 0.0, 1.0)
     static[2] = np.clip((lon + 20.0) / 60.0, 0.0, 1.0)
+    static[10] = np.clip(12.0 / 45.0, 0.0, 1.0)
+    static[11] = np.clip(150.0 / 500.0, 0.0, 1.0)
     age_norm, cohort, dens_norm = pack_tree_age_static(12.0)
-    static[10] = age_norm
-    static[11] = cohort
-    static[12] = dens_norm
+    static[12] = age_norm
+    static[13] = cohort
+    static[14] = dens_norm
 
     return (
         torch.from_numpy(climate).unsqueeze(0),

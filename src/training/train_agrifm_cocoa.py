@@ -28,6 +28,7 @@ from training.cocoa_agrifm_datamodule import (
     SyntheticAgriFMDataModule,
 )
 from training.hard_example_mining import HardExampleMiningCallback
+from training.lora_adapter import apply_lora_to_backbone, save_lora_for_region
 
 log = structlog.get_logger(__name__)
 
@@ -188,6 +189,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--mlflow-run-name", type=str, default="agrifm-cocoa-seg")
     parser.add_argument("--checkpoint-dir", type=Path, default=Path("models/checkpoints/agrifm"))
+    parser.add_argument("--region", type=str, default="ghana")
+    parser.add_argument("--lora", action="store_true", help="Train PEFT LoRA adapter + cocoa head")
     return parser.parse_args(argv)
 
 
@@ -232,6 +235,9 @@ def main(argv: list[str] | None = None) -> int:
         out_size=(args.patch_size, args.patch_size),
         num_frames=args.num_frames,
     )
+    if args.lora:
+        model.backbone.encoder = apply_lora_to_backbone(model.backbone.encoder, "agrifm")
+        args.freeze_epochs = args.epochs + 1
 
     task = AgriFMCocoaTask(
         model,
@@ -286,6 +292,14 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     export_checkpoint(task, args.out, extra={"epochs": args.epochs, "patch_size": args.patch_size})
+    if args.lora:
+        adapter_path = save_lora_for_region(
+            model.backbone.encoder,
+            args.region,
+            Path("models"),
+            backbone_name="agrifm",
+        )
+        log.info("saved_agrifm_lora_adapter", path=str(adapter_path))
     log.info(f"Exported AgriFM cocoa segmentation → {args.out}")
     if checkpoint_callback.best_model_path:
         log.info(f"Best Lightning checkpoint: {checkpoint_callback.best_model_path}")

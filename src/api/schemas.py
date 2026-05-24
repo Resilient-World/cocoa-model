@@ -171,6 +171,28 @@ class RankInterventionsRequest(BaseModel):
     farm_area_col: str = Field(
         default="farm_size_ha", description="Column name for farm area in hectares"
     )
+    condition_on_canopy: bool = Field(
+        default=True,
+        description="Add baseline canopy features for shade-tree heterogeneous treatment effects",
+    )
+
+
+class ExposureCanopyRequest(BaseModel):
+    """Request body for POST /exposure-canopy."""
+
+    farm_location: FarmLocation
+    year: int = Field(default=2023, ge=2019, le=2100)
+
+
+class ExposureCanopyResponse(BaseModel):
+    """GEDI/ICESat-2 canopy structure response."""
+
+    canopy_height_m: float = Field(..., ge=0.0)
+    canopy_cover_pct: float = Field(..., ge=0.0, le=100.0)
+    agb_mg_ha: float = Field(..., ge=0.0)
+    height_uncertainty_m: float = Field(..., ge=0.0)
+    gedi_n_shots: int = Field(..., ge=0)
+    source_attributions: list[str]
 
 
 class RankedFarmRecommendation(BaseModel):

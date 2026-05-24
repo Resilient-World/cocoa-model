@@ -155,7 +155,8 @@ class FeatureStore:
 
         Supported feature keys (subset):
         - ``awc_mm`` (required; index 0 in the legacy 10-feature layout)
-        - ``canopy_height_p95`` (GEDI)
+        - ``canopy_height_m`` / ``canopy_height_p95`` (GEDI/ATL08)
+        - ``agb_mg_ha`` / ``agbd_mean`` (GEDI L4A)
         - ``soc_0_5`` (SoilGrids)
         - ``clay_0_30`` (SoilGrids; average of 0-5,5-15,15-30)
         """
@@ -179,19 +180,30 @@ class FeatureStore:
             awc_val = float(np.nan)
 
         # GEDI features
-        canopy_p95 = float(np.nan)
+        canopy_height = float(np.nan)
+        agb = float(np.nan)
         if self.paths.gedi_zarr is not None and self.paths.gedi_zarr.is_dir():
             gedi = self._open(self.paths.gedi_zarr)
             gedi_pt = _nearest_point(gedi, lat, lon)
+            if "canopy_height_m" in gedi_pt:
+                canopy_height = float(gedi_pt["canopy_height_m"].values)
             if "canopy_height_p95" in gedi_pt:
-                canopy_p95 = float(gedi_pt["canopy_height_p95"].values)
+                canopy_height = float(gedi_pt["canopy_height_p95"].values)
+            if "agb_mg_ha" in gedi_pt:
+                agb = float(gedi_pt["agb_mg_ha"].values)
+            if "agbd_mean" in gedi_pt:
+                agb = float(gedi_pt["agbd_mean"].values)
 
         # Fill requested features
         for i, name in enumerate(names):
             if name == "awc_mm":
                 vec[i] = np.nan_to_num(awc_val, nan=0.0)
-            elif name == "canopy_height_p95":
-                vec[i] = np.nan_to_num(canopy_p95, nan=0.0)
+            elif name in {"canopy_height_m", "canopy_height_norm", "canopy_height_p95"}:
+                value = np.nan_to_num(canopy_height, nan=0.0)
+                vec[i] = np.clip(value / 45.0, 0.0, 1.0) if name.endswith("_norm") else value
+            elif name in {"agb_mg_ha", "agb_norm", "agbd_mean"}:
+                value = np.nan_to_num(agb, nan=0.0)
+                vec[i] = np.clip(value / 500.0, 0.0, 1.0) if name.endswith("_norm") else value
             else:
                 vec[i] = 0.0
 

@@ -30,6 +30,7 @@ if str(_REPO_ROOT / "src") not in sys.path:
 
 from data.alphaearth_embeddings import AEF_BAND_NAMES, AEF_EMBEDDING_DIM
 from models.aef_cocoa_head import DEFAULT_AEF_CHECKPOINT, AEFCocoaHead
+from training.lora_adapter import apply_lora_to_backbone, save_lora_for_region
 from validation.kalischek_benchmark import (
     DEFAULT_KALISCHEK_ASSET,
     REGIONS,
@@ -139,6 +140,8 @@ def train_head(
     val_fraction: float,
     device: torch.device,
     checkpoint_path: Path,
+    lora: bool = False,
+    region: str = "ghana",
 ) -> dict[str, float]:
     n = len(labels)
     idx = np.arange(n)
@@ -159,6 +162,8 @@ def train_head(
         shuffle=True,
     )
     model = AEFCocoaHead().to(device)
+    if lora:
+        model.net = apply_lora_to_backbone(model.net, "aef")  # type: ignore[assignment]
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
 
     mlflow.set_experiment("aef_cocoa_head")
@@ -197,6 +202,14 @@ def train_head(
             },
             checkpoint_path,
         )
+        if lora:
+            adapter_path = save_lora_for_region(
+                model.net,
+                region,
+                Path("models"),
+                backbone_name="aef",
+            )
+            mlflow.log_artifact(str(adapter_path))
         mlflow.log_artifact(str(checkpoint_path))
 
     logger.info("Saved AEF head to %s (val_acc=%.3f)", checkpoint_path, val_acc)
@@ -217,6 +230,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--project", type=str, default=None)
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_AEF_CHECKPOINT)
     parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument("--region", type=str, default="ghana")
+    parser.add_argument("--lora", action="store_true", help="Train PEFT LoRA adapter + cocoa head")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -242,6 +257,8 @@ def main(argv: list[str] | None = None) -> int:
         val_fraction=args.val_fraction,
         device=device,
         checkpoint_path=args.checkpoint,
+        lora=args.lora,
+        region=args.region,
     )
     return 0
 

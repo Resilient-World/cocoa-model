@@ -29,8 +29,10 @@ class YieldSurrogatePyfunc(mlflow.pyfunc.PythonModel):
 
         arr = np.asarray(model_input, dtype=np.float32)
         if arr.ndim == 2:
+            from models.yield_surrogate import N_STATIC_SITE
+
             climate = torch.from_numpy(arr).unsqueeze(0)
-            static = torch.zeros(1, 13)
+            static = torch.zeros(1, N_STATIC_SITE)
             region_id = torch.zeros(1, dtype=torch.long)
         else:
             raise ValueError("Expected 2-D climate array [T, C]")

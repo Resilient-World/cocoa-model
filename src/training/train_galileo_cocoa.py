@@ -24,6 +24,7 @@ from torchmetrics.classification import MulticlassJaccardIndex
 from data.cocoa_dataset import CLASS_NAMES, CLASS_OTHER
 from models.galileo_backbone import DEFAULT_NUM_CLASSES, GalileoSegmentation
 from training.cocoa_galileo_datamodule import CocoaGalileoDataModule
+from training.lora_adapter import apply_lora_to_backbone, save_lora_for_region
 
 log = structlog.get_logger(__name__)
 
@@ -225,6 +226,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--mlflow-run-name", type=str, default="galileo-cocoa-seg")
     parser.add_argument("--checkpoint-dir", type=Path, default=Path("models/checkpoints"))
     parser.add_argument("--class-weight-batches", type=int, default=50)
+    parser.add_argument("--region", type=str, default="ghana")
+    parser.add_argument("--lora", action="store_true", help="Train PEFT LoRA adapter + cocoa head")
     parser.add_argument(
         "--synthetic", action="store_true", help="Smoke training without tile files"
     )
@@ -314,6 +317,12 @@ def main(argv: list[str] | None = None) -> int:
         freeze_backbone=True,
         decoder=args.decoder,
     )
+    if args.lora:
+        segmentation.backbone = apply_lora_to_backbone(
+            segmentation.backbone,
+            "galileo",
+        )
+        args.freeze_epochs = args.epochs + 1
 
     task = GalileoCocoaTask(
         segmentation,
@@ -381,6 +390,14 @@ def main(argv: list[str] | None = None) -> int:
             args.out.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(best, args.out)
             log.info("copied_galileo_checkpoint", dest=str(args.out))
+    if args.lora:
+        adapter_path = save_lora_for_region(
+            segmentation.backbone,
+            args.region,
+            Path("models"),
+            backbone_name="galileo",
+        )
+        log.info("saved_galileo_lora_adapter", path=str(adapter_path))
     if args.metrics_out is not None:
         import json
 

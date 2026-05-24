@@ -34,6 +34,8 @@ from api.schemas import (
     ComplianceDdsRequest,
     ComplianceDdsResponse,
     DriftStatus,
+    ExposureCanopyRequest,
+    ExposureCanopyResponse,
     LearnPolicyRulesRequest,
     LearnPolicyRulesResponse,
     PolicyRule,
@@ -143,6 +145,18 @@ def health() -> dict[str, str]:
         ``{"status": "ok"}`` when the process is up (no model inference).
     """
     return {"status": "ok"}
+
+
+@app.post(
+    "/exposure-canopy",
+    response_model=ExposureCanopyResponse,
+    summary="Sample GEDI/ICESat-2 canopy structure for a farm point",
+)
+def exposure_canopy_endpoint(request: ExposureCanopyRequest) -> ExposureCanopyResponse:
+    """Return canopy height, cover, biomass, and source attribution for one farm."""
+    loc = request.farm_location
+    sample = app.state.feature_resolver.resolve_canopy(loc.lat, loc.lon, request.year)
+    return ExposureCanopyResponse(**sample.as_dict())
 
 
 @app.post(
@@ -281,6 +295,26 @@ def rank_interventions_endpoint(request: RankInterventionsRequest) -> RankInterv
     """
     prom_metrics.inc_policy_endpoint("rank-interventions")
     df = pd.DataFrame(request.rows)
+    covariates = list(request.covariates)
+    if request.condition_on_canopy and request.treatment == "shade_trees":
+        resolver = app.state.feature_resolver
+        if "canopy_height_m" not in df.columns or "agb_mg_ha" not in df.columns:
+            for idx, row in df.iterrows():
+                lat = row.get("lat", row.get("latitude"))
+                lon = row.get("lon", row.get("longitude"))
+                year = int(row.get("year", 2023))
+                if lat is None or lon is None:
+                    continue
+                sample = resolver.resolve_canopy(float(lat), float(lon), year)
+                if "canopy_height_m" not in df.columns:
+                    df.loc[idx, "canopy_height_m"] = sample.canopy_height_m
+                if "agb_mg_ha" not in df.columns:
+                    df.loc[idx, "agb_mg_ha"] = sample.agb_mg_ha
+        if "canopy_height_m" in df.columns:
+            df["canopy_percentile"] = df["canopy_height_m"].rank(pct=True).fillna(0.5)
+            for name in ("canopy_height_m", "canopy_percentile", "agb_mg_ha"):
+                if name in df.columns and name not in covariates:
+                    covariates.append(name)
     if request.farm_area_col not in df.columns:
         raise HTTPException(
             status_code=400, detail=f"Missing farm area column '{request.farm_area_col}'"
@@ -290,7 +324,7 @@ def rank_interventions_endpoint(request: RankInterventionsRequest) -> RankInterv
             df,
             outcome=request.outcome,
             treatment=request.treatment,
-            covariates=request.covariates,
+            covariates=covariates,
             method=request.method,
             n_folds=request.n_folds,
         )

@@ -37,7 +37,7 @@ CLIMATE_CHANNEL_NAMES: tuple[str, ...] = (
 N_CLIMATE_CHANNELS = len(CLIMATE_CHANNEL_NAMES)
 CLIMATE_IDX = {name: i for i, name in enumerate(CLIMATE_CHANNEL_NAMES)}
 
-# Static feature registry (default 13 site features; index 0 = AWC mm).
+# Static feature registry (default 15 site features; index 0 = AWC mm).
 STATIC_FEATURE_NAMES: tuple[str, ...] = (
     "awc_mm",
     "sand_frac",
@@ -49,6 +49,8 @@ STATIC_FEATURE_NAMES: tuple[str, ...] = (
     "ph_norm",
     "treecover_norm",
     "cocoa_prob",
+    "canopy_height_norm",
+    "agb_norm",
     "tree_age_years_norm",
     "cohort_phase",
     "planting_density_norm",
@@ -308,7 +310,7 @@ class YieldSurrogateModel(nn.Module):
         Input channels per day. Default 11 (:data:`CLIMATE_CHANNEL_NAMES`). Legacy ``4``
         pads missing channels with zeros (deprecation warning).
     static_features:
-        Site covariates (default 13); index 0 = AWC (mm) for the mechanistic soil bucket.
+        Site covariates (default 15); index 0 = AWC (mm) for the mechanistic soil bucket.
     galileo_dim:
         Optional Galileo embedding width appended to site static features
         (total input width = ``static_features + galileo_dim``).

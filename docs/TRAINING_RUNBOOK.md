@@ -78,6 +78,20 @@ These models feed `cocoa_prob` in the API and `ensemble_v2` exposure.
 
 Detailed exposure fine-tune + ensemble steps: [`docs/ensemble_v3_compute.md`](ensemble_v3_compute.md).
 
+#### LoRA per-region adapters
+
+New region onboarding should prefer LoRA adapters over full fine-tunes:
+
+```bash
+python -m training.train_galileo_cocoa --region ghana --lora
+python scripts/train_agrifm_cocoa.py --region ghana --lora
+python scripts/train_terramind_cocoa.py --region ghana --lora
+python scripts/train_olmoearth_cocoa.py --region ghana --lora
+python scripts/train_aef_head.py --region ghana --lora --synthetic
+```
+
+Adapters are saved as `models/<backbone>_lora_<region>.safetensors`. Use `scripts/benchmark_lora_vs_full_finetune.py` to compare F1, mIoU, checkpoint size, and training time; acceptance is at least 10× checkpoint reduction with no more than 2 pp F1 loss.
+
 Benchmark after checkpoints exist:
 
 ```bash
