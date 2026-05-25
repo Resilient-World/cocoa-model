@@ -245,7 +245,9 @@ Copy `.env.example` to `.env` (never commit `.env`).
 | `GOOGLE_APPLICATION_CREDENTIALS` | GEE (headless) | Service account JSON path |
 | `MLFLOW_TRACKING_URI` | Prithvi training | MLflow server URL |
 | `MLFLOW_EXPERIMENT_NAME` | Prithvi training | Experiment name |
-| `API_HOST` / `API_PORT` | Deployment | Uvicorn bind (documentation; not auto-wired in code) |
+| `API_HOST` / `API_PORT` | Deployment | Uvicorn bind; Docker/Railway defaults to port `8001` |
+| `COCOA_MODEL_API_KEY` | API auth | Required `x-api-key` value for protected POST endpoints; generate with `openssl rand -hex 32` |
+| `COCOA_MODEL_ALLOWED_ORIGINS` | API CORS | Comma-separated allowed caller origins (default `http://localhost:8000`) |
 | `MODEL_CHECKPOINT_PATH` | API | Path to `YieldSurrogateModel` weights (`.pt`) |
 | `CASEJ_CHECKPOINT_PATH` | API | Path to `CASEJSurrogate` weights for `/simulate-scenario` |
 | `MC_NUM_SAMPLES` | API | Monte Carlo forward passes (default `50`) |

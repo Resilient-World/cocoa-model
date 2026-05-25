@@ -13,6 +13,7 @@ from api.feature_resolver import FarmFeatureResolver, FeatureResolverConfig
 from api.main import app
 from data.gedi_canopy import CanopyPointSample
 from models.yield_surrogate import N_CLIMATE_CHANNELS, YieldSurrogateModel
+from tests.conftest import API_KEY_HEADERS
 
 VALID_PAYLOAD = {
     "farm_location": {"lat": 6.5, "lon": -1.2},
@@ -173,7 +174,7 @@ def test_real_features_from_cache_zarr(tmp_path) -> None:
 
 
 def test_simulate_intervention_happy_path(client: TestClient) -> None:
-    response = client.post("/simulate-intervention", json=VALID_PAYLOAD)
+    response = client.post("/simulate-intervention", json=VALID_PAYLOAD, headers=API_KEY_HEADERS)
     assert response.status_code == 200
     data = response.json()
 
@@ -228,13 +229,17 @@ def test_simulate_with_real_feature_resolver(tmp_path) -> None:
                 cache_dir=settings.feature_cache_dir,
             )
         )
-        response = test_client.post("/simulate-intervention", json=VALID_PAYLOAD)
+        response = test_client.post(
+            "/simulate-intervention",
+            json=VALID_PAYLOAD,
+            headers=API_KEY_HEADERS,
+        )
     assert response.status_code == 200
     assert "avoided_loss_tonnes" in response.json()
 
 
 def test_shade_trees_intervention_response_schema(client: TestClient) -> None:
-    response = client.post("/simulate-intervention", json=VALID_PAYLOAD)
+    response = client.post("/simulate-intervention", json=VALID_PAYLOAD, headers=API_KEY_HEADERS)
     assert response.status_code == 200
     data = response.json()
     assert {
@@ -283,6 +288,7 @@ def test_simulate_intervention_quality_block(client: TestClient) -> None:
     response = client.post(
         "/simulate-intervention",
         json={**VALID_PAYLOAD, "include_quality": True},
+        headers=API_KEY_HEADERS,
     )
     assert response.status_code == 200
     quality = response.json()["quality"]
@@ -294,26 +300,26 @@ def test_simulate_intervention_quality_block(client: TestClient) -> None:
 
 def test_validation_invalid_latitude(client: TestClient) -> None:
     payload = {**VALID_PAYLOAD, "farm_location": {"lat": 95.0, "lon": -1.2}}
-    response = client.post("/simulate-intervention", json=payload)
+    response = client.post("/simulate-intervention", json=payload, headers=API_KEY_HEADERS)
     assert response.status_code == 422
 
 
 def test_validation_negative_farm_size(client: TestClient) -> None:
     payload = {**VALID_PAYLOAD, "farm_size_ha": -1.0}
-    response = client.post("/simulate-intervention", json=payload)
+    response = client.post("/simulate-intervention", json=payload, headers=API_KEY_HEADERS)
     assert response.status_code == 422
 
 
 def test_validation_missing_cocoa_price_uses_icco(client: TestClient) -> None:
     payload = {k: v for k, v in VALID_PAYLOAD.items() if k != "cocoa_price_usd"}
-    response = client.post("/simulate-intervention", json=payload)
+    response = client.post("/simulate-intervention", json=payload, headers=API_KEY_HEADERS)
     assert response.status_code == 200
     assert response.json()["financial_impact"]["usd"]["price_usd_per_tonne"] > 0
 
 
 def test_validation_unknown_intervention(client: TestClient) -> None:
     payload = {**VALID_PAYLOAD, "intervention_type": "unknown_intervention"}
-    response = client.post("/simulate-intervention", json=payload)
+    response = client.post("/simulate-intervention", json=payload, headers=API_KEY_HEADERS)
     assert response.status_code == 422
 
 
@@ -324,7 +330,7 @@ def test_simulate_with_overridden_model(client: TestClient) -> None:
         static_features=SITE_STATIC_DIM,
         galileo_dim=0,
     )
-    response = client.post("/simulate-intervention", json=VALID_PAYLOAD)
+    response = client.post("/simulate-intervention", json=VALID_PAYLOAD, headers=API_KEY_HEADERS)
     assert response.status_code == 200
     assert "avoided_loss_tonnes" in response.json()
 

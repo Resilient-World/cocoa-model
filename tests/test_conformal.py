@@ -193,6 +193,7 @@ def test_api_returns_conformal_when_json_present(tmp_path: Path) -> None:
     from fastapi.testclient import TestClient
 
     from api.main import app
+    from tests.conftest import API_KEY_HEADERS
 
     predictor = SplitConformalYield(quantile=1.2, alpha=0.1)
     conf_path = tmp_path / "conformal.json"
@@ -207,7 +208,7 @@ def test_api_returns_conformal_when_json_present(tmp_path: Path) -> None:
 
         def resolve_static(self, lat: float, lon: float) -> torch.Tensor:
             del lat, lon
-            s = torch.zeros(1, 13)
+            s = torch.zeros(1, 15)
             s[0, 0] = 150.0
             return s
 
@@ -236,6 +237,7 @@ def test_api_returns_conformal_when_json_present(tmp_path: Path) -> None:
                     "intervention_type": "shade_trees",
                     "cocoa_price_usd": 3200.0,
                 },
+                headers=API_KEY_HEADERS,
             )
 
     assert response.status_code == 200

@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from api.main import app
 from models.casej_surrogate import CASEJSurrogate
 from models.yield_surrogate import N_CLIMATE_CHANNELS
+from tests.conftest import API_KEY_HEADERS
 
 VALID_PAYLOAD = {
     "farm_location": {"lat": 6.5, "lon": -1.2},
@@ -22,7 +23,7 @@ VALID_PAYLOAD = {
     "cocoa_price_usd": 3200.0,
 }
 
-SITE_STATIC_DIM = 13
+SITE_STATIC_DIM = 15
 SEQUENCE_LENGTH = 365
 
 
@@ -119,10 +120,12 @@ def scenario_client(tmp_path):
         yield client
 
 
-@patch("api.simulation.ScenarioBuilder")
-def test_simulate_scenario_happy_path(mock_sb_cls: MagicMock, scenario_client: TestClient) -> None:
+@patch("api.simulation.build_cmip_scenario_builder")
+def test_simulate_scenario_happy_path(
+    mock_builder_factory: MagicMock, scenario_client: TestClient
+) -> None:
     inst = MagicMock()
-    mock_sb_cls.return_value = inst
+    mock_builder_factory.return_value = inst
     inst.build_scenario.return_value = _scenario_grid_dataset()
 
     app.state.casej_model = CASEJSurrogate(
@@ -132,7 +135,11 @@ def test_simulate_scenario_happy_path(mock_sb_cls: MagicMock, scenario_client: T
         galileo_dim=0,
     )
 
-    response = scenario_client.post("/simulate-scenario", json=SCENARIO_PAYLOAD)
+    response = scenario_client.post(
+        "/simulate-scenario",
+        json=SCENARIO_PAYLOAD,
+        headers=API_KEY_HEADERS,
+    )
     assert response.status_code == 200
     data = response.json()
     assert data["scenario"] == "ssp245"
@@ -159,12 +166,16 @@ def test_simulate_scenario_missing_cmip6_zarr_returns_400(
     assert not missing.exists()
     app.state.settings.cmip6_zarr_path = missing
 
-    response = scenario_client.post("/simulate-scenario", json=SCENARIO_PAYLOAD)
+    response = scenario_client.post(
+        "/simulate-scenario",
+        json=SCENARIO_PAYLOAD,
+        headers=API_KEY_HEADERS,
+    )
     assert response.status_code == 400
     assert "CMIP6 Zarr" in response.json()["detail"]
 
 
 def test_simulate_scenario_invalid_horizon(scenario_client: TestClient) -> None:
     payload = {**SCENARIO_PAYLOAD, "horizon_year": 2040}
-    response = scenario_client.post("/simulate-scenario", json=payload)
+    response = scenario_client.post("/simulate-scenario", json=payload, headers=API_KEY_HEADERS)
     assert response.status_code == 422

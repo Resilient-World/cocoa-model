@@ -17,14 +17,14 @@ from api.config import APISettings
 from api.main import app
 from api.online_conformal_store import OnlineConformalStore, stratum_key
 from api.scenario_conformal import apply_scenario_conformal, resolve_region
-from models.casej_surrogate import CASEJSurrogate
 from models.cqr import QuantileYieldSurrogate
 from models.eci import ECIIntegral
-from models.yield_surrogate import N_CLIMATE_CHANNELS
+from models.yield_surrogate import N_CLIMATE_CHANNELS, YieldSurrogateModel
 from tests.conformal_online_helpers import (
     post_shift_coverage,
     run_online_coverage,
 )
+from tests.conftest import API_KEY_HEADERS
 
 SCENARIO_PAYLOAD = {
     "farm_location": {"lat": 6.5, "lon": -1.2},
@@ -36,7 +36,7 @@ SCENARIO_PAYLOAD = {
     "horizon_year": 2050,
 }
 
-SITE_STATIC_DIM = 13
+SITE_STATIC_DIM = 15
 SEQUENCE_LENGTH = 365
 
 
@@ -103,12 +103,23 @@ def _scenario_grid_dataset() -> xr.Dataset:
     )
 
 
-def _mock_casej_model() -> MagicMock:
-    mock = MagicMock(spec=CASEJSurrogate)
-    mock.training = False
-    mock.eval.return_value = mock
-    mock.side_effect = lambda *a, **k: torch.tensor([2.1])
-    return mock
+class MockCasejModel:
+    training = False
+
+    def eval(self) -> MockCasejModel:
+        return self
+
+    def train(self) -> MockCasejModel:
+        self.training = True
+        return self
+
+    def __call__(self, *args, **kwargs) -> torch.Tensor:
+        del args, kwargs
+        return torch.tensor([2.1])
+
+
+def _mock_casej_model() -> MockCasejModel:
+    return MockCasejModel()
 
 
 def _mock_cqr_model() -> MagicMock:
@@ -200,6 +211,8 @@ def _client_for_method(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, method: 
     if method == "split_cqr":
         cal = MagicMock()
         cal.empirical_coverage = 0.91
+        cal.cv_strategy = None
+        cal.recommended_block_km = None
         iv = MagicMock(lower=1.0, upper=2.5, median=1.8)
         cal.predict_interval.return_value = iv
 
@@ -207,17 +220,17 @@ def _client_for_method(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, method: 
     def _cm():
         sample_tensor = torch.full((50,), 2.1)
         with (
-            patch("api.main.load_yield_model", return_value=MagicMock()),
+            patch("api.main.load_yield_model", return_value=YieldSurrogateModel()),
             patch("api.main.load_casej_model", return_value=mock_casej),
             patch("api.main.load_conformal_if_exists", return_value=None),
             patch("api.main.load_cqr_bundle", return_value=(_mock_cqr_model(), cal)),
-            patch("api.simulation.ScenarioBuilder") as mock_builder,
+            patch("api.simulation.build_cmip_scenario_builder") as mock_builder_factory,
             patch(
                 "api.simulation.predict_scenario_yield_samples",
                 return_value=sample_tensor,
             ),
         ):
-            inst = mock_builder.return_value
+            inst = mock_builder_factory.return_value
             inst.build_scenario.return_value = _scenario_grid_dataset()
             with TestClient(app) as client:
                 client.app.state.settings.era5_zarr_path = hist
@@ -244,7 +257,7 @@ def test_backward_compat_conformal_methods(
     expected_ci_method: str,
 ) -> None:
     with _client_for_method(tmp_path, monkeypatch, conformal_method) as client:
-        r = client.post("/simulate-scenario", json=SCENARIO_PAYLOAD)
+        r = client.post("/simulate-scenario", json=SCENARIO_PAYLOAD, headers=API_KEY_HEADERS)
 
     assert r.status_code == 200
     body = r.json()

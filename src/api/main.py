@@ -9,7 +9,8 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from analysis.heterogeneity import estimate_cate
@@ -71,6 +72,17 @@ from models.yield_surrogate import YieldSurrogateModel
 from monitoring.drift_store import build_drift_store_from_settings
 
 
+def _allowed_origins_from_env() -> list[str]:
+    raw = os.environ.get("COCOA_MODEL_ALLOWED_ORIGINS", "http://localhost:8000")
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
+def verify_api_key(x_api_key: str = Header(...)) -> None:
+    expected_key = os.environ.get("COCOA_MODEL_API_KEY")
+    if not expected_key or x_api_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging(
@@ -122,6 +134,12 @@ app = FastAPI(
     description="Geospatial ML inference and intervention simulation",
     version="0.3.0",
     lifespan=lifespan,
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allowed_origins_from_env(),
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.include_router(eudr_router)
@@ -199,6 +217,7 @@ def price_parametric_endpoint(request: PriceParametricRequest) -> PriceParametri
     "/simulate-intervention",
     response_model=SimulateInterventionResponse,
     summary="Simulate intervention impact (avoided loss)",
+    dependencies=[Depends(verify_api_key)],
 )
 def simulate_intervention_endpoint(
     request: SimulateInterventionRequest,
@@ -261,6 +280,7 @@ def simulate_climate_attribution_endpoint(
     "/simulate-scenario",
     response_model=SimulateScenarioResponse,
     summary="Simulate intervention under CMIP6 SSP future climate (delta-change ERA5)",
+    dependencies=[Depends(verify_api_key)],
 )
 def simulate_scenario_endpoint(request: SimulateScenarioRequest) -> SimulateScenarioResponse:
     """
@@ -448,6 +468,7 @@ def _rulebook_from_tree_result(
     "/learn-policy-rules",
     response_model=LearnPolicyRulesResponse,
     summary="Learn interpretable DR policy targeting rules from a farm panel",
+    dependencies=[Depends(verify_api_key)],
 )
 def learn_policy_rules_endpoint(request: LearnPolicyRulesRequest) -> LearnPolicyRulesResponse:
     """
@@ -526,6 +547,7 @@ def learn_policy_rules_endpoint(request: LearnPolicyRulesRequest) -> LearnPolicy
     "/compliance/dds",
     response_model=ComplianceDdsResponse,
     summary="Generate EUDR due diligence statement (cocoa)",
+    dependencies=[Depends(verify_api_key)],
 )
 def compliance_dds_endpoint(request: ComplianceDdsRequest) -> ComplianceDdsResponse:
     """
