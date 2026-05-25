@@ -11,7 +11,8 @@ from fastapi.testclient import TestClient
 from api.config import APISettings
 from api.main import app
 from api.schemas import SensitivityBounds
-from models.yield_surrogate import N_CLIMATE_CHANNELS, YieldSurrogateModel
+from models.yield_surrogate import YieldSurrogateModel
+from tests.conftest import API_KEY_HEADERS
 from tests.test_api_simulate import VALID_PAYLOAD, StubFeatureResolver
 
 
@@ -25,12 +26,7 @@ class _SensitivityStubResolver(StubFeatureResolver):
 def client() -> Iterator[TestClient]:
     app.state.settings = APISettings(use_real_features=False, enable_teleconnection=False)
     app.state.feature_resolver = _SensitivityStubResolver()
-    app.state.yield_model = YieldSurrogateModel(
-        sequence_length=365,
-        climate_features=N_CLIMATE_CHANNELS,
-        static_features=13,
-        galileo_dim=0,
-    )
+    app.state.yield_model = YieldSurrogateModel()
     app.state.casej_model = MagicMock()
     app.state.conformal = None
     app.state.cqr_model = None
@@ -41,7 +37,7 @@ def client() -> Iterator[TestClient]:
 
 
 def test_simulate_without_sensitivity_omits_bounds(client: TestClient) -> None:
-    response = client.post("/simulate-intervention", json=VALID_PAYLOAD)
+    response = client.post("/simulate-intervention", json=VALID_PAYLOAD, headers=API_KEY_HEADERS)
     assert response.status_code == 200
     data = response.json()
     assert data.get("sensitivity_bounds") is None
@@ -71,7 +67,7 @@ def test_simulate_with_sensitivity_returns_bounds(
         ),
     ]
     payload = {**VALID_PAYLOAD, "include_sensitivity": True}
-    response = client.post("/simulate-intervention", json=payload)
+    response = client.post("/simulate-intervention", json=payload, headers=API_KEY_HEADERS)
     assert response.status_code == 200
     data = response.json()
     bounds = data["sensitivity_bounds"]

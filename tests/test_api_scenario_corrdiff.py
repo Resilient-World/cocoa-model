@@ -95,14 +95,14 @@ def test_simulate_scenario_corrdiff_cache_miss_raises(
         )
 
 
-@patch("api.simulation.ScenarioBuilder")
+@patch("api.simulation.build_cmip_scenario_builder")
 def test_default_request_still_linear(
-    mock_sb_cls: MagicMock, scenario_dirs: tuple[Path, Path]
+    mock_builder_factory: MagicMock, scenario_dirs: tuple[Path, Path]
 ) -> None:
     from tests.test_api_scenario import _scenario_grid_dataset
 
     hist, cmip = scenario_dirs
-    inst = mock_sb_cls.return_value
+    inst = mock_builder_factory.return_value
     inst.build_scenario.return_value = _scenario_grid_dataset()
 
     request = SimulateScenarioRequest.model_validate(SCENARIO_PAYLOAD)

@@ -22,6 +22,7 @@ from compliance.eudr import (
     generate_dds,
     validate_geolocation,
 )
+from tests.conftest import API_KEY_HEADERS
 
 # Western Côte d'Ivoire — illustrative deforestation hotspot (6-decimal polygon)
 CDI_DEFORESTED_POLYGON = {
@@ -205,7 +206,7 @@ def test_compliance_dds_api_endpoint(api_client: TestClient) -> None:
         "supply_chain_complexity": 0.2,
         "use_gee_deforestation_check": False,
     }
-    response = api_client.post("/compliance/dds", json=payload)
+    response = api_client.post("/compliance/dds", json=payload, headers=API_KEY_HEADERS)
     assert response.status_code == 200
     data = response.json()
     assert data["geolocation_valid"] is True
@@ -356,5 +357,5 @@ def test_compliance_dds_api_rejects_invalid_geolocation(api_client: TestClient) 
         },
         "product": {"net_mass_kg": 100.0},
     }
-    response = api_client.post("/compliance/dds", json=payload)
+    response = api_client.post("/compliance/dds", json=payload, headers=API_KEY_HEADERS)
     assert response.status_code == 400
