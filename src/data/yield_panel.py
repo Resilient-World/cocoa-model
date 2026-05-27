@@ -35,6 +35,8 @@ COUNTRY_CENTROIDS: dict[str, tuple[float, float]] = {
     "NGA": (6.5, 5.5),
     "ECU": (-0.5, -79.0),
     "IDN": (-0.5, 115.0),
+    "PER": (-9.0, -75.0),
+    "COL": (4.0, -74.0),
 }
 
 # Climatic offsets for country-mean daily stacks (synthetic ERA5 prior).
@@ -45,6 +47,8 @@ _COUNTRY_CLIMATE_OFFSETS: dict[str, dict[str, float]] = {
     "NGA": {"tmean": 27.0, "rh_mean": 78.0, "precip": 5.5},
     "ECU": {"tmean": 25.0, "rh_mean": 88.0, "precip": 9.0},
     "IDN": {"tmean": 27.5, "rh_mean": 86.0, "precip": 8.5},
+    "PER": {"tmean": 24.5, "rh_mean": 82.0, "precip": 6.5},
+    "COL": {"tmean": 26.0, "rh_mean": 84.0, "precip": 7.5},
 }
 
 

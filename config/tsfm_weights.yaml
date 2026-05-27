@@ -1,0 +1,9 @@
+# TSFM ensemble per-stratum NNLS weights (fit via scripts/benchmark_tsfm.py)
+# Schema: {region: {chronos2: w, timesfm: w, timemoe: w, moirai: w}}
+# Weights are non-negative and sum to 1.0 per region.
+# Default uniform weights until fitted.
+default:
+  chronos-2: 0.25
+  timesfm: 0.25
+  timemoe: 0.25
+  moirai: 0.25
