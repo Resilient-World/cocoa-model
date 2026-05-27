@@ -278,6 +278,22 @@ class APISettings(BaseSettings):
         validation_alias="AURORA_CACHE_DIR",
     )
 
+    tsfm_enabled: bool = Field(default=False, validation_alias="TSFM_ENABLED")
+    tsfm_primary: Literal["chronos-2", "timesfm", "timemoe", "moirai"] = Field(
+        default="timemoe",
+        validation_alias="TSFM_PRIMARY",
+        description="Primary TSFM model when TSFM_ENSEMBLE_MODE=best",
+    )
+    tsfm_ensemble_mode: Literal["mean", "nnls", "best"] = Field(
+        default="nnls",
+        validation_alias="TSFM_ENSEMBLE_MODE",
+        description="TSFM ensemble aggregation: mean, nnls (per-region weights), or best (single model)",
+    )
+    tsfm_weights_path: Path = Field(
+        default=Path("config/tsfm_weights.yaml"),
+        validation_alias="TSFM_WEIGHTS_PATH",
+    )
+
     process_bma_enabled: bool = Field(default=False, validation_alias="PROCESS_BMA_ENABLED")
     ensemble_process_method: str = Field(
         default="mean",

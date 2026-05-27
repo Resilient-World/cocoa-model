@@ -26,6 +26,17 @@ from models.surrogate.yield_surrogate import (
 )
 from models.surrogate.yield_surrogate_v2 import YieldSurrogateV2
 from models.surrogate.yield_surrogate_v2_teleconnection import YieldSurrogateV2Teleconnection
+from models.tsfm.ensemble import NnlsWeightFitter, TsfmEnsemble, WeightedMedianForecast
+from models.tsfm.hybrid_surrogate import HybridYieldSurrogate
+from models.tsfm.wrappers import (
+    Chronos2Wrapper,
+    Moirai2Wrapper,
+    TimeMoEWrapper,
+    TimesFM2Wrapper,
+    TsfmForecast,
+    TsfmWrapper,
+    build_wrapper,
+)
 
 __all__ = [
     "CASEJPhysicsLoss",
@@ -44,6 +55,17 @@ __all__ = [
     "YieldSurrogateModel",
     "YieldSurrogateV2",
     "YieldSurrogateV2Teleconnection",
+    "build_wrapper",
+    "Chronos2Wrapper",
+    "HybridYieldSurrogate",
+    "Moirai2Wrapper",
+    "NnlsWeightFitter",
+    "TimeMoEWrapper",
+    "TimesFM2Wrapper",
+    "TsfmEnsemble",
+    "TsfmForecast",
+    "TsfmWrapper",
+    "WeightedMedianForecast",
     "load_casej_surrogate",
     "load_conformal",
     "load_conformal_if_exists",

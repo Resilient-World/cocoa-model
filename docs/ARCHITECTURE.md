@@ -12,6 +12,7 @@ flowchart TB
     conformal_pkg[conformal — UQ and online calibration]
     process[process — CASEJ and crop models]
     surrogate[surrogate — yield surrogates]
+    tsfm[tsfm — time-series foundation models]
     features[features — PAPE and teleconnection GNN]
     io[io — Galileo loaders and checkpoint migration]
     shims[flat shims at models/*.py]
@@ -32,6 +33,7 @@ flowchart TB
 | `models.conformal` | CQR, ACI, ECI, conformal PID, online conformal | `from models.cqr import ConformalCalibrator` |
 | `models.process` | CASEJ surrogate and ALMANAC/CASE2 runners | `from models.casej_surrogate import CASEJSurrogate` |
 | `models.surrogate` | Yield surrogates v1/v2 and joint heads | `from models.yield_surrogate import YieldSurrogateModel` |
+| `models.tsfm` | Time-series foundation model wrappers and ensemble | `from models.tsfm import TsfmEnsemble, HybridYieldSurrogate` |
 | `models.features` | PAPE and teleconnection GNN | `from models.pape import PhenologyAwarePositionalEncoding` |
 | `models.io` | Galileo feature extraction and checkpoint migration | `from models.checkpoint_migration import …` |
 

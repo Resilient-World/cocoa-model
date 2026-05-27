@@ -270,3 +270,22 @@ stages:
       - src/analysis/run_evaluation.py
     metrics:
       - reports/causal_eval.json
+
+  tsfm_ensemble_fit:
+    cmd: >
+      python scripts/benchmark_tsfm.py
+      --all-regions
+      --horizon 12
+      --num-samples 50
+      --out-dir reports/tsfm
+    deps:
+      - scripts/benchmark_tsfm.py
+      - src/models/tsfm/ensemble.py
+      - src/models/tsfm/wrappers.py
+      - src/data/yield_panel.py
+      - params.yaml
+    outs:
+      - config/tsfm_weights.yaml
+    metrics:
+      - reports/tsfm/benchmark_summary_latest.json:
+          cache: false

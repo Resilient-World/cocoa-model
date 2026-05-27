@@ -263,6 +263,10 @@ Copy `.env.example` to `.env` (never commit `.env`).
 | `INTERPRET_ENABLED` | TCAV API | `false`; enables `POST /interpret` when `true` |
 | `INTERPRET_AUTH_TOKEN` | TCAV API | Bearer token for `/interpret` (required when enabled) |
 | `AIPW_NUISANCE_ESTIMATOR` | Causal scripts | `hgb` (default) or `ngboost` |
+| `TSFM_ENABLED` | Scenario API | `false` (default); set `true` to use TSFM ensemble for yield forecasting |
+| `TSFM_PRIMARY` | Scenario API | `timemoe` (default); primary model when `TSFM_ENSEMBLE_MODE=best` |
+| `TSFM_ENSEMBLE_MODE` | Scenario API | `nnls` (default), `mean`, or `best` |
+| `TSFM_WEIGHTS_PATH` | Scenario API | Path to per-region NNLS weights YAML |
 
 API settings are loaded via `pydantic-settings` in `api.config.APISettings`.
 
